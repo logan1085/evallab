@@ -1,0 +1,236 @@
+import { describe, expect, it } from 'vitest';
+import {
+  agreementStats,
+  bootstrapCI,
+  coverageStats,
+  krippendorffAlpha,
+  observedAgreement,
+} from '@shared/metrics.js';
+import { ABSTAIN, DEFAULT_SCALE, type ItemVerdicts } from '@shared/types.js';
+
+const CATS = ['fail', 'partial', 'pass'];
+
+function items(rows: Record<string, string>[]): ItemVerdicts[] {
+  return rows.map((byGrader, i) => ({ itemId: `i${i}`, byGrader }));
+}
+
+describe('observedAgreement', () => {
+  it('is 1 when every rater matches on every unit', () => {
+    expect(observedAgreement([['pass', 'pass', 'pass'], ['fail', 'fail']])).toBe(1);
+  });
+
+  it('is 0 when no pair ever matches', () => {
+    expect(observedAgreement([['pass', 'fail'], ['partial', 'pass']])).toBe(0);
+  });
+
+  it('weights each unit equally regardless of how many raters saw it', () => {
+    // Unit A: 1 of 3 pairs agree. Unit B: 0 of 1 pairs agree. Mean = (1/3 + 0) / 2.
+    // A three-rater unit does not get more say than a two-rater unit.
+    const rate = observedAgreement([['pass', 'pass', 'fail'], ['pass', 'fail']]);
+    expect(rate).toBeCloseTo((1 / 3 + 0) / 2, 10);
+  });
+
+  it('ignores units with fewer than two verdicts', () => {
+    expect(observedAgreement([['pass'], ['fail', 'fail']])).toBe(1);
+  });
+});
+
+describe('krippendorffAlpha', () => {
+  it('returns 1 for perfect agreement across both categories', () => {
+    const units = [
+      ['pass', 'pass', 'pass'],
+      ['fail', 'fail', 'fail'],
+      ['pass', 'pass', 'pass'],
+      ['fail', 'fail', 'fail'],
+      ['partial', 'partial', 'partial'],
+    ];
+    expect(krippendorffAlpha(units, CATS, 'nominal')).toBeCloseTo(1, 10);
+  });
+
+  it('matches the closed form for systematic two-rater disagreement', () => {
+    // Every unit is {pass, fail}. Analytically alpha = (1 - N) / N.
+    const N = 10;
+    const units = Array.from({ length: N }, () => ['pass', 'fail']);
+    expect(krippendorffAlpha(units, CATS, 'nominal')).toBeCloseTo((1 - N) / N, 10);
+  });
+
+  it('returns null when expected disagreement is zero', () => {
+    // Only one category was ever used: alpha is undefined, not 1.
+    const units = Array.from({ length: 6 }, () => ['pass', 'pass']);
+    expect(krippendorffAlpha(units, CATS, 'nominal')).toBeNull();
+  });
+
+  it('penalises a far miss more than a near miss under the ordinal metric', () => {
+    const base = [
+      ['pass', 'pass'],
+      ['fail', 'fail'],
+      ['partial', 'partial'],
+      ['pass', 'pass'],
+      ['fail', 'fail'],
+    ];
+    const near = krippendorffAlpha([...base, ['pass', 'partial']], CATS, 'ordinal')!;
+    const far = krippendorffAlpha([...base, ['pass', 'fail']], CATS, 'ordinal')!;
+    expect(near).toBeGreaterThan(far);
+  });
+
+  it('is blind to the ordering of the scale under the nominal metric', () => {
+    // Nominal alpha depends on the marginals, not on where categories sit on the
+    // scale. Reversing the scale must not move it. Ordinal alpha must move.
+    // Marginals must be unbalanced for this to bite: with equal category counts
+    // the ordinal metric is accidentally permutation-invariant too.
+    const units = [
+      ['pass', 'partial'],
+      ['pass', 'pass'],
+      ['pass', 'pass'],
+      ['pass', 'fail'],
+      ['partial', 'fail'],
+      ['fail', 'fail'],
+    ];
+    const forward = krippendorffAlpha(units, CATS, 'nominal')!;
+    const reversed = krippendorffAlpha(units, [...CATS].reverse(), 'nominal')!;
+    expect(forward).toBeCloseTo(reversed, 10);
+
+    // Moving 'partial' off the middle of the scale changes what counts as a near miss.
+    const ordForward = krippendorffAlpha(units, CATS, 'ordinal')!;
+    const ordShuffled = krippendorffAlpha(units, ['partial', 'fail', 'pass'], 'ordinal')!;
+    expect(ordForward).toBeGreaterThan(ordShuffled);
+  });
+
+  it('handles missing data by scaling each unit by 1/(m-1)', () => {
+    const ragged = [
+      ['pass', 'pass', 'pass'],
+      ['fail', 'fail'],
+      ['pass', 'pass', 'pass', 'pass'],
+      ['fail', 'fail', 'fail'],
+      ['partial', 'partial'],
+    ];
+    expect(krippendorffAlpha(ragged, CATS, 'nominal')).toBeCloseTo(1, 10);
+  });
+
+  it('returns null with no usable units', () => {
+    expect(krippendorffAlpha([], CATS, 'nominal')).toBeNull();
+  });
+});
+
+describe('bootstrapCI', () => {
+  it('withholds an interval below the minimum unit count', () => {
+    expect(bootstrapCI([['pass', 'pass'], ['fail', 'fail']])).toBeNull();
+  });
+
+  it('brackets the point estimate and is deterministic', () => {
+    const units = [
+      ['pass', 'pass'],
+      ['pass', 'fail'],
+      ['fail', 'fail'],
+      ['pass', 'pass'],
+      ['partial', 'pass'],
+      ['fail', 'fail'],
+      ['pass', 'pass'],
+      ['fail', 'partial'],
+      ['pass', 'pass'],
+      ['fail', 'fail'],
+    ];
+    const a = bootstrapCI(units, 500)!;
+    const b = bootstrapCI(units, 500)!;
+    expect(a).toEqual(b);
+    const point = observedAgreement(units);
+    expect(a[0]).toBeLessThanOrEqual(point);
+    expect(a[1]).toBeGreaterThanOrEqual(point);
+  });
+});
+
+describe('agreementStats', () => {
+  const graders = ['a', 'b', 'c'];
+
+  it('excludes abstentions from agreement entirely', () => {
+    const stats = agreementStats(
+      items([
+        { a: 'pass', b: 'pass', c: ABSTAIN },
+        { a: 'fail', b: 'fail', c: ABSTAIN },
+      ]),
+      DEFAULT_SCALE,
+      graders,
+    );
+    expect(stats.observed).toBe(1);
+    expect(stats.units).toBe(2);
+  });
+
+  it('drops items where only one grader produced a usable verdict', () => {
+    const stats = agreementStats(
+      items([{ a: 'pass', b: ABSTAIN, c: ABSTAIN }, { a: 'pass', b: 'pass', c: 'pass' }]),
+      DEFAULT_SCALE,
+      graders,
+    );
+    expect(stats.units).toBe(1);
+  });
+
+  it('reproduces the split pattern from the spec table', () => {
+    // Six traces, three graders, three of them split. Mean pairwise agreement
+    // over the three unanimous rows is 1; the splits contribute 1/3, 0 and 1/3.
+    const stats = agreementStats(
+      items([
+        { a: 'pass', b: 'pass', c: 'pass' },
+        { a: 'pass', b: 'fail', c: 'pass' },
+        { a: 'fail', b: 'fail', c: 'fail' },
+        { a: 'partial', b: 'fail', c: 'pass' },
+        { a: 'pass', b: 'fail', c: 'fail' },
+        { a: 'fail', b: 'fail', c: 'fail' },
+      ]),
+      DEFAULT_SCALE,
+      graders,
+    );
+    expect(stats.observed).toBeCloseTo((1 + 1 / 3 + 1 + 0 + 1 / 3 + 1) / 6, 10);
+    expect(stats.raters).toBe(3);
+  });
+
+  it('reports the small-panel caveat for three graders', () => {
+    const stats = agreementStats(items([{ a: 'pass', b: 'pass', c: 'pass' }]), DEFAULT_SCALE, graders);
+    expect(stats.caveats.join(' ')).toMatch(/3 graders/);
+  });
+
+  it('withholds alpha and the interval on a tiny sample', () => {
+    const stats = agreementStats(items([{ a: 'pass', b: 'fail' }]), DEFAULT_SCALE, ['a', 'b']);
+    expect(stats.alphaNominal).toBeNull();
+    expect(stats.observedCI).toBeNull();
+    expect(stats.caveats.length).toBeGreaterThan(0);
+  });
+
+  it('computes pairwise rates that identify the outlier grader', () => {
+    const stats = agreementStats(
+      items([
+        { a: 'pass', b: 'fail', c: 'pass' },
+        { a: 'pass', b: 'fail', c: 'pass' },
+      ]),
+      DEFAULT_SCALE,
+      graders,
+    );
+    expect(stats.pairwise['a|c']!.rate).toBe(1);
+    expect(stats.pairwise['a|b']!.rate).toBe(0);
+    expect(stats.pairwise['b|c']!.rate).toBe(0);
+  });
+});
+
+describe('coverageStats', () => {
+  it('tracks participation against the full grader x item grid', () => {
+    const cov = coverageStats(items([{ a: 'pass', b: 'pass' }, { a: 'fail' }]), ['a', 'b']);
+    expect(cov.participation).toBeCloseTo(3 / 4, 10);
+  });
+
+  it('separates abstention rate from undecidable items', () => {
+    const cov = coverageStats(
+      items([
+        { a: ABSTAIN, b: ABSTAIN },
+        { a: 'pass', b: ABSTAIN },
+        { a: 'pass', b: 'pass' },
+      ]),
+      ['a', 'b'],
+    );
+    expect(cov.abstentionRate).toBeCloseTo(3 / 6, 10);
+    expect(cov.undecidableRate).toBeCloseTo(1 / 3, 10);
+  });
+
+  it('reports clause coverage over items', () => {
+    const cov = coverageStats(items([{ a: 'pass' }, { a: 'fail' }]), ['a'], new Set(['i0']));
+    expect(cov.clauseCoverage).toBeCloseTo(1 / 2, 10);
+  });
+});
