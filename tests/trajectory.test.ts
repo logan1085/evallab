@@ -40,7 +40,15 @@ async function project(traceCount = 10): Promise<Harness> {
   return { slug: p.slug, auth, graders };
 }
 
-/** Runs a round to completion. `disagreeEvery` controls how much the panel splits. */
+/**
+ * Runs a round to completion.
+ *
+ * `dissenter` names one grader who votes fail on every item while everyone else
+ * passes. Splitting by grader rather than by item position is what makes these
+ * tests deterministic: the arms are interleaved into random positions and the
+ * queue deliberately hides which arm an item is in, so anything keyed on item
+ * index leaves it to chance whether a split lands in calibration or held-out.
+ */
 async function runRound(
   h: Harness,
   opts: {
@@ -50,7 +58,7 @@ async function runRound(
     sourceRoundId?: string;
     reuseHeldout?: boolean;
     panel: string[];
-    disagreeEvery: number;
+    dissenter?: string | null;
   },
 ) {
   const round = (
@@ -69,12 +77,15 @@ async function runRound(
   const first = h.graders[opts.panel[0]!]!;
   const items = (await h.auth(request(app).get(`/api/rounds/${round.id}/queue?graderId=${first.id}`))).body.items;
 
-  for (const [i, item] of items.entries()) {
-    for (const [gi, name] of opts.panel.entries()) {
-      const disagrees = opts.disagreeEvery > 0 && i % opts.disagreeEvery === 0 && gi > 0;
+  for (const item of items) {
+    for (const name of opts.panel) {
       await h
         .auth(request(app).post(`/api/rounds/${round.id}/grades`))
-        .send({ graderId: h.graders[name]!.id, itemId: item.itemId, verdict: disagrees ? 'fail' : 'pass' })
+        .send({
+          graderId: h.graders[name]!.id,
+          itemId: item.itemId,
+          verdict: name === opts.dissenter ? 'fail' : 'pass',
+        })
         .expect(200);
     }
   }
@@ -89,7 +100,7 @@ describe('trajectory', () => {
   it('reports a delta when the held-out set and the panel both held still', async () => {
     const h = await project();
     const panel = ['Ana', 'Ben'];
-    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel, disagreeEvery: 2 });
+    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel, dissenter: 'Ben' });
     await runRound(h, {
       calibrationSize: 4,
       heldoutSize: 4,
@@ -97,7 +108,7 @@ describe('trajectory', () => {
       sourceRoundId: first.id,
       reuseHeldout: true,
       panel,
-      disagreeEvery: 0, // everyone agrees this time
+      dissenter: null, // everyone agrees this time
     });
 
     const { series } = await trajectory(h);
@@ -112,7 +123,7 @@ describe('trajectory', () => {
   it('refuses to compare when the held-out traces were redrawn', async () => {
     const h = await project();
     const panel = ['Ana', 'Ben'];
-    const first = await runRound(h, { calibrationSize: 3, heldoutSize: 3, panel, disagreeEvery: 2 });
+    const first = await runRound(h, { calibrationSize: 3, heldoutSize: 3, panel, dissenter: 'Ben' });
     await runRound(h, {
       calibrationSize: 3,
       heldoutSize: 3,
@@ -120,7 +131,7 @@ describe('trajectory', () => {
       sourceRoundId: first.id,
       reuseHeldout: false, // redrawn
       panel,
-      disagreeEvery: 0,
+      dissenter: null,
     });
 
     const { series } = await trajectory(h);
@@ -131,7 +142,7 @@ describe('trajectory', () => {
 
   it('refuses to compare when the panel changed, and names who moved', async () => {
     const h = await project();
-    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel: ['Ana', 'Ben'], disagreeEvery: 2 });
+    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel: ['Ana', 'Ben'], dissenter: 'Ben' });
     await runRound(h, {
       calibrationSize: 4,
       heldoutSize: 4,
@@ -139,7 +150,7 @@ describe('trajectory', () => {
       sourceRoundId: first.id,
       reuseHeldout: true,
       panel: ['Ana', 'Cass'], // Ben out, Cass in
-      disagreeEvery: 0,
+      dissenter: null,
     });
 
     const { series } = await trajectory(h);
@@ -152,7 +163,7 @@ describe('trajectory', () => {
 
   it('carries the rubric version and clause count each round was graded against', async () => {
     const h = await project();
-    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel: ['Ana', 'Ben'], disagreeEvery: 2 });
+    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel: ['Ana', 'Ben'], dissenter: 'Ben' });
 
     const report = (await h.auth(request(app).get(`/api/rounds/${first.id}/report`))).body;
     const split = report.clusters[0].rows[0];
@@ -169,7 +180,7 @@ describe('trajectory', () => {
       sourceRoundId: first.id,
       reuseHeldout: true,
       panel: ['Ana', 'Ben'],
-      disagreeEvery: 0,
+      dissenter: null,
     });
 
     const { series } = await trajectory(h);
@@ -181,7 +192,7 @@ describe('trajectory', () => {
 
   it('omits rounds that are still open', async () => {
     const h = await project();
-    await runRound(h, { calibrationSize: 3, heldoutSize: 3, panel: ['Ana', 'Ben'], disagreeEvery: 2 });
+    await runRound(h, { calibrationSize: 3, heldoutSize: 3, panel: ['Ana', 'Ben'], dissenter: 'Ben' });
     await h
       .auth(request(app).post(`/api/projects/${h.slug}/rounds`))
       .send({ calibrationSize: 3, heldoutSize: 3 })
@@ -194,7 +205,7 @@ describe('trajectory', () => {
 
   it('flags a round with no held-out arm rather than plotting it as a drop to zero', async () => {
     const h = await project();
-    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel: ['Ana', 'Ben'], disagreeEvery: 2 });
+    const first = await runRound(h, { calibrationSize: 4, heldoutSize: 4, panel: ['Ana', 'Ben'], dissenter: 'Ben' });
     await runRound(h, {
       calibrationSize: 4,
       heldoutSize: 0,
@@ -202,7 +213,7 @@ describe('trajectory', () => {
       sourceRoundId: first.id,
       reuseHeldout: false,
       panel: ['Ana', 'Ben'],
-      disagreeEvery: 0,
+      dissenter: null,
     });
 
     const { series } = await trajectory(h);
