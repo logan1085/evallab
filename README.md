@@ -48,6 +48,41 @@ create the demo from the home page instead, which hits the same endpoint.
 missing whatever was in the write-ahead log when you copied the file. Restore by
 pointing `GR_DB` at the backup, or copying it back while stopped.
 
+### Fly.io
+
+`fly.toml` is checked in.
+
+```
+fly launch --no-deploy
+fly volumes create grading_room_data --size 1
+fly secrets set ANTHROPIC_API_KEY=sk-ant-...    # optional; enables the real judge
+fly deploy
+```
+
+**Keep it at one machine.** The database is a file on a volume, so two machines
+means two independent databases behind one hostname and graders silently landing
+on different ones. `fly.toml` pins `min_machines_running = 1` and disables
+auto-stop for that reason.
+
+Railway and Render work the same way — point them at the `Dockerfile`, mount a
+volume at `/data`, and keep the instance count at one.
+
+### Not Vercel
+
+Serverless is the wrong shape for this. The filesystem is ephemeral and
+per-invocation, there are no volumes, and this is a long-running process rather
+than a set of functions — so grades would be written to a disk that disappears.
+Making it fit would mean replacing SQLite with hosted Postgres, which turns
+every synchronous store call async and buys nothing for a single-tenant app.
+
+## CI
+
+`.github/workflows/ci.yml` runs typecheck, tests and the build, then builds the
+Docker image and smoke-tests it: health probe, SPA served from the same origin,
+a seeded project written to the mounted volume, and a clean `SIGTERM` shutdown.
+The image build is the one thing that cannot be verified from a dev container,
+which is exactly why it runs there.
+
 ## The loop
 
 1. **Bring in traces.** Paste, JSONL, or CSV. Field names are matched loosely,

@@ -1,0 +1,46 @@
+# Fly.io deployment.
+#
+# One machine, one volume, one SQLite file. This app is single-tenant by design
+# (v1 is "one team, one project"), and the database is a file on disk — so the
+# machine count here is not a performance knob. Running two machines gives you
+# two independent databases behind one hostname, and graders would silently land
+# on different ones. Keep it at one.
+#
+#   fly launch --no-deploy      # creates the app, reads this file
+#   fly volumes create grading_room_data --size 1
+#   fly secrets set ANTHROPIC_API_KEY=sk-ant-...   # optional; enables the real judge
+#   fly deploy
+
+app = "grading-room"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8787"
+  GR_DB = "/data/grading-room.db"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  auto_start_machines = true
+  # Never suspend to zero: a grader opening a shared link should not wait on a
+  # cold start, and the volume is attached to this one machine anyway.
+  auto_stop_machines = "off"
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/health"
+    timeout = "5s"
+
+[mounts]
+  source = "grading_room_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
