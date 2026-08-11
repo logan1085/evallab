@@ -67,6 +67,37 @@ auto-stop for that reason.
 Railway and Render work the same way — point them at the `Dockerfile`, mount a
 volume at `/data`, and keep the instance count at one.
 
+### Running it for free
+
+No mainstream platform offers a free tier with a persistent disk, and this
+app's database is a file. Render's free tier has no disk and idles out; a round
+costs several people half an hour of attention, so losing one is not a minor
+inconvenience. Free therefore means hardware you already control.
+
+**A machine you own, exposed by a tunnel.** Nothing to sign up for, works
+today, and the right answer for a first round with a team.
+
+```
+docker compose up -d --build
+npx cloudflared tunnel --url http://localhost:8787
+```
+
+That prints an HTTPS `*.trycloudflare.com` URL anyone can grade through. The
+database stays on your disk. Caveats worth knowing: the URL changes each time
+you restart the tunnel, and grading stops when your machine sleeps — so start
+it, run the round, and shut it down. A free Cloudflare account plus a domain
+gets you a stable named tunnel if you want to leave it up.
+
+**An always-free VM.** Oracle Cloud's Always Free tier includes an ARM machine
+big enough for this several times over, with real block storage. Install Docker,
+`docker compose up -d`, put Caddy or Cloudflare in front for TLS. Genuinely free
+indefinitely; costs you an afternoon and a card for identity verification, and
+capacity in some regions is scarce.
+
+**Or pay a little.** Fly is roughly a couple of dollars a month for a small
+machine and a 1 GB volume; Render Starter is $7. If the team is real, this is
+the least of the costs involved.
+
 ### Not Vercel
 
 Serverless is the wrong shape for this. The filesystem is ephemeral and
