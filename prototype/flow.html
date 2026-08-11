@@ -177,6 +177,14 @@
   }
   .btn.quiet { background: transparent; color: var(--ink); border-color: var(--rule); }
 
+  .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill {
+    display: inline-block; font-family: var(--data); font-size: 11.5px;
+    padding: 5px 10px; border-radius: 2px;
+    border: 1px solid var(--rule); background: var(--ground); color: var(--muted);
+  }
+  .pill.on { border-color: var(--agree); background: var(--agree-wash); color: var(--agree); }
+
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
 
   /* Verdicts ------------------------------------------------------------- */
@@ -279,7 +287,8 @@
     </div>
     <h1>Your eval score is measuring who graded it</h1>
     <p class="standfirst">
-      Eight screens, in order, so we can argue about the flow before it gets built. Step 4 is real — you grade three
+      Eight screens, in order, so we can argue about the flow. Six are built and chipped as such; the two that are not
+      are both the hosted sign-up, which is waiting on an identity provider. Step 4 is real — you grade three
       transcripts yourself and find out whether you'd have agreed with the team.
     </p>
   </header>
@@ -411,24 +420,29 @@ orphaned rows? I have not modified anything yet.`,
     {
       nav: "Say what you're grading",
       title: "You don't need a rubric. That's the thing you're here to build.",
-      built: false,
-      why: "This is the step that lets a team with nothing start. Describe the job in a sentence, paste a few real conversations, and get a first rubric to react to — reacting to a draft is far easier than facing an empty box.",
-      render: () => frame("gradingroom.app / new project", `
+      built: true,
+      why: "This is the step that lets a team with nothing start. Describe the job in a sentence, pick a few real conversations, and get a first rubric to react to — reacting to a draft is far easier than facing an empty box. What makes it worth using is the second half of what comes back.",
+      render: () => frame("gradingroom.app / Northwind support agent / rubric", `
         <div class="field">
           <label>What is your AI supposed to do?</label>
           <div class="fake-input">Handle customer support tickets end to end — look up orders, apply refunds within policy, and escalate anything it can't settle.</div>
         </div>
         <div class="field">
-          <label>Paste a few real conversations</label>
-          <div class="fake-input mono ghost">USER: Customer wants a refund on order 88214…
-ASSISTANT: [orders.get id=88214] → {"purchased_at": "2026-05-02"…
-
---- paste as many as you like, separated by three dashes ---</div>
+          <label>Which conversations to read</label>
+          <div class="pill-row">
+            <span class="pill on">Refund inside policy</span>
+            <span class="pill on">Nine of twelve done</span>
+            <span class="pill on">Stopped to ask</span>
+            <span class="pill on">Green by editing the assertion</span>
+            <span class="pill">Order lookup failed</span>
+          </div>
         </div>
-        <span class="btn">Draft a rubric from these</span>
-        <div class="aside"><b>What comes back</b> is a first draft — a scale and three or four criteria in your own
-        words — which you then edit. It is a starting point to argue with, not an answer. The real rubric gets built
-        over the next few steps, out of the cases your team actually disagrees on.</div>
+        <span class="btn">Draft from 4 conversations</span>
+        <div class="aside"><b>What comes back</b> is a scale, three or four criteria in your own words — and the
+        questions your examples don't answer. <i>"Your conversations never show the agent escalating, so nothing here
+        says whether that's a pass."</i> The draft is not allowed to quietly pick a side on those; if the examples
+        don't settle it, it gets named instead. Those questions are where your first round will split, which is the
+        point. Nothing is saved until you press save.</div>
       `)
     },
     {
