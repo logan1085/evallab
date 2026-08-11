@@ -18,6 +18,13 @@
   --agree-wash: rgba(44, 110, 104, 0.1);
   --split: #a81e3f;
   --split-wash: rgba(168, 30, 63, 0.09);
+  /*
+   * Chart marks need more chroma than the text tokens above: --agree sits below
+   * the chroma floor for a plotted mark and reads gray as a dot. Same hue, a
+   * step up in saturation, validated for lightness band, chroma and contrast
+   * against each mode's surface.
+   */
+  --chart-line: #0d9488;
   --display: "Helvetica Neue", Helvetica, Arial, sans-serif;
   --body: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
   --data: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -37,6 +44,7 @@
     --agree-wash: rgba(99, 179, 170, 0.14);
     --split: #f0708f;
     --split-wash: rgba(240, 112, 143, 0.13);
+    --chart-line: #19ab9c;
   }
 }
 
@@ -53,6 +61,7 @@
   --agree-wash: rgba(99, 179, 170, 0.14);
   --split: #f0708f;
   --split-wash: rgba(240, 112, 143, 0.13);
+  --chart-line: #19ab9c;
 }
 
 * { box-sizing: border-box; }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { SplitCluster } from '@shared/splits';
 import type { ItemArm, RubricVersion, SplitReportRow, VerdictLevel } from '@shared/types';
 import { api, recallGrader, recallKey, type JudgeRunView, type ReportView } from '../api';
@@ -508,9 +508,10 @@ function ShipSection({
             <span className="metric-k">Shipped</span>
             <p style={{ marginTop: 6 }}>
               Rubric v{shipped.version} now carries {shipped.clauses.length} clause
-              {shipped.clauses.length === 1 ? '' : 's'}. Run the next round against it, reusing this round&rsquo;s
-              held-out traces, to see whether agreement actually moved.
+              {shipped.clauses.length === 1 ? '' : 's'}. The next round is what turns that into evidence: same
+              held-out traces, same people, graded against the revised rubric.
             </p>
+            <NextRound report={report} roundId={roundId} token={token} onError={onError} />{' '}
             <a className="btn ghost" href={api.exportUrl(shipped.id, token, 'md')} target="_blank" rel="noreferrer">
               Export the revised rubric
             </a>
@@ -536,6 +537,56 @@ function ShipSection({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * One click from a shipped rubric to the round that tests it, prefilled to be
+ * comparable: drawn from this round's splits, on the identical held-out set.
+ * Anything the user has to reconstruct by hand here is a place the second round
+ * does not happen.
+ */
+function NextRound({
+  report,
+  roundId,
+  token,
+  onError,
+}: {
+  report: ReportView;
+  roundId: string;
+  token: string;
+  onError: (m: string) => void;
+}) {
+  const navigate = useNavigate();
+  const { slug } = useParams<{ slug: string }>();
+  const [busy, setBusy] = useState(false);
+
+  const calibrationSize = report.rows.filter((r) => r.arm === 'calibration').length;
+  const heldoutSize = report.rows.filter((r) => r.arm === 'heldout').length;
+
+  return (
+    <button
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await api.createRound(slug!, token, {
+            name: `Round ${report.round.index + 1}`,
+            calibrationSize,
+            heldoutSize,
+            strategy: 'from_splits',
+            sourceRoundId: roundId,
+            reuseHeldout: true,
+          });
+          navigate(`/p/${slug}`);
+        } catch (err) {
+          onError(err instanceof Error ? err.message : 'Could not start the next round.');
+          setBusy(false);
+        }
+      }}
+    >
+      {busy ? 'Sampling…' : `Start round ${report.round.index + 1} on the same held-out traces`}
+    </button>
   );
 }
 

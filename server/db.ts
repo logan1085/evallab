@@ -139,7 +139,23 @@ export function openDb(file = process.env.GR_DB ?? 'data/grading-room.db'): DB {
   if (file !== ':memory:') mkdirSync(dirname(resolve(file)), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  if (file !== ':memory:') {
+    // A round has several people submitting grades at once. WAL plus a wait —
+    // rather than an immediate SQLITE_BUSY — is the difference between a slow
+    // write and a grader losing a verdict they thought they had saved.
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA synchronous = NORMAL');
+  }
   return db;
+}
+
+/**
+ * Consistent on-disk copy while the server is running. SQLite's own backup
+ * command handles the WAL correctly; copying the .db file by hand does not.
+ */
+export function backupTo(db: DB, destination: string): void {
+  mkdirSync(dirname(resolve(destination)), { recursive: true });
+  db.prepare('VACUUM INTO ?').run(resolve(destination));
 }
 
 export function newId(prefix = ''): string {

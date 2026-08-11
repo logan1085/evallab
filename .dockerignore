@@ -1,0 +1,11 @@
+node_modules
+dist
+data
+*.db
+*.db-wal
+*.db-shm
+.git
+.env
+.env.local
+*.png
+*.mjs

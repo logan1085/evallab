@@ -21,10 +21,40 @@ if (webDir) {
   app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(join(webDir, 'index.html')));
 }
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   const mode = webDir ? 'app + api' : 'api only (run `npm run dev:web` for the UI)';
   console.log(`The Grading Room — ${mode} on http://localhost:${port}`);
   if (!process.env.ANTHROPIC_API_KEY) {
     console.log('No ANTHROPIC_API_KEY set: judge runs will use the offline stub, which is not a real judge.');
   }
 });
+
+/**
+ * Finish in-flight requests before closing the database. A grader submitting a
+ * verdict during a deploy should get their verdict stored, not a dropped
+ * connection — and closing SQLite underneath an open request corrupts nothing
+ * but does lose that write.
+ */
+let shuttingDown = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received, finishing in-flight requests…`);
+
+    const force = setTimeout(() => {
+      console.error('Shutdown timed out after 10s, exiting anyway.');
+      process.exit(1);
+    }, 10_000);
+    force.unref();
+
+    server.close((err) => {
+      try {
+        db.close();
+      } catch {
+        // Already closed; nothing to salvage.
+      }
+      process.exit(err ? 1 : 0);
+    });
+  });
+}

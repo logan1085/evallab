@@ -155,6 +155,26 @@ export interface ReportView {
   notes: { itemId: string; graderId: string; note: string; verdict: string }[];
 }
 
+export interface TrajectoryPoint {
+  roundId: string;
+  index: number;
+  name: string;
+  closedAt: string | null;
+  strategy: 'random' | 'from_splits';
+  rubricVersion: number | null;
+  clauseCount: number;
+  graderNames: string[];
+  heldout: ArmStats;
+  calibration: ArmStats;
+  splitCount: number;
+  resolvedCount: number;
+  heldoutSignature: string;
+  /** False whenever a delta would be measuring something other than the rubric. */
+  comparableToPrevious: boolean;
+  comparabilityNotes: string[];
+  heldoutDelta: number | null;
+}
+
 export interface JudgeRunView {
   id: string;
   provider: string;
@@ -183,6 +203,9 @@ export const api = {
     }),
 
   project: (slug: string, token: string) => call<ProjectView>(`/projects/${slug}`, { token }),
+
+  trajectory: (slug: string, token: string) =>
+    call<{ series: TrajectoryPoint[]; roundsClosed: number }>(`/projects/${slug}/trajectory`, { token }),
 
   traces: (slug: string, token: string) => call<{ traces: Trace[] }>(`/projects/${slug}/traces`, { token }),
 

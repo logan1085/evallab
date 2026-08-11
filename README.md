@@ -18,6 +18,36 @@ npm run dev      # http://localhost:5173
 
 `npm run seed` prints a shared link. Open it.
 
+## Running it for a team
+
+One container, one SQLite file on a volume. Deliberately not a cluster — v1 is
+one team and one project, and a single process serving the API and the built
+SPA from the same origin is the whole topology, which is why a shared link works
+with no CORS or session story.
+
+```
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d --build
+open http://localhost:8787          # create a project, or open the demo
+```
+
+The seed script is a dev-time convenience and is not in the production image;
+create the demo from the home page instead, which hits the same endpoint.
+
+- Data lives on the `grading-room-data` volume at `/data`, never in the image.
+- `/api/health` performs a real read, so a wedged database fails the check.
+  Point your platform's health probe at it.
+- `SIGTERM` finishes in-flight requests before closing the database, so a
+  deploy does not drop a grader's verdict mid-submit. `init: true` in the
+  compose file ensures the signal actually reaches the process.
+- Put it behind TLS. The project key travels in the URL on first open, and the
+  app strips it from the address bar immediately, but the first request carries
+  it.
+
+**Backups.** `npm run backup -- backups/2026-08-11.db` uses SQLite's own
+`VACUUM INTO`, which is the difference between a restorable snapshot and one
+missing whatever was in the write-ahead log when you copied the file. Restore by
+pointing `GR_DB` at the backup, or copying it back while stopped.
+
 ## The loop
 
 1. **Bring in traces.** Paste, JSONL, or CSV. Field names are matched loosely,
@@ -31,6 +61,10 @@ npm run dev      # http://localhost:5173
 6. **Ship the revised rubric,** with the agreement number before and after.
 7. **Generate a judge** from the calibrated rubric and score it against the
    humans on cases it has not seen.
+8. **Run it again.** Shipping a rubric offers the next round in one click,
+   drawn from this round's splits and reusing the identical held-out set. The
+   project page then plots held-out agreement across rounds — the only view
+   that answers whether any of this worked.
 
 ## What the code is careful about
 
@@ -63,10 +97,20 @@ from round one's splits and fills the rest at random. Neither is clever, and
 the UI prints the real sentence — including how many items were carried versus
 filled — rather than implying a boundary-seeking sampler that does not exist.
 
-**Held-out means held out.** The held-out arm is reserved before calibration
-draws, so calibration can never eat the measurement set, and a follow-up round
-can reuse the same held-out traces so before-and-after is measured on the same
-cases.
+**Held-out means held out**, in three separate places. The arm is reserved
+before calibration draws, so calibration can never eat the measurement set. A
+held-out split cannot be resolved, because writing a rubric clause about a trace
+you are measuring on is teaching to the test. And while any round is still being
+graded, every other round's report withholds verdicts and notes for the traces
+that round is using — otherwise reusing a held-out set, which is exactly how
+before-and-after gets measured on the same cases, would hand the later round's
+graders the earlier answers.
+
+**The trajectory refuses to draw a line it cannot justify.** Held-out agreement
+only means "the rubric improved" if the later round graded the same held-out
+traces with the same panel. Change either and the rounds are reported as
+incomparable, the delta is withheld, and the chart leaves the gap open rather
+than bridging it — naming who joined or dropped out.
 
 **Rubric versions a round has pinned are immutable.** Editing one forks a new
 version. Otherwise a closed round's numbers would silently start referring to a
@@ -95,7 +139,8 @@ and the types the UI renders cannot drift.
 |---|---|
 | `npm run dev` | API on :8787, UI on :5173 with a proxy |
 | `npm run seed` | Create the demo project, print its link |
-| `npm test` | 65 tests |
+| `npm run backup -- <path>` | Consistent snapshot of a live database |
+| `npm test` | 78 tests |
 | `npm run typecheck` | `tsc --noEmit` across shared, server, web, tests |
 | `npm run build` | SPA to `dist/web`, server bundle to `dist/server.js` |
 | `npm start` | Serve both from :8787 on one origin |
@@ -127,3 +172,8 @@ Known limits of this version, stated rather than managed away:
   something about it", tracked by provenance. It is not a semantic match.
 - Round-two sampling is splits-then-random. It is not a boundary-seeking
   sampler and does not claim to be.
+- One instance serves one team. There are no accounts and no tenancy, so
+  running it for several teams means running several containers.
+- The Dockerfile is unverified in CI — it was written against a verified
+  production run (`node dist/server.js`, health, graceful shutdown, backup and
+  restore all exercised) but the image build itself has not been executed.

@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ATTENTION_BUDGET_MINUTES, attentionEstimate } from '@shared/sampling';
 import type { RubricCriterion, Trace } from '@shared/types';
-import { api, forgetGrader, recallGrader, recallKey, rememberGrader, type ProjectView } from '../api';
-import { ErrorBanner, Loading, Masthead, minutes, useAsync } from '../ui';
+import { api, forgetGrader, recallGrader, recallKey, rememberGrader, type ProjectView, type RoundSummary } from '../api';
+import { Trajectory } from '../components/Trajectory';
+import { ErrorBanner, Loading, Masthead, minutes, pct, useAsync } from '../ui';
 
 type Tab = 'rounds' | 'traces' | 'rubric';
 
@@ -172,6 +173,8 @@ function RoundsTab({
         <span className="rail-note">One blind pass each.</span>
       </div>
       <div className="col">
+        <TrajectorySection slug={slug} token={token} rounds={view.rounds} />
+
         {view.rounds.length === 0 ? (
           <div className="empty">No rounds yet. A round is one blind pass over a sample of traces.</div>
         ) : (
@@ -293,6 +296,120 @@ function RoundsTab({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * The trajectory, and — when there is only one closed round — the nudge toward
+ * a second one. A single round is a measurement; two is the first time the
+ * product can say anything about whether calibration worked, which is the whole
+ * reason to come back.
+ */
+function TrajectorySection({
+  slug,
+  token,
+  rounds,
+}: {
+  slug: string;
+  token: string;
+  rounds: RoundSummary[];
+}) {
+  const closedCount = rounds.filter((r) => r.status === 'closed').length;
+  const { data } = useAsync(() => api.trajectory(slug, token), [slug, token, rounds.length, closedCount]);
+  const series = data?.series ?? [];
+
+  if (series.length === 0) return null;
+
+  if (series.length === 1) {
+    const only = series[0]!;
+    const held = only.heldout.agreement;
+    return (
+      <div className="panel">
+        <span className="metric-k">One round in</span>
+        <h3 style={{ marginTop: 6 }}>
+          {held.units > 0
+            ? `Held-out agreement is ${pct(held.observed, 1)}. There is nothing to compare it against yet.`
+            : 'This round reserved no held-out traces, so there is no baseline to improve on yet.'}
+        </h3>
+        <p className="note">
+          One round tells you where you are. The second one is what tells you whether resolving the splits changed
+          anything — run it against the same held-out traces, with the same people, and the difference is attributable
+          to the rubric.
+        </p>
+        {only.resolvedCount === 0 && only.splitCount > 0 ? (
+          <Link className="btn ghost" to={`/p/${slug}/round/${only.roundId}`}>
+            Resolve {only.splitCount} split{only.splitCount === 1 ? '' : 's'} first
+          </Link>
+        ) : (
+          <Link className="btn ghost" to={`/p/${slug}/round/${only.roundId}`}>
+            Open the report to start round two
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  const latest = series[series.length - 1]!;
+
+  return (
+    <div className="panel">
+      <div className="between" style={{ marginBottom: 6 }}>
+        <h3 style={{ margin: 0 }}>Did agreement move?</h3>
+        {latest.heldoutDelta !== null ? (
+          <span className={`tiny ${latest.heldoutDelta >= 0 ? 'delta-up' : 'delta-down'}`}>
+            {latest.heldoutDelta >= 0 ? '+' : ''}
+            {(latest.heldoutDelta * 100).toFixed(1)} PTS ON THE SAME HELD-OUT TRACES
+          </span>
+        ) : (
+          <span className="tiny">LATEST ROUND NOT COMPARABLE TO THE ONE BEFORE IT</span>
+        )}
+      </div>
+
+      <Trajectory series={series} />
+
+      <div className="scroll-x">
+        <table>
+          <caption>Every closed round</caption>
+          <thead>
+            <tr>
+              <th scope="col">Round</th>
+              <th scope="col">Rubric</th>
+              <th scope="col">Held-out</th>
+              <th scope="col">Calibration</th>
+              <th scope="col">Splits</th>
+              <th scope="col">Resolved</th>
+              <th scope="col">Graders</th>
+            </tr>
+          </thead>
+          <tbody>
+            {series.map((point) => (
+              <tr key={point.roundId}>
+                <td className="case">{point.name}</td>
+                <td>
+                  v{point.rubricVersion ?? '—'} · {point.clauseCount} cl
+                </td>
+                <td>
+                  {point.heldout.agreement.units > 0 ? pct(point.heldout.agreement.observed, 1) : '—'}
+                  {point.heldoutDelta !== null ? (
+                    <span className={point.heldoutDelta >= 0 ? 'delta-up' : 'delta-down'}>
+                      {' '}
+                      ({point.heldoutDelta >= 0 ? '+' : ''}
+                      {(point.heldoutDelta * 100).toFixed(1)})
+                    </span>
+                  ) : null}
+                </td>
+                <td>
+                  {point.calibration.agreement.units > 0 ? pct(point.calibration.agreement.observed, 1) : '—'}
+                </td>
+                <td>{point.splitCount}</td>
+                <td>{point.resolvedCount}</td>
+                <td>{point.graderNames.join(', ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

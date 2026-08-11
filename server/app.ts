@@ -12,7 +12,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { DB } from './db.js';
-import { newSlug, newToken } from './db.js';
+import { newId, newSlug, newToken } from './db.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
@@ -43,6 +43,16 @@ export function createApp(db: DB) {
   app.use(express.json({ limit: '25mb' }));
 
   const api = express.Router();
+
+  /** Liveness plus a real read, so a wedged database fails the check. */
+  api.get('/health', (_req, res) => {
+    try {
+      db.prepare('SELECT 1 AS ok').get();
+      res.json({ ok: true, judge: resolveProvider().id });
+    } catch (error) {
+      res.status(503).json({ ok: false, error: error instanceof Error ? error.message : 'database unavailable' });
+    }
+  });
 
   /* ---- Project scoping -------------------------------------------------- */
 
@@ -117,6 +127,105 @@ export function createApp(db: DB) {
         rubricVersion: store.getRubric(db, round.rubricVersionId)?.version ?? null,
       })),
     });
+  });
+
+  /**
+   * Round-over-round trajectory — the view that answers the question the whole
+   * product exists to answer, and the one that makes a second round worth
+   * running.
+   *
+   * The care here is in refusing to draw a line between two points that are not
+   * comparable. Held-out agreement only means "the rubric got better" if the
+   * later round graded the same held-out traces with the same panel. Change
+   * either and the delta is measuring something else, so it is reported as
+   * incomparable rather than plotted.
+   */
+  api.get('/projects/:slug/trajectory', requireProject, (req, res) => {
+    const { project } = req as ProjectRequest;
+    const closed = store.listRounds(db, project.id).filter((r) => r.status === 'closed');
+
+    const points = closed.map((round) => {
+      const rubric = store.getRubric(db, round.rubricVersionId);
+      const scale = rubric?.scale ?? DEFAULT_SCALE;
+      const graders = store.participantsOf(db, round.id);
+      const graderIds = graders.map((g) => g.id);
+      const verdicts = store.verdictsForRound(db, round.id);
+      const items = store.listItems(db, round.id);
+
+      const idsFor = (arm: 'calibration' | 'heldout') =>
+        new Set(items.filter((i) => i.arm === arm).map((i) => i.id));
+      const armStats = (arm: 'calibration' | 'heldout') => {
+        const ids = idsFor(arm);
+        const subset = verdicts.filter((v) => ids.has(v.itemId));
+        return {
+          agreement: agreementStats(subset, scale, graderIds),
+          coverage: coverageStats(subset, graderIds),
+        };
+      };
+
+      const rows = buildSplitReport(verdicts, itemContexts(db, round.id), scale);
+      const resolutions = store.resolutionsForRound(db, round.id);
+
+      return {
+        roundId: round.id,
+        index: round.index,
+        name: round.name,
+        closedAt: round.closedAt,
+        strategy: round.strategy,
+        rubricVersion: rubric?.version ?? null,
+        clauseCount: rubric?.clauses.length ?? 0,
+        graderIds,
+        graderNames: graders.map((g) => g.name),
+        heldout: armStats('heldout'),
+        calibration: armStats('calibration'),
+        splitCount: splitsOf(rows.filter((r) => r.arm === 'calibration')).length,
+        resolvedCount: resolutions.length,
+        /** Identity of the held-out set. Two rounds only compare if these match. */
+        heldoutSignature: items
+          .filter((i) => i.arm === 'heldout')
+          .map((i) => i.traceId)
+          .sort()
+          .join('|'),
+      };
+    });
+
+    const series = points.map((point, i) => {
+      const previous = i > 0 ? points[i - 1]! : null;
+      const reasons: string[] = [];
+
+      if (previous) {
+        if (!point.heldoutSignature || !previous.heldoutSignature) {
+          reasons.push('One of the two rounds reserved no held-out traces.');
+        } else if (point.heldoutSignature !== previous.heldoutSignature) {
+          reasons.push(
+            'The held-out traces are not the same ones, so this is a different measurement rather than a before and after.',
+          );
+        }
+        const gained = point.graderNames.filter((n) => !previous.graderNames.includes(n));
+        const lost = previous.graderNames.filter((n) => !point.graderNames.includes(n));
+        if (gained.length || lost.length) {
+          reasons.push(
+            `The panel changed${gained.length ? ` — ${gained.join(', ')} joined` : ''}${
+              lost.length ? `${gained.length ? ' and' : ' —'} ${lost.join(', ')} did not grade` : ''
+            }. Some of any movement is the people, not the rubric.`,
+          );
+        }
+        if (point.heldout.agreement.units === 0 || previous.heldout.agreement.units === 0) {
+          reasons.push('One of the two rounds has no comparable held-out items.');
+        }
+      }
+
+      const comparable = previous !== null && reasons.length === 0;
+      return {
+        ...point,
+        comparableToPrevious: comparable,
+        comparabilityNotes: reasons,
+        heldoutDelta:
+          comparable && previous ? point.heldout.agreement.observed - previous.heldout.agreement.observed : null,
+      };
+    });
+
+    res.json({ series, roundsClosed: closed.length });
   });
 
   /* ---- Traces ----------------------------------------------------------- */
@@ -303,7 +412,10 @@ export function createApp(db: DB) {
       }
     }
 
-    const seed = body.data.seed ?? `${project.slug}:${Date.now()}`;
+    // Random component, not just a timestamp: two rounds created in the same
+    // millisecond would otherwise draw the identical sample. The seed is stored
+    // on the round, so the draw stays reproducible and auditable afterwards.
+    const seed = body.data.seed ?? `${project.slug}:${Date.now()}:${newId()}`;
     const plan = planSample({
       pool: traces.map((t) => t.id),
       strategy: body.data.strategy,
