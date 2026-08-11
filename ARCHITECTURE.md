@@ -18,6 +18,14 @@ self-hosting is off the table. That makes tenancy a correctness problem rather
 than a feature: every read is scoped by workspace membership, and the failure
 mode is one customer seeing another's traces.
 
+**Identity comes from Clerk, later.** Not built yet, and deliberately not
+hand-rolled in the meantime. This removes most of the tenancy schema rather than
+postponing it: Clerk Organizations already provides workspaces, roles and invite
+links, so `users`, `sessions` and `invites` are theirs and never ours. What stays
+is a thin mapping — a project carries a Clerk organization id, a grader carries a
+Clerk user id — and roles are read from Clerk membership. Until then the existing
+shared-link model stands.
+
 **Postgres, not SQLite.** Forced twice over — by serverless (no local disk) and
 by multi-tenancy (one file per instance is a single point of failure with no
 horizontal scale). Every store function becomes async, and `PRAGMA` /
@@ -46,30 +54,26 @@ rubric rendering — with 45 tests and no database access. It is untouched by an
 of this. That is most of the value in the test suite.
 
 `server/store.ts` and `server/app.ts` get rewritten for async Postgres.
-`server/auth.ts` is already here and survives the port: password hashing and
-session cookies, no database calls.
 
 ## Tenancy model
 
 Drafted against SQLite and dropped rather than half-ported. Recorded here
 because the shape is what matters, not the SQL.
 
+Most of it is now Clerk's. What remains on our side:
+
 ```
-users         id, email, name, password_hash
-workspaces    id, name
-memberships   (workspace_id, user_id) → role
-sessions      token → user_id, expires_at        -- server-side, so revocable
-invites       token → workspace_id, role         -- how colleagues join
-projects      gains workspace_id
-graders       gains user_id
+projects   gains org_id      -- Clerk organization
+graders    gains user_id     -- Clerk user
 ```
 
 Two things worth keeping from that draft:
 
 **Roles are owner and member.** Owners manage traces, the rubric and rounds;
-members grade. This also fixes a hazard in the current build, where anyone with
-the link can close a round while three colleagues are halfway through it and the
-number then gets computed from their half-finished work.
+members grade. Clerk membership roles map onto this directly. It also fixes a
+hazard in the current build, where anyone with the link can close a round while
+three colleagues are halfway through it and the number then gets computed from
+their half-finished work.
 
 **A grader row stays keyed on the account, not the typed name.** Every metric
 and report query keys on `grader_id`, so keeping that row stable means the whole
@@ -79,12 +83,8 @@ agreement scores.
 
 ## Still open
 
-- **Sign-in: password or magic link?** A link is friendlier for non-technical
-  graders and removes password resets, but needs an email provider wired up
-  before anyone can sign in at all. `server/auth.ts` currently implements
-  passwords.
 - **What "draft a rubric from these conversations" actually returns.** This is
-  the step carrying the whole from-nothing promise and it is unspecified.
+  the step carrying the whole from-nothing promise.
 - **Whether a calibrated rubric measurably improves an LLM judge.** The
   commercial claim, still untested on real data. No amount of engineering
   settles it.
