@@ -17,6 +17,7 @@ import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
 import { JudgeError, mapLimit, resolveProvider } from './judge.js';
+import { DrafterError, resolveDrafter } from './drafter.js';
 import {
   ABSTAIN,
   DEFAULT_SCALE,
@@ -29,6 +30,7 @@ import {
   type ItemContext,
   type ItemVerdicts,
   planSample,
+  prepareExamples,
   renderRubricMarkdown,
   splitsOf,
   type Project,
@@ -288,6 +290,71 @@ export function createApp(db: DB) {
     res.json({ rubrics: store.listRubrics(db, (req as ProjectRequest).project.id) });
   });
 
+  /**
+   * Draft a first rubric from transcripts. Deliberately does not write anything:
+   * a rubric nobody read is not a rubric, so accepting the draft is a separate,
+   * human act (the PUT below).
+   */
+  api.post('/projects/:slug/rubric/draft', requireProject, async (req, res) => {
+    const body = z
+      .object({
+        description: z.string().min(10).max(2000),
+        traceIds: z.array(z.string().min(1)).optional(),
+        examples: z.array(z.object({ title: z.string().default(''), content: z.string().min(1) })).optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: 'Describe what the agent is meant to do, in a sentence or two.' });
+    }
+
+    const { project } = req as ProjectRequest;
+    const chosen: { title: string; content: string }[] = [];
+    const usedTraceIds: string[] = [];
+
+    for (const traceId of body.data.traceIds ?? []) {
+      const trace = store.getTrace(db, traceId);
+      // Scoped by hand: getTrace is keyed on the trace id alone, so without this
+      // a valid link to one project could draft from another project's traces.
+      if (!trace || trace.projectId !== project.id) {
+        return res.status(404).json({ error: 'One of those conversations is not in this project.' });
+      }
+      chosen.push({ title: trace.title, content: trace.content });
+      usedTraceIds.push(trace.id);
+    }
+    for (const example of body.data.examples ?? []) {
+      chosen.push({ title: example.title || 'Pasted conversation', content: example.content });
+    }
+
+    if (chosen.length === 0) {
+      return res.status(400).json({ error: 'Pick or paste at least one conversation to draft from.' });
+    }
+
+    const prepared = prepareExamples(chosen);
+    const drafter = resolveDrafter();
+
+    try {
+      const draft = await drafter.draft({ description: body.data.description, examples: prepared.examples });
+      res.json({
+        draft,
+        provider: { id: drafter.id, model: drafter.model, real: drafter.real },
+        draftedFrom: {
+          provider: drafter.id,
+          model: drafter.model,
+          describedAs: body.data.description.trim(),
+          exampleCount: prepared.examples.length,
+          truncated: prepared.truncated,
+          createdAt: new Date().toISOString(),
+        },
+        usedTraceIds,
+      });
+    } catch (error) {
+      if (error instanceof DrafterError) {
+        return res.status(error.code === 'auth' ? 401 : 502).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
+  });
+
   api.put('/projects/:slug/rubric', requireProject, (req, res) => {
     const body = z
       .object({
@@ -299,6 +366,20 @@ export function createApp(db: DB) {
           .optional(),
         criteria: z
           .array(z.object({ id: z.string().min(1), title: z.string().min(1), body: z.string().default('') }))
+          .optional(),
+        openQuestions: z
+          .array(z.object({ id: z.string().min(1), question: z.string().min(1), why: z.string().default('') }))
+          .optional(),
+        draftedFrom: z
+          .object({
+            provider: z.string(),
+            model: z.string(),
+            describedAs: z.string(),
+            exampleCount: z.number().int().nonnegative(),
+            truncated: z.boolean(),
+            createdAt: z.string(),
+          })
+          .nullable()
           .optional(),
       })
       .safeParse(req.body);
@@ -324,6 +405,8 @@ export function createApp(db: DB) {
           originItemId: c.originItemId,
           originRoundId: c.originRoundId,
         })),
+        openQuestions: body.data.openQuestions ?? current.openQuestions,
+        draftedFrom: body.data.draftedFrom === undefined ? current.draftedFrom : body.data.draftedFrom,
       });
       return res.json({ rubric: forked, forked: true });
     }
@@ -339,6 +422,8 @@ export function createApp(db: DB) {
     const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
     if (!project || token !== project.token) return res.status(403).json({ error: 'Wrong or missing key.' });
 
+    // Open questions travel with the human-readable exports but never with the
+    // judge prompt — see the note on buildJudgeSystemPrompt.
     const format = String(req.query.format ?? 'md');
     if (format === 'json') {
       res.setHeader('content-type', 'application/json');
@@ -349,7 +434,7 @@ export function createApp(db: DB) {
       return res.send(buildJudgeSystemPrompt(rubric));
     }
     res.setHeader('content-type', 'text/markdown; charset=utf-8');
-    res.send(renderRubricMarkdown(rubric, { includeProvenance: false }));
+    res.send(renderRubricMarkdown(rubric, { includeProvenance: false, includeOpenQuestions: true }));
   });
 
   /* ---- Graders ---------------------------------------------------------- */

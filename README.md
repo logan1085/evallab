@@ -119,7 +119,9 @@ which is exactly why it runs there.
 1. **Bring in traces.** Paste, JSONL, or CSV. Field names are matched loosely,
    because eval platforms disagree about whether the transcript lives under
    `output`, `completion`, `messages`, or `trace`.
-2. **Write a rubric,** or import the one you have.
+2. **Write a rubric,** import the one you have, or draft one from the traces
+   you just brought in — for teams whose honest answer is that no rubric
+   exists.
 3. **Run a round.** Everyone grades the same sample independently and blind.
 4. **See the splits first,** clustered by the kind of disagreement.
 5. **Resolve each one.** The prompt is always the same: what would the rubric
@@ -177,6 +179,25 @@ only means "the rubric improved" if the later round graded the same held-out
 traces with the same panel. Change either and the rounds are reported as
 incomparable, the delta is withheld, and the chart leaves the gap open rather
 than bridging it — naming who joined or dropped out.
+
+**A drafted rubric has to carry its own gaps.** Asked to draft from a handful
+of transcripts, a model can produce something authoritative-sounding that is,
+in the places that matter, a guess — the afternoon rubric this product exists
+to argue with, written faster. So the draft is required to return the questions
+the examples do not answer, and the drafter is told never to state an unsettled
+case as a criterion. Those questions are stored with the rubric, travel with
+its exports, and are struck by hand once a round has actually settled one.
+They are also the useful half: they predict where round one will split.
+
+They are deliberately kept out of the judge prompt. Telling a judge "abstain
+when the case turns on one of these" would make an early rubric abstain often
+and a calibrated one abstain rarely, and since abstentions never count as
+agreement, calibration would post a win that had nothing to do with judgment.
+
+Without `ANTHROPIC_API_KEY` the drafter returns no criteria at all, plus the
+questions teams argue about first — and says that is what it is doing.
+Inventing criteria offline would hand someone a rubric that looks drafted from
+their data and is not.
 
 **Rubric versions a round has pinned are immutable.** Editing one forks a new
 version. Otherwise a closed round's numbers would silently start referring to a

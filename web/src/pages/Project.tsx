@@ -1,8 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ATTENTION_BUDGET_MINUTES, attentionEstimate } from '@shared/sampling';
-import type { RubricCriterion, Trace } from '@shared/types';
-import { api, forgetGrader, recallGrader, recallKey, rememberGrader, type ProjectView, type RoundSummary } from '../api';
+import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
+import type { DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
+import {
+  api,
+  forgetGrader,
+  recallGrader,
+  recallKey,
+  rememberGrader,
+  type DraftResponse,
+  type ProjectView,
+  type RoundSummary,
+} from '../api';
 import { Trajectory } from '../components/Trajectory';
 import { ErrorBanner, Loading, Masthead, minutes, pct, useAsync } from '../ui';
 
@@ -567,6 +577,217 @@ function TracesTab({
 
 /* ---- Rubric ------------------------------------------------------------- */
 
+/**
+ * Drafting a first rubric from conversations already in the project.
+ *
+ * The draft is shown in full before it can be accepted, and accepting it only
+ * fills the form below — a rubric nobody read is not a rubric, so the save is
+ * always a separate, deliberate act.
+ */
+function DraftPanel({
+  slug,
+  token,
+  traceCount,
+  startOpen,
+  onAccept,
+  onError,
+}: {
+  slug: string;
+  token: string;
+  traceCount: number;
+  startOpen: boolean;
+  onAccept: (draft: DraftResponse) => void;
+  onError: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(startOpen);
+  const [description, setDescription] = useState('');
+  const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<DraftResponse | null>(null);
+
+  const traces = useAsync(() => (open ? api.traces(slug, token) : Promise.resolve({ traces: [] })), [slug, token, open]);
+  const available = traces.data?.traces ?? [];
+
+  // Pre-select enough to see a pattern without making the first click a chore.
+  const selected = picked ?? new Set(available.slice(0, Math.min(6, available.length)).map((t) => t.id));
+
+  function toggle(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPicked(next);
+  }
+
+  async function requestDraft(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setDraft(null);
+    try {
+      setDraft(await api.draftRubric(slug, token, { description, traceIds: [...selected] }));
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not draft a rubric.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="panel">
+        <div className="between">
+          <div>
+            <h3 style={{ margin: 0 }}>Draft a rubric from your conversations</h3>
+            <p className="tiny" style={{ margin: '4px 0 0' }}>
+              Useful when you are starting over, or when the rubric no longer matches what the agent does.
+            </p>
+          </div>
+          <div className="shrink">
+            <button type="button" className="ghost" onClick={() => setOpen(true)}>
+              Draft
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel">
+      <h3 style={{ marginTop: 0 }}>Draft a rubric from your conversations</h3>
+
+      {traceCount === 0 ? (
+        <div className="empty">
+          Add some conversations on the Traces tab first. A rubric drafted from nothing is just a guess with formatting.
+        </div>
+      ) : (
+        <form onSubmit={requestDraft}>
+          <div className="field">
+            <label htmlFor="draft-description">What is your agent supposed to do?</label>
+            <textarea
+              id="draft-description"
+              rows={3}
+              value={description}
+              placeholder="A support agent that answers billing questions and can issue refunds up to $50 without approval."
+              onChange={(e) => setDescription(e.target.value)}
+            />
+            <p className="tiny" style={{ margin: 0 }}>
+              A sentence or two. Include the limits it is supposed to respect — those are where graders argue.
+            </p>
+          </div>
+
+          <div className="field">
+            <label>Which conversations to read</label>
+            {traces.loading ? (
+              <Loading what="conversations" />
+            ) : (
+              <div className="pill-row">
+                {available.slice(0, MAX_DRAFT_EXAMPLES).map((trace) => (
+                  <button
+                    type="button"
+                    key={trace.id}
+                    className={`pill${selected.has(trace.id) ? ' on' : ''}`}
+                    onClick={() => toggle(trace.id)}
+                    aria-pressed={selected.has(trace.id)}
+                  >
+                    {trace.title}
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="tiny" style={{ margin: 0 }}>
+              {available.length > MAX_DRAFT_EXAMPLES
+                ? `Showing the first ${MAX_DRAFT_EXAMPLES} of ${available.length}. `
+                : ''}
+              Pick a spread — the ones that went well, the ones that did not, and the ones you argued about.
+            </p>
+          </div>
+
+          <button type="submit" disabled={busy || selected.size === 0 || description.trim().length < 10}>
+            {busy ? 'Reading…' : `Draft from ${selected.size} conversation${selected.size === 1 ? '' : 's'}`}
+          </button>
+          <button type="button" className="ghost" style={{ marginLeft: 8 }} onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+        </form>
+      )}
+
+      {draft ? (
+        <div style={{ marginTop: 20 }}>
+          {!draft.provider.real ? (
+            <div className="warn">
+              <span className="metric-k">No model configured</span>
+              <p style={{ margin: '6px 0 0' }}>
+                Nothing read your conversations, so there are no criteria below — inventing some would give you a rubric
+                that looks drafted from your data and is not. What you get instead is a blank three-point scale and the
+                questions teams argue about first. Set ANTHROPIC_API_KEY to draft properly.
+              </p>
+            </div>
+          ) : null}
+
+          <h4>{draft.draft.name}</h4>
+          {draft.draft.preamble ? <p>{draft.draft.preamble}</p> : null}
+
+          <div className="pill-row">
+            {[...draft.draft.scale]
+              .sort((a, b) => b.rank - a.rank)
+              .map((level) => (
+                <span key={level.id} className="pill on">
+                  {level.label}
+                </span>
+              ))}
+          </div>
+
+          {draft.draft.criteria.length > 0 ? (
+            <ul className="plain">
+              {draft.draft.criteria.map((c) => (
+                <li key={c.id}>
+                  <strong>{c.title}</strong> — {c.body}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <h4>What it does not answer</h4>
+          <p className="tiny" style={{ marginTop: 0 }}>
+            {draft.provider.real
+              ? 'These are the cases your conversations left open. They are where your first round will split.'
+              : 'These are not from your conversations. They are the questions most teams turn out to disagree about.'}
+          </p>
+          <ul className="plain">
+            {draft.draft.openQuestions.map((q) => (
+              <li key={q.id} style={{ marginBottom: 8 }}>
+                <strong>{q.question}</strong>
+                {q.why ? (
+                  <div className="tiny" style={{ marginTop: 2 }}>
+                    {q.why}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+
+          <button
+            type="button"
+            onClick={() => {
+              onAccept(draft);
+              setDraft(null);
+              setOpen(false);
+            }}
+          >
+            Use this draft
+          </button>
+          <button type="button" className="ghost" style={{ marginLeft: 8 }} onClick={() => setDraft(null)}>
+            Discard
+          </button>
+          <p className="tiny" style={{ marginBottom: 0 }}>
+            Using it fills the form below. Nothing is saved until you press Save rubric.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RubricTab({
   view,
   slug,
@@ -584,6 +805,9 @@ function RubricTab({
   const [name, setName] = useState(rubric?.name ?? '');
   const [preamble, setPreamble] = useState(rubric?.preamble ?? '');
   const [criteria, setCriteria] = useState<RubricCriterion[]>(rubric?.criteria ?? []);
+  const [scale, setScale] = useState<VerdictLevel[]>(rubric?.scale ?? []);
+  const [questions, setQuestions] = useState<DraftQuestion[]>(rubric?.openQuestions ?? []);
+  const [draftedFrom, setDraftedFrom] = useState(rubric?.draftedFrom ?? null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
 
@@ -591,12 +815,30 @@ function RubricTab({
 
   if (!rubric) return <div className="empty">This project has no rubric yet.</div>;
 
+  /** Accepting a draft only fills the form. Nothing is stored until Save. */
+  function applyDraft(draft: DraftResponse) {
+    setName(draft.draft.name);
+    setPreamble(draft.draft.preamble);
+    setCriteria(draft.draft.criteria);
+    setScale(draft.draft.scale);
+    setQuestions(draft.draft.openQuestions);
+    setDraftedFrom(draft.draftedFrom);
+    setSaved(null);
+  }
+
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setSaved(null);
     try {
-      const res = await api.saveRubric(slug, token, { name, preamble, criteria });
+      const res = await api.saveRubric(slug, token, {
+        name,
+        preamble,
+        criteria,
+        scale,
+        openQuestions: questions,
+        draftedFrom,
+      });
       setSaved(
         res.forked
           ? `Saved as v${res.rubric.version}. A round already pinned the previous version, so it was kept intact.`
@@ -619,6 +861,15 @@ function RubricTab({
         <span className="rail-note">What a pass means.</span>
       </div>
       <div className="col">
+        <DraftPanel
+          slug={slug}
+          token={token}
+          traceCount={view.traceCount}
+          startOpen={rubric.criteria.length === 0 && rubric.clauses.length === 0}
+          onAccept={applyDraft}
+          onError={onError}
+        />
+
         <div className="panel">
           <div className="between">
             <h3 style={{ marginTop: 0 }}>Version {rubric.version}</h3>
@@ -635,6 +886,20 @@ function RubricTab({
             </div>
           </div>
 
+          {draftedFrom ? (
+            <div className="warn">
+              <span className="metric-k">Drafted, not calibrated</span>
+              <p style={{ margin: '6px 0 0' }}>
+                {draftedFrom.provider === 'anthropic'
+                  ? `A model wrote this from ${draftedFrom.exampleCount} of your conversations.`
+                  : 'This is a starting skeleton, not a draft from your conversations.'}{' '}
+                Nobody has yet checked whether two people apply it the same way. Run a round before trusting any number
+                that comes out of it.
+                {draftedFrom.truncated ? ' Some conversations were trimmed to fit.' : ''}
+              </p>
+            </div>
+          ) : null}
+
           <form onSubmit={save}>
             <div className="field">
               <label htmlFor="rubric-name">Name</label>
@@ -648,7 +913,7 @@ function RubricTab({
             <div className="field">
               <label>Verdict scale</label>
               <div className="pill-row">
-                {[...rubric.scale]
+                {[...scale]
                   .sort((a, b) => b.rank - a.rank)
                   .map((level) => (
                     <span key={level.id} className="pill on">
@@ -657,6 +922,12 @@ function RubricTab({
                   ))}
                 <span className="pill">abstain</span>
               </div>
+              {scale.map((l) => l.id).join('|') !== rubric.scale.map((l) => l.id).join('|') ? (
+                <p className="tiny" style={{ margin: 0 }}>
+                  This scale differs from the saved one. Saving keeps every closed round on the scale it was graded
+                  against — an edit forks a new version rather than rewriting the old one.
+                </p>
+              ) : null}
               <p className="tiny" style={{ margin: 0 }}>
                 Abstain is always available and never counts as agreement. It shows up in coverage instead.
               </p>
@@ -703,6 +974,43 @@ function RubricTab({
                 Add criterion
               </button>
             </div>
+
+            {questions.length > 0 ? (
+              <div className="field">
+                <label>What this rubric does not answer yet</label>
+                <p className="tiny" style={{ marginTop: 0 }}>
+                  Expect your first disagreements here. Strike one once a round has settled it and the answer is written
+                  into a criterion or a clause.
+                </p>
+                {questions.map((q, i) => (
+                  <div key={q.id} className="panel" style={{ marginBottom: 10, padding: '14px 16px' }}>
+                    <div className="row">
+                      <input
+                        value={q.question}
+                        onChange={(e) =>
+                          setQuestions(questions.map((x, j) => (i === j ? { ...x, question: e.target.value } : x)))
+                        }
+                        aria-label="Open question"
+                      />
+                      <div className="shrink">
+                        <button
+                          type="button"
+                          className="ghost tiny-btn"
+                          onClick={() => setQuestions(questions.filter((_, j) => j !== i))}
+                        >
+                          answered
+                        </button>
+                      </div>
+                    </div>
+                    {q.why ? (
+                      <p className="tiny" style={{ margin: '8px 0 0' }}>
+                        {q.why}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {rubric.clauses.length > 0 ? (
               <div className="field">

@@ -81,10 +81,25 @@ tested statistics layer is untouched by the move to accounts — and a rename
 mid-round cannot fork one person into two graders and quietly corrupt their
 agreement scores.
 
+## Settled since
+
+**What "draft a rubric from these conversations" returns.** A scale, criteria
+grounded in the transcripts, and — the part that makes it this product's
+drafter rather than a prompt anyone could write — the questions the examples do
+not answer. The drafter is forbidden from stating an unsettled case as a
+criterion; if the examples do not decide it, it goes in the open questions. The
+draft is never written on acceptance by the model, only by a human, and a
+drafted rubric is labelled as never having been read by a second person.
+
+Built in `shared/drafting.ts` (pure) and `server/drafter.ts` (providers), on
+SQLite. It ports to Postgres with the two new columns on `rubric_versions` and
+nothing else.
+
 ## Still open
 
-- **What "draft a rubric from these conversations" actually returns.** This is
-  the step carrying the whole from-nothing promise.
 - **Whether a calibrated rubric measurably improves an LLM judge.** The
   commercial claim, still untested on real data. No amount of engineering
   settles it.
+- **Whether a drafted rubric is a better starting point than a blank page.**
+  Now testable: draft one, run a round, compare round-one agreement against a
+  project whose rubric a person wrote unaided.

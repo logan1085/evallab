@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS rubric_versions (
   preamble          TEXT NOT NULL DEFAULT '',
   scale             TEXT NOT NULL,
   criteria          TEXT NOT NULL DEFAULT '[]',
+  open_questions    TEXT NOT NULL DEFAULT '[]',
+  drafted_from      TEXT,
   created_at        TEXT NOT NULL,
   UNIQUE (project_id, version)
 );
@@ -139,6 +141,7 @@ export function openDb(file = process.env.GR_DB ?? 'data/grading-room.db'): DB {
   if (file !== ':memory:') mkdirSync(dirname(resolve(file)), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(SCHEMA);
+  migrate(db);
   if (file !== ':memory:') {
     // A round has several people submitting grades at once. WAL plus a wait —
     // rather than an immediate SQLITE_BUSY — is the difference between a slow
@@ -147,6 +150,25 @@ export function openDb(file = process.env.GR_DB ?? 'data/grading-room.db'): DB {
     db.exec('PRAGMA synchronous = NORMAL');
   }
   return db;
+}
+
+/**
+ * Columns added after the first release.
+ *
+ * `CREATE TABLE IF NOT EXISTS` is a no-op against a database that already has
+ * the table, so a new column in SCHEMA never reaches an existing file. Adding it
+ * here keeps a running deployment working across an upgrade instead of failing
+ * on the first query that mentions the column.
+ */
+function migrate(db: DB): void {
+  addColumn(db, 'rubric_versions', 'open_questions', "TEXT NOT NULL DEFAULT '[]'");
+  addColumn(db, 'rubric_versions', 'drafted_from', 'TEXT');
+}
+
+function addColumn(db: DB, table: string, column: string, ddl: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
 }
 
 /**

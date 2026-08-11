@@ -8,6 +8,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../server/app.js';
 import { openDb, type DB } from '../server/db.js';
+import { DEFAULT_SCALE, buildJudgeSystemPrompt, renderRubricMarkdown } from '../shared/index.js';
 
 let db: DB;
 let app: Express;
@@ -173,5 +174,45 @@ describe('reused traces are embargoed while a later round is open', () => {
       expect(row.embargoed).toBeUndefined();
       expect(Object.keys(row.byGrader)).toHaveLength(2);
     }
+  });
+});
+
+describe('open questions do not reach the judge', () => {
+  /**
+   * A drafted rubric names what it does not settle. Handing those to the judge
+   * as "abstain when the case turns on one of these" would make an early rubric
+   * abstain often and a calibrated one abstain rarely — and since abstentions
+   * never count as agreement, calibration would post a win it did not earn.
+   */
+  const drafted = {
+    id: 'r1',
+    projectId: 'p1',
+    version: 1,
+    parentVersionId: null,
+    name: 'Refund rubric',
+    preamble: 'Decide whether the agent handled the refund request.',
+    scale: DEFAULT_SCALE,
+    criteria: [{ id: 'c1', title: 'States what it did not do', body: 'The agent names any part it left unfinished.' }],
+    clauses: [],
+    openQuestions: [
+      { id: 'q1', question: 'Is an escalation a pass?', why: 'No example shows the agent escalating.' },
+    ],
+    draftedFrom: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('keeps them out of the judge prompt', () => {
+    const prompt = buildJudgeSystemPrompt(drafted);
+    expect(prompt).toContain('States what it did not do');
+    expect(prompt).not.toContain('Is an escalation a pass?');
+    expect(prompt).not.toContain('does not answer yet');
+  });
+
+  it('still shows them to humans on request, and never by accident', () => {
+    expect(renderRubricMarkdown(drafted)).not.toContain('Is an escalation a pass?');
+
+    const forHumans = renderRubricMarkdown(drafted, { includeOpenQuestions: true });
+    expect(forHumans).toContain('Is an escalation a pass?');
+    expect(forHumans).toContain('No example shows the agent escalating.');
   });
 });

@@ -11,6 +11,8 @@ import type { DB } from './db.js';
 import { newId, now } from './db.js';
 import {
   DEFAULT_SCALE,
+  type DraftProvenance,
+  type DraftQuestion,
   type Grade,
   type Grader,
   type ItemArm,
@@ -187,6 +189,8 @@ export function createRubricVersion(
     criteria?: RubricVersion['criteria'];
     parentVersionId?: string | null;
     clauses?: { text: string; originItemId?: string | null; originRoundId?: string | null }[];
+    openQuestions?: DraftQuestion[];
+    draftedFrom?: DraftProvenance | null;
   },
 ): RubricVersion {
   const maxRow = db
@@ -204,12 +208,15 @@ export function createRubricVersion(
     scale: args.scale && args.scale.length > 0 ? args.scale : DEFAULT_SCALE,
     criteria: args.criteria ?? [],
     clauses: [],
+    openQuestions: args.openQuestions ?? [],
+    draftedFrom: args.draftedFrom ?? null,
     createdAt: now(),
   };
 
   db.prepare(
-    `INSERT INTO rubric_versions (id, project_id, version, parent_version_id, name, preamble, scale, criteria, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO rubric_versions
+       (id, project_id, version, parent_version_id, name, preamble, scale, criteria, open_questions, drafted_from, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     rubric.id,
     rubric.projectId,
@@ -219,6 +226,8 @@ export function createRubricVersion(
     rubric.preamble,
     JSON.stringify(rubric.scale),
     JSON.stringify(rubric.criteria),
+    JSON.stringify(rubric.openQuestions),
+    rubric.draftedFrom ? JSON.stringify(rubric.draftedFrom) : null,
     rubric.createdAt,
   );
 
@@ -269,7 +278,14 @@ export function rubricIsPinned(db: DB, rubricVersionId: string): boolean {
 export function updateRubricInPlace(
   db: DB,
   id: string,
-  patch: { name?: string; preamble?: string; scale?: VerdictLevel[]; criteria?: RubricVersion['criteria'] },
+  patch: {
+    name?: string;
+    preamble?: string;
+    scale?: VerdictLevel[];
+    criteria?: RubricVersion['criteria'];
+    openQuestions?: DraftQuestion[];
+    draftedFrom?: DraftProvenance | null;
+  },
 ): RubricVersion | null {
   const existing = getRubric(db, id);
   if (!existing) return null;
@@ -278,12 +294,20 @@ export function updateRubricInPlace(
     preamble: patch.preamble ?? existing.preamble,
     scale: patch.scale ?? existing.scale,
     criteria: patch.criteria ?? existing.criteria,
+    openQuestions: patch.openQuestions ?? existing.openQuestions,
+    draftedFrom: patch.draftedFrom === undefined ? existing.draftedFrom : patch.draftedFrom,
   };
-  db.prepare('UPDATE rubric_versions SET name = ?, preamble = ?, scale = ?, criteria = ? WHERE id = ?').run(
+  db.prepare(
+    `UPDATE rubric_versions
+        SET name = ?, preamble = ?, scale = ?, criteria = ?, open_questions = ?, drafted_from = ?
+      WHERE id = ?`,
+  ).run(
     next.name,
     next.preamble,
     JSON.stringify(next.scale),
     JSON.stringify(next.criteria),
+    JSON.stringify(next.openQuestions),
+    next.draftedFrom ? JSON.stringify(next.draftedFrom) : null,
     id,
   );
   return getRubric(db, id);
@@ -312,6 +336,8 @@ function hydrateRubric(db: DB, row: Row): RubricVersion {
     scale: parseJson<VerdictLevel[]>(row.scale, DEFAULT_SCALE),
     criteria: parseJson<RubricVersion['criteria']>(row.criteria, []),
     clauses,
+    openQuestions: parseJson<DraftQuestion[]>(row.open_questions, []),
+    draftedFrom: row.drafted_from == null ? null : parseJson<DraftProvenance | null>(row.drafted_from, null),
     createdAt: str(row.created_at),
   };
 }

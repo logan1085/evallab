@@ -8,7 +8,10 @@
 
 import type { RubricVersion, Trace } from './types.js';
 
-export function renderRubricMarkdown(rubric: RubricVersion, opts: { includeProvenance?: boolean } = {}): string {
+export function renderRubricMarkdown(
+  rubric: RubricVersion,
+  opts: { includeProvenance?: boolean; includeOpenQuestions?: boolean } = {},
+): string {
   const lines: string[] = [];
   lines.push(`# ${rubric.name}`);
   lines.push('');
@@ -52,6 +55,20 @@ export function renderRubricMarkdown(rubric: RubricVersion, opts: { includeProve
     lines.push('');
   }
 
+  if (opts.includeOpenQuestions && rubric.openQuestions.length > 0) {
+    lines.push('## What this rubric does not answer yet');
+    lines.push('');
+    lines.push(
+      'These are the cases the rubric leaves to the grader. Expect disagreement here first — that is what the next round is for.',
+    );
+    lines.push('');
+    for (const q of rubric.openQuestions) {
+      lines.push(`- **${q.question.trim()}**`);
+      if (q.why.trim()) lines.push(`  ${q.why.trim()}`);
+    }
+    lines.push('');
+  }
+
   return lines.join('\n');
 }
 
@@ -59,6 +76,15 @@ export function renderRubricMarkdown(rubric: RubricVersion, opts: { includeProve
  * The judge prompt is the rubric, verbatim, plus the output contract. Nothing is
  * paraphrased: if a judge disagrees with the humans, the rubric is the thing to
  * fix, and that is only true if the judge read exactly what the humans read.
+ *
+ * Open questions are deliberately left out, even though they are part of the
+ * rubric document. Telling a judge "abstain when the case turns on one of these"
+ * would make an early, gap-riddled rubric abstain more and a calibrated one
+ * abstain less — and since abstentions never count as agreement, calibration
+ * would appear to work for a reason that has nothing to do with judgment. The
+ * measurement artefact is worth more than the honesty gained, so the judge grades
+ * the settled rubric and its mistakes on unsettled cases stay visible as
+ * disagreement.
  */
 export function buildJudgeSystemPrompt(rubric: RubricVersion): string {
   const scale = [...rubric.scale].sort((a, b) => b.rank - a.rank);

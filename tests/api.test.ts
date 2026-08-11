@@ -397,3 +397,153 @@ describe('judge', () => {
       .expect(409);
   });
 });
+
+describe('drafting a rubric from conversations', () => {
+  const description = 'A support agent that answers billing questions and can issue refunds.';
+
+  it('drafts from traces already in the project without saving anything', async () => {
+    const { project, auth } = await makeProject(3);
+    const traces = (await auth(request(app).get(`/api/projects/${project.slug}/traces`))).body.traces as {
+      id: string;
+    }[];
+
+    const res = await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+      .send({ description, traceIds: traces.map((t) => t.id) })
+      .expect(200);
+
+    expect(res.body.draft.scale.length).toBeGreaterThanOrEqual(2);
+    expect(res.body.draft.openQuestions.length).toBeGreaterThan(0);
+    expect(res.body.draftedFrom.exampleCount).toBe(3);
+    expect(res.body.usedTraceIds).toHaveLength(3);
+
+    // Nothing is written until a human accepts it.
+    const rubric = (await auth(request(app).get(`/api/projects/${project.slug}`))).body.rubric;
+    expect(rubric.openQuestions).toEqual([]);
+    expect(rubric.draftedFrom).toBeNull();
+  });
+
+  it('accepts pasted conversations from a project with no traces at all', async () => {
+    const { project, auth } = await makeProject(0);
+    const res = await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+      .send({ description, examples: [{ title: 'First call', content: 'user: where is my refund' }] })
+      .expect(200);
+    expect(res.body.draftedFrom.exampleCount).toBe(1);
+  });
+
+  it('says so rather than inventing criteria when no model is configured', async () => {
+    const { project, auth } = await makeProject(2);
+    const traces = (await auth(request(app).get(`/api/projects/${project.slug}/traces`))).body.traces as {
+      id: string;
+    }[];
+    const res = await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+      .send({ description, traceIds: [traces[0]!.id] })
+      .expect(200);
+
+    expect(res.body.provider.real).toBe(false);
+    expect(res.body.draft.criteria).toEqual([]);
+    expect(res.body.draft.openQuestions.length).toBeGreaterThan(0);
+  });
+
+  it('refuses to draft from another project\'s traces', async () => {
+    const mine = await makeProject(1);
+    const theirs = await makeProject(1);
+    const theirTrace = (await theirs.auth(request(app).get(`/api/projects/${theirs.project.slug}/traces`))).body
+      .traces[0];
+
+    const res = await mine
+      .auth(request(app).post(`/api/projects/${mine.project.slug}/rubric/draft`))
+      .send({ description, traceIds: [theirTrace.id] })
+      .expect(404);
+    expect(res.body.error).toMatch(/not in this project/i);
+  });
+
+  it('refuses with nothing to draft from, and with no description', async () => {
+    const { project, auth } = await makeProject(1);
+    await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`)).send({ description }).expect(400);
+    await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+      .send({ description: 'short', examples: [{ title: 'x', content: 'y' }] })
+      .expect(400);
+  });
+
+  it('stores the draft and its provenance once a human accepts it', async () => {
+    const { project, auth } = await makeProject(2);
+    const traces = (await auth(request(app).get(`/api/projects/${project.slug}/traces`))).body.traces as {
+      id: string;
+    }[];
+    const drafted = (
+      await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+        .send({ description, traceIds: [traces[0]!.id] })
+        .expect(200)
+    ).body;
+
+    const saved = (
+      await auth(request(app).put(`/api/projects/${project.slug}/rubric`))
+        .send({
+          name: drafted.draft.name,
+          preamble: drafted.draft.preamble,
+          scale: drafted.draft.scale,
+          criteria: drafted.draft.criteria,
+          openQuestions: drafted.draft.openQuestions,
+          draftedFrom: drafted.draftedFrom,
+        })
+        .expect(200)
+    ).body.rubric;
+
+    expect(saved.openQuestions).toEqual(drafted.draft.openQuestions);
+    expect(saved.draftedFrom.describedAs).toBe(description);
+    expect(saved.draftedFrom.exampleCount).toBe(1);
+
+    const markdown = (
+      await auth(request(app).get(`/api/rubrics/${saved.id}/export?format=md`)).expect(200)
+    ).text;
+    expect(markdown).toContain('does not answer yet');
+    expect(markdown).toContain(saved.openQuestions[0].question);
+
+    const judge = (await auth(request(app).get(`/api/rubrics/${saved.id}/export?format=judge`)).expect(200)).text;
+    expect(judge).not.toContain(saved.openQuestions[0].question);
+  });
+
+  it('carries open questions forward when an edit forks a pinned version', async () => {
+    const { project, auth } = await makeProject(4);
+    const drafted = (
+      await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+        .send({ description, examples: [{ title: 'x', content: 'a conversation' }] })
+        .expect(200)
+    ).body;
+
+    await auth(request(app).put(`/api/projects/${project.slug}/rubric`))
+      .send({ name: 'v1', openQuestions: drafted.draft.openQuestions, draftedFrom: drafted.draftedFrom })
+      .expect(200);
+
+    await auth(request(app).post(`/api/projects/${project.slug}/graders`)).send({ name: 'Ana' }).expect(201);
+    await auth(request(app).post(`/api/projects/${project.slug}/rounds`))
+      .send({ calibrationSize: 2, heldoutSize: 1 })
+      .expect(201);
+
+    const forked = (
+      await auth(request(app).put(`/api/projects/${project.slug}/rubric`)).send({ name: 'v2' }).expect(200)
+    ).body;
+    expect(forked.forked).toBe(true);
+    expect(forked.rubric.openQuestions).toEqual(drafted.draft.openQuestions);
+    expect(forked.rubric.draftedFrom.describedAs).toBe(description);
+  });
+
+  it('lets a team strike a question the rubric now answers', async () => {
+    const { project, auth } = await makeProject(1);
+    const drafted = (
+      await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+        .send({ description, examples: [{ title: 'x', content: 'a conversation' }] })
+        .expect(200)
+    ).body;
+
+    await auth(request(app).put(`/api/projects/${project.slug}/rubric`))
+      .send({ name: 'v1', openQuestions: drafted.draft.openQuestions })
+      .expect(200);
+
+    const kept = drafted.draft.openQuestions.slice(1);
+    const res = await auth(request(app).put(`/api/projects/${project.slug}/rubric`))
+      .send({ name: 'v1', openQuestions: kept })
+      .expect(200);
+    expect(res.body.rubric.openQuestions).toEqual(kept);
+  });
+});

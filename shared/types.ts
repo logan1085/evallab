@@ -44,6 +44,40 @@ export interface RubricClause {
   createdAt: string;
 }
 
+/**
+ * A decision the rubric does not settle yet.
+ *
+ * These are the inverse of clauses. A clause is an answer the team earned by
+ * disagreeing on a real trace; an open question is a disagreement they have not
+ * had yet but almost certainly will. Naming them is the honest half of drafting
+ * a rubric from examples: a handful of transcripts cannot possibly settle every
+ * case, and a draft that pretends otherwise is the thing this product exists to
+ * argue against.
+ */
+export interface DraftQuestion {
+  id: string;
+  question: string;
+  /** What in the examples left it open. Provenance, same as a clause carries. */
+  why: string;
+}
+
+/**
+ * Where a drafted rubric came from. Null when a human wrote the rubric.
+ *
+ * A drafted rubric has never been read by a second person, so every number
+ * computed against it is a first draft's number. The UI leans on this to say so.
+ */
+export interface DraftProvenance {
+  provider: string;
+  model: string;
+  /** How the team described their agent when they asked for a draft. */
+  describedAs: string;
+  exampleCount: number;
+  /** True when transcripts were trimmed to fit the request. */
+  truncated: boolean;
+  createdAt: string;
+}
+
 export interface RubricVersion {
   id: string;
   projectId: string;
@@ -55,6 +89,9 @@ export interface RubricVersion {
   scale: VerdictLevel[];
   criteria: RubricCriterion[];
   clauses: RubricClause[];
+  /** Carried forward across versions until a resolution answers one and a human removes it. */
+  openQuestions: DraftQuestion[];
+  draftedFrom: DraftProvenance | null;
   createdAt: string;
 }
 
