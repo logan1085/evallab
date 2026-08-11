@@ -1,0 +1,38 @@
+# Render Blueprint.
+#
+# Deploy with: New → Blueprint → point at this repo. Render reads this file and
+# provisions the service and its disk, so there is nothing to configure by hand
+# except the optional API key.
+#
+# The disk requires a paid instance type — Render's free tier has no persistent
+# storage, and this app's database is a file.
+
+services:
+  - type: web
+    name: grading-room
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    region: oregon
+    healthCheckPath: /api/health
+
+    # One instance, always. The database is a file on the disk below, so a
+    # second instance would be a second database behind the same URL, with
+    # graders silently landing on different ones. Render already refuses to
+    # scale a service that has a disk; this makes the intent explicit.
+    numInstances: 1
+
+    disk:
+      name: grading-room-data
+      mountPath: /data
+      sizeGB: 1
+
+    envVars:
+      - key: GR_DB
+        value: /data/grading-room.db
+      # Optional. Without it the judge falls back to an offline stub that is
+      # labelled, everywhere it appears, as not a real judge.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GR_JUDGE_MODEL
+        value: claude-opus-5

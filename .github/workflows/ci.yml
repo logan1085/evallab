@@ -42,7 +42,14 @@ jobs:
       - name: Smoke test
         run: |
           set -euo pipefail
-          docker run -d --name gr --init -p 8787:8787 -v gr-data:/data grading-room:ci
+
+          # A root-owned empty directory, not a named volume. Named volumes
+          # inherit ownership from the image and so hide the exact failure that
+          # a provisioned cloud disk produces; a bind mount reproduces it.
+          sudo mkdir -p /mnt/gr-data
+          sudo chown root:root /mnt/gr-data
+
+          docker run -d --name gr --init -p 8787:8787 -v /mnt/gr-data:/data grading-room:ci
 
           ok=""
           for _ in $(seq 1 30); do
@@ -64,6 +71,20 @@ jobs:
           # The SPA must be served from the same origin as the API.
           curl -fsS http://localhost:8787/ | grep -q '<div id="root">'
           echo "spa served"
+
+          # The database must exist on the mounted disk, owned by the app user
+          # rather than root — the whole point of the entrypoint.
+          sudo test -f /mnt/gr-data/grading-room.db
+          owner=$(docker run --rm -v /mnt/gr-data:/data grading-room:ci \
+            sh -c 'stat -c "%U" /data/grading-room.db')
+          echo "database owner: $owner"
+          [ "$owner" = "node" ]
+
+          # And the server itself must not be running as root.
+          user=$(docker exec gr sh -c 'ps -o user= -p 1 | tr -d " "' || true)
+          runner=$(docker exec gr sh -c 'ps -o user=,comm= | grep node | head -1')
+          echo "process table: $runner"
+          echo "$runner" | grep -q '^node' || { echo "server is not running as node"; exit 1; }
 
           # Graceful shutdown must actually run, or a deploy drops in-flight writes.
           docker stop -t 15 gr

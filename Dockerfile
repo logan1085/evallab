@@ -16,14 +16,22 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# su-exec drops privileges in the entrypoint after the mounted disk is fixed up.
+RUN apk add --no-cache su-exec
+
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # The database lives on a volume, not in the image layer.
 RUN mkdir -p /data && chown -R node:node /data /app
-USER node
+
+# Deliberately still root here: the entrypoint chowns the mounted disk and then
+# execs the server as `node`. A cloud disk is root-owned when it is attached, so
+# dropping privileges in the image would make it unwritable.
 
 ENV PORT=8787 \
     GR_DB=/data/grading-room.db
@@ -33,4 +41,5 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8787)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "dist/server.js"]
