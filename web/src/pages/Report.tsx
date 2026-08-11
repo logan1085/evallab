@@ -80,6 +80,27 @@ export function ReportPage() {
           <span className="rail-note">Clustered by kind.</span>
         </div>
         <div className="col">
+          {data.heldoutSplitCount > 0 ? (
+            <p className="note">
+              {data.heldoutSplitCount} further split{data.heldoutSplitCount === 1 ? ' is' : 's are'} in the held-out
+              arm and {data.heldoutSplitCount === 1 ? 'is' : 'are'} not listed here. Held-out cases are what the
+              primary metric is measured on, so writing a rubric clause about one would be editing the rubric against
+              your own test set. They still count in the numbers below.
+            </p>
+          ) : null}
+
+          {data.embargoedCount > 0 ? (
+            <div className="warn">
+              <span className="metric-k">Some verdicts are withheld</span>
+              <p style={{ margin: '6px 0 0' }}>
+                {data.embargoedCount} of these traces are in a round somebody is still grading, so their verdicts stay
+                hidden until that round closes. Reusing traces across rounds is how before-and-after gets measured on
+                the same cases, and it only works if the later round&rsquo;s graders cannot look up the earlier
+                answers. The aggregate numbers below are unaffected.
+              </p>
+            </div>
+          ) : null}
+
           {data.clusters.length === 0 ? (
             <div className="empty">Nothing to resolve.</div>
           ) : (
@@ -218,16 +239,22 @@ export function ReportPage() {
               </thead>
               <tbody>
                 {data.rows.map((row) => (
-                  <tr key={row.itemId} className={row.kind === 'unanimous' ? '' : 'is-split'}>
+                  <tr key={row.itemId} className={!row.embargoed && row.kind !== 'unanimous' ? 'is-split' : ''}>
                     <td className="case">{row.title}</td>
-                    {data.graders.map((g) => (
-                      <td key={g.id}>
-                        <Verdict verdict={row.byGrader[g.id]} scale={scale} />
+                    {row.embargoed ? (
+                      <td colSpan={data.graders.length} className="tiny">
+                        withheld — in a round being graded now
                       </td>
-                    ))}
+                    ) : (
+                      data.graders.map((g) => (
+                        <td key={g.id}>
+                          <Verdict verdict={row.byGrader[g.id]} scale={scale} />
+                        </td>
+                      ))
+                    )}
                     <td>{row.arm === 'heldout' ? 'held out' : 'calibration'}</td>
                     <td className="flag">
-                      {row.kind === 'unanimous' ? '' : row.resolved ? <span className="resolved-badge">resolved</span> : row.kind}
+                      {row.embargoed ? '' : row.kind === 'unanimous' ? '' : row.resolved ? <span className="resolved-badge">resolved</span> : row.kind}
                     </td>
                   </tr>
                 ))}

@@ -169,6 +169,13 @@ export interface SplitReportRow {
   /** Cluster key: the kind of disagreement, e.g. "pass|fail". Splits group by this. */
   clusterKey: string;
   resolved: boolean;
+  /**
+   * Set when this trace is also in a round that is still open, so its verdicts
+   * are withheld until that round closes. Reusing a held-out set across rounds
+   * is the whole before-and-after design, and it only works if a grader in the
+   * later round cannot look up how everyone graded the same trace last time.
+   */
+  embargoed?: boolean;
 }
 
 export interface AgreementStats {

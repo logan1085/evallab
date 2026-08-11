@@ -451,7 +451,21 @@ export function createApp(db: DB) {
     const graders = store.participantsOf(db, round.id);
     const graderIds = graders.map((g) => g.id);
     const verdicts = store.verdictsForRound(db, round.id);
-    const rows = buildSplitReport(verdicts, itemContexts(db, round.id), scale);
+    const allRows = buildSplitReport(verdicts, itemContexts(db, round.id), scale);
+
+    // A trace that is also sitting in a round somebody is still grading has its
+    // verdicts withheld here. Otherwise reusing a held-out set — which is how
+    // before-and-after is measured on the same cases — would hand the later
+    // round's graders last round's answers.
+    const embargoed = traceIdsInOpenRounds(db, round.projectId, round.id);
+    const rows = allRows.map((row) =>
+      embargoed.has(row.traceId) ? { ...row, byGrader: {}, embargoed: true } : row,
+    );
+    const embargoedItemIds = new Set(rows.filter((r) => r.embargoed).map((r) => r.itemId));
+
+    // Aggregate statistics are computed from the unredacted verdicts, so a
+    // closed round's numbers do not shift around depending on what happens to
+    // be open right now. Only the per-item detail is withheld.
 
     const byArm = (arm: 'calibration' | 'heldout') => {
       const ids = new Set(rows.filter((r) => r.arm === arm).map((r) => r.itemId));
@@ -462,14 +476,21 @@ export function createApp(db: DB) {
       };
     };
 
+    // Held-out splits are counted but never offered for resolution. Writing a
+    // rubric clause about a trace you are measuring on is teaching to the test,
+    // and it would make the primary metric improve for the wrong reason.
+    const resolvable = rows.filter((r) => r.arm === 'calibration' && !r.embargoed);
+
     res.json({
       round,
       rubric,
       graders,
       samplingNote: store.roundSamplingNote(db, round.id),
       rows,
-      clusters: clusterSplits(rows),
-      splitCount: splitsOf(rows).length,
+      clusters: clusterSplits(resolvable),
+      splitCount: splitsOf(resolvable).length,
+      heldoutSplitCount: splitsOf(rows.filter((r) => r.arm === 'heldout')).length,
+      embargoedCount: rows.filter((r) => r.embargoed).length,
       overall: {
         agreement: agreementStats(verdicts, scale, graderIds),
         coverage: coverageStats(verdicts, graderIds, clauseCoveredItems(rubric, new Set(rows.map((r) => r.itemId)))),
@@ -477,7 +498,9 @@ export function createApp(db: DB) {
       calibration: byArm('calibration'),
       heldout: byArm('heldout'),
       resolutions: store.resolutionsForRound(db, round.id),
-      notes: store.allGradesForRound(db, round.id).filter((g) => g.note.trim()),
+      notes: store
+        .allGradesForRound(db, round.id)
+        .filter((g) => g.note.trim() && !embargoedItemIds.has(g.itemId)),
     });
   });
 
@@ -505,6 +528,17 @@ export function createApp(db: DB) {
 
     const item = store.getItem(db, req.params.itemId!);
     if (!item || item.roundId !== round.id) return res.status(404).json({ error: 'That item is not in this round.' });
+
+    // Held-out traces are graded but never discussed. A clause written about
+    // one would be a rubric edit aimed at the measurement set, and the
+    // before-and-after number would improve because of the teaching, not the
+    // calibration.
+    if (item.arm === 'heldout') {
+      return res.status(400).json({
+        error:
+          'This trace is in the held-out arm. Held-out cases are what the primary metric is measured on, so resolving one would be writing the rubric against your own test set.',
+      });
+    }
 
     res.json({ resolution: store.saveResolution(db, { itemId: item.id, ...body.data }) });
   });
@@ -677,6 +711,19 @@ function itemContexts(db: DB, roundId: string): Map<string, ItemContext> {
     });
   }
   return map;
+}
+
+/**
+ * Traces currently sitting in a round somebody is still grading. Their verdicts
+ * are withheld from every other round's report until that round closes.
+ */
+function traceIdsInOpenRounds(db: DB, projectId: string, exceptRoundId: string): Set<string> {
+  const ids = new Set<string>();
+  for (const round of store.listRounds(db, projectId)) {
+    if (round.status !== 'open' || round.id === exceptRoundId) continue;
+    for (const item of store.listItems(db, round.id)) ids.add(item.traceId);
+  }
+  return ids;
 }
 
 function reportRows(db: DB, roundId: string, scale: { id: string; label: string; rank: number }[]) {

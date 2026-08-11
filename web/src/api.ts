@@ -142,7 +142,12 @@ export interface ReportView {
   samplingNote: string;
   rows: SplitReportRow[];
   clusters: SplitCluster[];
+  /** Splits that can be resolved: calibration arm, not embargoed. */
   splitCount: number;
+  /** Splits in the held-out arm. Counted, never resolvable. */
+  heldoutSplitCount: number;
+  /** Rows whose verdicts are withheld because another round is grading them now. */
+  embargoedCount: number;
   overall: ArmStats;
   calibration: ArmStats;
   heldout: ArmStats;
