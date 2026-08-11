@@ -16,8 +16,8 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { ABSTAIN, type RubricVersion, type Trace } from '@shared/types.js';
-import { buildJudgeSystemPrompt, buildJudgeUserPrompt } from '@shared/rubric.js';
+import { ABSTAIN, type RubricVersion, type Trace } from '../shared/types.js';
+import { buildJudgeSystemPrompt, buildJudgeUserPrompt } from '../shared/rubric.js';
 
 export const DEFAULT_JUDGE_MODEL = 'claude-opus-5';
 

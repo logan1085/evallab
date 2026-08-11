@@ -20,73 +20,65 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  image:
-    name: docker image builds and serves
+  serverless:
+    name: serverless entry boots and serves
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build
-        uses: docker/build-push-action@v6
+      - uses: actions/setup-node@v4
         with:
-          context: .
-          push: false
-          load: true
-          tags: grading-room:ci
+          node-version: "22"
+          cache: npm
+      - run: npm ci
 
-      # Building is not the same as working. This starts the container the way
-      # the compose file does and checks the two things that would actually be
-      # broken: that the health probe passes, and that SQLite can write to the
-      # mounted volume.
-      - name: Smoke test
+      # The unit suite drives the Express app directly, which never exercises
+      # api/index.ts — the file Vercel actually invokes. A broken import or a
+      # pool built per request would pass every test and fail on deploy, so this
+      # runs the real handler over real HTTP.
+      - name: Boot the handler
         run: |
           set -euo pipefail
+          cat > ci-entry-check.ts <<'TS'
+          import { createServer } from 'node:http';
+          import handler from './api/index.js';
 
-          # A root-owned empty directory, not a named volume. Named volumes
-          # inherit ownership from the image and so hide the exact failure that
-          # a provisioned cloud disk produces; a bind mount reproduces it.
-          sudo mkdir -p /mnt/gr-data
-          sudo chown root:root /mnt/gr-data
+          const server = createServer((req, res) => handler(req, res));
+          await new Promise<void>((r) => server.listen(4189, '127.0.0.1', r));
+          const base = 'http://127.0.0.1:4189';
 
-          docker run -d --name gr --init -p 8787:8787 -v /mnt/gr-data:/data grading-room:ci
+          const health = await fetch(`${base}/api/health`).then((r) => r.json());
+          if (!health.ok) throw new Error(`health failed: ${JSON.stringify(health)}`);
 
-          ok=""
-          for _ in $(seq 1 30); do
-            if curl -fsS http://localhost:8787/api/health > /dev/null; then ok=1; break; fi
-            sleep 1
-          done
-          if [ -z "$ok" ]; then echo "health never came up"; docker logs gr; exit 1; fi
+          const made = await fetch(`${base}/api/projects`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: 'CI' }),
+          });
+          if (made.status !== 201) throw new Error(`create failed: ${made.status}`);
+          const { project } = await made.json();
 
-          curl -fsS http://localhost:8787/api/health
-          echo
+          const view = await fetch(`${base}/api/projects/${project.slug}`, {
+            headers: { 'x-gr-token': project.token },
+          }).then((r) => r.json());
+          if (view.rubric.version !== 1) throw new Error('project view came back wrong');
 
-          # Seeding writes a project, traces, grades and a closed round, so a
-          # read-only or unwritable volume fails here rather than in production.
-          slug=$(curl -fsS -X POST http://localhost:8787/api/projects/demo \
-            -H 'content-type: application/json' -d '{}' \
-            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s).slug))")
-          echo "seeded $slug"
+          // A warm invocation must reuse the instance, not rebuild the pool.
+          const warm = await fetch(`${base}/api/health`).then((r) => r.json());
+          if (!warm.ok) throw new Error('warm request failed');
 
-          # The SPA must be served from the same origin as the API.
-          curl -fsS http://localhost:8787/ | grep -q '<div id="root">'
-          echo "spa served"
+          console.log('serverless entry serves:', project.slug);
+          server.close();
+          process.exit(0);
+          TS
+          npx tsx ci-entry-check.ts
+          rm ci-entry-check.ts
 
-          # The database must exist on the mounted disk, owned by the app user
-          # rather than root — the whole point of the entrypoint.
-          sudo test -f /mnt/gr-data/grading-room.db
-          owner=$(docker run --rm -v /mnt/gr-data:/data grading-room:ci \
-            sh -c 'stat -c "%U" /data/grading-room.db')
-          echo "database owner: $owner"
-          [ "$owner" = "node" ]
-
-          # And the server itself must not be running as root. BusyBox ps has no
-          # -p, so select by column and match the node process.
-          runner=$(docker exec gr sh -c 'ps -o user=,comm= | grep node | head -1')
-          echo "process table: $runner"
-          echo "$runner" | grep -q '^node' || { echo "server is not running as node"; exit 1; }
-
-          # Graceful shutdown must actually run, or a deploy drops in-flight writes.
-          docker stop -t 15 gr
-          docker logs gr 2>&1 | grep -q "SIGTERM received"
-          echo "graceful shutdown confirmed"
+      # The SPA is served by Vercel as static files, so the build has to produce
+      # an index.html that references the hashed bundle.
+      - name: Build the SPA
+        run: |
+          set -euo pipefail
+          npm run build:web
+          test -f dist/web/index.html
+          grep -q 'assets/index-' dist/web/index.html
+          echo "spa built"

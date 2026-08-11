@@ -25,7 +25,7 @@ import {
   type RubricVersion,
   type Trace,
   type VerdictLevel,
-} from '@shared/types.js';
+} from '../shared/types.js';
 
 type Row = Record<string, unknown>;
 
@@ -44,7 +44,7 @@ function parseJson<T>(v: unknown, fallback: T): T {
 
 /* ---- Projects ----------------------------------------------------------- */
 
-export function createProject(db: DB, args: { id?: string; slug: string; token: string; name: string }): Project {
+export async function createProject(db: DB, args: { id?: string; slug: string; token: string; name: string }): Promise<Project> {
   const project: Project = {
     id: args.id ?? newId(),
     slug: args.slug,
@@ -52,28 +52,26 @@ export function createProject(db: DB, args: { id?: string; slug: string; token: 
     name: args.name,
     createdAt: now(),
   };
-  db.prepare('INSERT INTO projects (id, slug, token, name, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    project.id,
+  await db.run('INSERT INTO projects (id, slug, token, name, created_at) VALUES (?, ?, ?, ?, ?)', project.id,
     project.slug,
     project.token,
     project.name,
-    project.createdAt,
-  );
+    project.createdAt,);
   return project;
 }
 
-export function getProjectBySlug(db: DB, slug: string): Project | null {
-  const row = db.prepare('SELECT * FROM projects WHERE slug = ?').get(slug) as Row | undefined;
+export async function getProjectBySlug(db: DB, slug: string): Promise<Project | null> {
+  const row = await db.get('SELECT * FROM projects WHERE slug = ?', slug) as Row | undefined;
   return row ? toProject(row) : null;
 }
 
-export function getProjectById(db: DB, id: string): Project | null {
-  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Row | undefined;
+export async function getProjectById(db: DB, id: string): Promise<Project | null> {
+  const row = await db.get('SELECT * FROM projects WHERE id = ?', id) as Row | undefined;
   return row ? toProject(row) : null;
 }
 
-export function getProjectSlug(db: DB, id: string): string | null {
-  const row = db.prepare('SELECT slug FROM projects WHERE id = ?').get(id) as Row | undefined;
+export async function getProjectSlug(db: DB, id: string): Promise<string | null> {
+  const row = await db.get('SELECT slug FROM projects WHERE id = ?', id) as Row | undefined;
   return row ? str(row.slug) : null;
 }
 
@@ -90,31 +88,27 @@ function toProject(row: Row): Project {
 /* ---- Graders ------------------------------------------------------------ */
 
 /** Idempotent by name: rejoining from a second device must not create a second grader. */
-export function upsertGrader(db: DB, projectId: string, name: string): Grader {
+export async function upsertGrader(db: DB, projectId: string, name: string): Promise<Grader> {
   const trimmed = name.trim();
-  const existing = db
-    .prepare('SELECT * FROM graders WHERE project_id = ? AND name = ?')
-    .get(projectId, trimmed) as Row | undefined;
+  const existing = await db.get('SELECT * FROM graders WHERE project_id = ? AND name = ?', projectId, trimmed) as Row | undefined;
   if (existing) return toGrader(existing);
 
   const grader: Grader = { id: newId(), projectId, name: trimmed, createdAt: now() };
-  db.prepare('INSERT INTO graders (id, project_id, name, created_at) VALUES (?, ?, ?, ?)').run(
-    grader.id,
+  await db.run('INSERT INTO graders (id, project_id, name, created_at) VALUES (?, ?, ?, ?)', grader.id,
     grader.projectId,
     grader.name,
-    grader.createdAt,
-  );
+    grader.createdAt,);
   return grader;
 }
 
-export function listGraders(db: DB, projectId: string): Grader[] {
-  return (db.prepare('SELECT * FROM graders WHERE project_id = ? ORDER BY created_at').all(projectId) as Row[]).map(
+export async function listGraders(db: DB, projectId: string): Promise<Grader[]> {
+  return (await db.all('SELECT * FROM graders WHERE project_id = ? ORDER BY created_at', projectId) as Row[]).map(
     toGrader,
   );
 }
 
-export function getGrader(db: DB, id: string): Grader | null {
-  const row = db.prepare('SELECT * FROM graders WHERE id = ?').get(id) as Row | undefined;
+export async function getGrader(db: DB, id: string): Promise<Grader | null> {
+  const row = await db.get('SELECT * FROM graders WHERE id = ?', id) as Row | undefined;
   return row ? toGrader(row) : null;
 }
 
@@ -124,14 +118,13 @@ function toGrader(row: Row): Grader {
 
 /* ---- Traces ------------------------------------------------------------- */
 
-export function addTraces(
+export async function addTraces(
   db: DB,
   projectId: string,
   traces: { title: string; content: string; source?: string; meta?: Record<string, unknown> }[],
-): Trace[] {
-  const stmt = db.prepare(
-    'INSERT INTO traces (id, project_id, title, content, source, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  );
+): Promise<Trace[]> {
+  const sql =
+    'INSERT INTO traces (id, project_id, title, content, source, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)';
   const out: Trace[] = [];
   for (const t of traces) {
     const trace: Trace = {
@@ -143,25 +136,34 @@ export function addTraces(
       meta: t.meta ?? {},
       createdAt: now(),
     };
-    stmt.run(trace.id, projectId, trace.title, trace.content, trace.source, JSON.stringify(trace.meta), trace.createdAt);
+    await db.run(
+      sql,
+      trace.id,
+      projectId,
+      trace.title,
+      trace.content,
+      trace.source,
+      JSON.stringify(trace.meta),
+      trace.createdAt,
+    );
     out.push(trace);
   }
   return out;
 }
 
-export function listTraces(db: DB, projectId: string): Trace[] {
-  return (db.prepare('SELECT * FROM traces WHERE project_id = ? ORDER BY created_at, id').all(projectId) as Row[]).map(
+export async function listTraces(db: DB, projectId: string): Promise<Trace[]> {
+  return (await db.all('SELECT * FROM traces WHERE project_id = ? ORDER BY created_at, id', projectId) as Row[]).map(
     toTrace,
   );
 }
 
-export function getTrace(db: DB, id: string): Trace | null {
-  const row = db.prepare('SELECT * FROM traces WHERE id = ?').get(id) as Row | undefined;
+export async function getTrace(db: DB, id: string): Promise<Trace | null> {
+  const row = await db.get('SELECT * FROM traces WHERE id = ?', id) as Row | undefined;
   return row ? toTrace(row) : null;
 }
 
-export function deleteTrace(db: DB, projectId: string, traceId: string): boolean {
-  const res = db.prepare('DELETE FROM traces WHERE id = ? AND project_id = ?').run(traceId, projectId);
+export async function deleteTrace(db: DB, projectId: string, traceId: string): Promise<boolean> {
+  const res = await db.run('DELETE FROM traces WHERE id = ? AND project_id = ?', traceId, projectId);
   return Number(res.changes) > 0;
 }
 
@@ -179,7 +181,7 @@ function toTrace(row: Row): Trace {
 
 /* ---- Rubrics ------------------------------------------------------------ */
 
-export function createRubricVersion(
+export async function createRubricVersion(
   db: DB,
   args: {
     projectId: string;
@@ -192,10 +194,8 @@ export function createRubricVersion(
     openQuestions?: DraftQuestion[];
     draftedFrom?: DraftProvenance | null;
   },
-): RubricVersion {
-  const maxRow = db
-    .prepare('SELECT COALESCE(MAX(version), 0) AS v FROM rubric_versions WHERE project_id = ?')
-    .get(args.projectId) as Row;
+): Promise<RubricVersion> {
+  const maxRow = await db.get('SELECT COALESCE(MAX(version), 0) AS v FROM rubric_versions WHERE project_id = ?', args.projectId) as Row;
   const version = num(maxRow.v) + 1;
 
   const rubric: RubricVersion = {
@@ -213,12 +213,9 @@ export function createRubricVersion(
     createdAt: now(),
   };
 
-  db.prepare(
-    `INSERT INTO rubric_versions
+  await db.run(`INSERT INTO rubric_versions
        (id, project_id, version, parent_version_id, name, preamble, scale, criteria, open_questions, drafted_from, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    rubric.id,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, rubric.id,
     rubric.projectId,
     rubric.version,
     rubric.parentVersionId,
@@ -228,15 +225,12 @@ export function createRubricVersion(
     JSON.stringify(rubric.criteria),
     JSON.stringify(rubric.openQuestions),
     rubric.draftedFrom ? JSON.stringify(rubric.draftedFrom) : null,
-    rubric.createdAt,
-  );
+    rubric.createdAt,);
 
   const clauses = args.clauses ?? [];
-  const stmt = db.prepare(
-    `INSERT INTO rubric_clauses (id, rubric_version_id, text, origin_item_id, origin_round_id, position, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  );
-  clauses.forEach((c, i) => {
+  const clauseSql = `INSERT INTO rubric_clauses (id, rubric_version_id, text, origin_item_id, origin_round_id, position, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`;
+  for (const [i, c] of clauses.entries()) {
     const clause: RubricClause = {
       id: newId(),
       text: c.text,
@@ -244,38 +238,38 @@ export function createRubricVersion(
       originRoundId: c.originRoundId ?? null,
       createdAt: now(),
     };
-    stmt.run(clause.id, rubric.id, clause.text, clause.originItemId, clause.originRoundId, i, clause.createdAt);
+    await db.run(clauseSql, clause.id, rubric.id, clause.text, clause.originItemId, clause.originRoundId, i, clause.createdAt);
     rubric.clauses.push(clause);
-  });
+  }
 
   return rubric;
 }
 
-export function getRubric(db: DB, id: string): RubricVersion | null {
-  const row = db.prepare('SELECT * FROM rubric_versions WHERE id = ?').get(id) as Row | undefined;
+export async function getRubric(db: DB, id: string): Promise<RubricVersion | null> {
+  const row = await db.get('SELECT * FROM rubric_versions WHERE id = ?', id) as Row | undefined;
   return row ? hydrateRubric(db, row) : null;
 }
 
-export function currentRubric(db: DB, projectId: string): RubricVersion | null {
-  const row = db
-    .prepare('SELECT * FROM rubric_versions WHERE project_id = ? ORDER BY version DESC LIMIT 1')
-    .get(projectId) as Row | undefined;
+export async function currentRubric(db: DB, projectId: string): Promise<RubricVersion | null> {
+  const row = await db.get('SELECT * FROM rubric_versions WHERE project_id = ? ORDER BY version DESC LIMIT 1', projectId) as Row | undefined;
   return row ? hydrateRubric(db, row) : null;
 }
 
-export function listRubrics(db: DB, projectId: string): RubricVersion[] {
-  return (
-    db.prepare('SELECT * FROM rubric_versions WHERE project_id = ? ORDER BY version').all(projectId) as Row[]
-  ).map((row) => hydrateRubric(db, row));
+export async function listRubrics(db: DB, projectId: string): Promise<RubricVersion[]> {
+  const rows = (await db.all(
+    'SELECT * FROM rubric_versions WHERE project_id = ? ORDER BY version',
+    projectId,
+  )) as Row[];
+  return Promise.all(rows.map((row) => hydrateRubric(db, row)));
 }
 
 /** True once a round has pinned this version. Pinned versions are immutable; edits fork instead. */
-export function rubricIsPinned(db: DB, rubricVersionId: string): boolean {
-  const row = db.prepare('SELECT COUNT(*) AS n FROM rounds WHERE rubric_version_id = ?').get(rubricVersionId) as Row;
+export async function rubricIsPinned(db: DB, rubricVersionId: string): Promise<boolean> {
+  const row = await db.get('SELECT COUNT(*) AS n FROM rounds WHERE rubric_version_id = ?', rubricVersionId) as Row;
   return num(row.n) > 0;
 }
 
-export function updateRubricInPlace(
+export async function updateRubricInPlace(
   db: DB,
   id: string,
   patch: {
@@ -286,8 +280,8 @@ export function updateRubricInPlace(
     openQuestions?: DraftQuestion[];
     draftedFrom?: DraftProvenance | null;
   },
-): RubricVersion | null {
-  const existing = getRubric(db, id);
+): Promise<RubricVersion | null> {
+  const existing = await getRubric(db, id);
   if (!existing) return null;
   const next = {
     name: patch.name ?? existing.name,
@@ -297,26 +291,22 @@ export function updateRubricInPlace(
     openQuestions: patch.openQuestions ?? existing.openQuestions,
     draftedFrom: patch.draftedFrom === undefined ? existing.draftedFrom : patch.draftedFrom,
   };
-  db.prepare(
-    `UPDATE rubric_versions
+  await db.run(`UPDATE rubric_versions
         SET name = ?, preamble = ?, scale = ?, criteria = ?, open_questions = ?, drafted_from = ?
-      WHERE id = ?`,
-  ).run(
-    next.name,
+      WHERE id = ?`, next.name,
     next.preamble,
     JSON.stringify(next.scale),
     JSON.stringify(next.criteria),
     JSON.stringify(next.openQuestions),
     next.draftedFrom ? JSON.stringify(next.draftedFrom) : null,
-    id,
-  );
-  return getRubric(db, id);
+    id,);
+  return await getRubric(db, id);
 }
 
-function hydrateRubric(db: DB, row: Row): RubricVersion {
+async function hydrateRubric(db: DB, row: Row): Promise<RubricVersion> {
   const id = str(row.id);
   const clauses = (
-    db.prepare('SELECT * FROM rubric_clauses WHERE rubric_version_id = ? ORDER BY position, created_at').all(id) as Row[]
+    await db.all('SELECT * FROM rubric_clauses WHERE rubric_version_id = ? ORDER BY position, created_at', id) as Row[]
   ).map(
     (c): RubricClause => ({
       id: str(c.id),
@@ -344,7 +334,7 @@ function hydrateRubric(db: DB, row: Row): RubricVersion {
 
 /* ---- Rounds ------------------------------------------------------------- */
 
-export function createRound(
+export async function createRound(
   db: DB,
   args: {
     projectId: string;
@@ -357,10 +347,8 @@ export function createRound(
     calibration: string[];
     heldout: string[];
   },
-): { round: Round; items: RoundItem[] } {
-  const maxRow = db
-    .prepare('SELECT COALESCE(MAX(idx), 0) AS v FROM rounds WHERE project_id = ?')
-    .get(args.projectId) as Row;
+): Promise<{ round: Round; items: RoundItem[] }> {
+  const maxRow = await db.get('SELECT COALESCE(MAX(idx), 0) AS v FROM rounds WHERE project_id = ?', args.projectId) as Row;
   const index = num(maxRow.v) + 1;
 
   const round: Round = {
@@ -377,11 +365,8 @@ export function createRound(
     closedAt: null,
   };
 
-  db.prepare(
-    `INSERT INTO rounds (id, project_id, rubric_version_id, idx, name, status, strategy, seed, sampling_note, source_round_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    round.id,
+  await db.run(`INSERT INTO rounds (id, project_id, rubric_version_id, idx, name, status, strategy, seed, sampling_note, source_round_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, round.id,
     round.projectId,
     round.rubricVersionId,
     round.index,
@@ -391,10 +376,9 @@ export function createRound(
     round.seed,
     args.samplingNote,
     round.sourceRoundId,
-    round.createdAt,
-  );
+    round.createdAt,);
 
-  const stmt = db.prepare('INSERT INTO round_items (id, round_id, trace_id, arm, position) VALUES (?, ?, ?, ?, ?)');
+  const itemSql = 'INSERT INTO round_items (id, round_id, trace_id, arm, position) VALUES (?, ?, ?, ?, ?)';
   const items: RoundItem[] = [];
   let position = 0;
   // Calibration and held-out are interleaved deliberately: a grader must not be
@@ -406,7 +390,7 @@ export function createRound(
   ];
   for (const p of interleave(planned, args.seed)) {
     const item: RoundItem = { id: newId(), roundId: round.id, traceId: p.traceId, arm: p.arm, position: position++ };
-    stmt.run(item.id, item.roundId, item.traceId, item.arm, item.position);
+    await db.run(itemSql, item.id, item.roundId, item.traceId, item.arm, item.position);
     items.push(item);
   }
 
@@ -437,27 +421,27 @@ function interleave<T>(input: T[], seed: string): T[] {
   return out;
 }
 
-export function getRound(db: DB, id: string): Round | null {
-  const row = db.prepare('SELECT * FROM rounds WHERE id = ?').get(id) as Row | undefined;
+export async function getRound(db: DB, id: string): Promise<Round | null> {
+  const row = await db.get('SELECT * FROM rounds WHERE id = ?', id) as Row | undefined;
   return row ? toRound(row) : null;
 }
 
-export function roundSamplingNote(db: DB, id: string): string {
-  const row = db.prepare('SELECT sampling_note FROM rounds WHERE id = ?').get(id) as Row | undefined;
+export async function roundSamplingNote(db: DB, id: string): Promise<string> {
+  const row = await db.get('SELECT sampling_note FROM rounds WHERE id = ?', id) as Row | undefined;
   return row ? str(row.sampling_note) : '';
 }
 
-export function listRounds(db: DB, projectId: string): Round[] {
-  return (db.prepare('SELECT * FROM rounds WHERE project_id = ? ORDER BY idx').all(projectId) as Row[]).map(toRound);
+export async function listRounds(db: DB, projectId: string): Promise<Round[]> {
+  return (await db.all('SELECT * FROM rounds WHERE project_id = ? ORDER BY idx', projectId) as Row[]).map(toRound);
 }
 
-export function closeRound(db: DB, id: string): Round | null {
-  db.prepare("UPDATE rounds SET status = 'closed', closed_at = ? WHERE id = ? AND status = 'open'").run(now(), id);
+export async function closeRound(db: DB, id: string): Promise<Round | null> {
+  await db.run("UPDATE rounds SET status = 'closed', closed_at = ? WHERE id = ? AND status = 'open'", now(), id);
   return getRound(db, id);
 }
 
-export function reopenRound(db: DB, id: string): Round | null {
-  db.prepare("UPDATE rounds SET status = 'open', closed_at = NULL WHERE id = ?").run(id);
+export async function reopenRound(db: DB, id: string): Promise<Round | null> {
+  await db.run("UPDATE rounds SET status = 'open', closed_at = NULL WHERE id = ?", id);
   return getRound(db, id);
 }
 
@@ -477,8 +461,8 @@ function toRound(row: Row): Round {
   };
 }
 
-export function listItems(db: DB, roundId: string): RoundItem[] {
-  return (db.prepare('SELECT * FROM round_items WHERE round_id = ? ORDER BY position').all(roundId) as Row[]).map(
+export async function listItems(db: DB, roundId: string): Promise<RoundItem[]> {
+  return (await db.all('SELECT * FROM round_items WHERE round_id = ? ORDER BY position', roundId) as Row[]).map(
     (row): RoundItem => ({
       id: str(row.id),
       roundId: str(row.round_id),
@@ -489,8 +473,8 @@ export function listItems(db: DB, roundId: string): RoundItem[] {
   );
 }
 
-export function getItem(db: DB, id: string): RoundItem | null {
-  const row = db.prepare('SELECT * FROM round_items WHERE id = ?').get(id) as Row | undefined;
+export async function getItem(db: DB, id: string): Promise<RoundItem | null> {
+  const row = await db.get('SELECT * FROM round_items WHERE id = ?', id) as Row | undefined;
   if (!row) return null;
   return {
     id: str(row.id),
@@ -503,10 +487,10 @@ export function getItem(db: DB, id: string): RoundItem | null {
 
 /* ---- Grades ------------------------------------------------------------- */
 
-export function submitGrade(
+export async function submitGrade(
   db: DB,
   args: { itemId: string; graderId: string; verdict: string; note?: string; elapsedMs?: number },
-): Grade {
+): Promise<Grade> {
   const grade: Grade = {
     id: newId(),
     itemId: args.itemId,
@@ -516,43 +500,31 @@ export function submitGrade(
     elapsedMs: args.elapsedMs ?? 0,
     createdAt: now(),
   };
-  db.prepare(
-    `INSERT INTO grades (id, item_id, grader_id, verdict, note, elapsed_ms, created_at)
+  await db.run(`INSERT INTO grades (id, item_id, grader_id, verdict, note, elapsed_ms, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (item_id, grader_id) DO UPDATE SET
        verdict = excluded.verdict, note = excluded.note,
-       elapsed_ms = excluded.elapsed_ms, created_at = excluded.created_at`,
-  ).run(grade.id, grade.itemId, grade.graderId, grade.verdict, grade.note, grade.elapsedMs, grade.createdAt);
+       elapsed_ms = excluded.elapsed_ms, created_at = excluded.created_at`, grade.id, grade.itemId, grade.graderId, grade.verdict, grade.note, grade.elapsedMs, grade.createdAt);
 
-  const stored = db
-    .prepare('SELECT * FROM grades WHERE item_id = ? AND grader_id = ?')
-    .get(args.itemId, args.graderId) as Row;
+  const stored = await db.get('SELECT * FROM grades WHERE item_id = ? AND grader_id = ?', args.itemId, args.graderId) as Row;
   return toGrade(stored);
 }
 
 /** The grader's own grades, and only ever their own. */
-export function gradesForGrader(db: DB, roundId: string, graderId: string): Grade[] {
+export async function gradesForGrader(db: DB, roundId: string, graderId: string): Promise<Grade[]> {
   return (
-    db
-      .prepare(
-        `SELECT g.* FROM grades g
+    await db.all(`SELECT g.* FROM grades g
          JOIN round_items ri ON ri.id = g.item_id
-         WHERE ri.round_id = ? AND g.grader_id = ?`,
-      )
-      .all(roundId, graderId) as Row[]
+         WHERE ri.round_id = ? AND g.grader_id = ?`, roundId, graderId) as Row[]
   ).map(toGrade);
 }
 
-export function allGradesForRound(db: DB, roundId: string): Grade[] {
+export async function allGradesForRound(db: DB, roundId: string): Promise<Grade[]> {
   return (
-    db
-      .prepare(
-        `SELECT g.* FROM grades g
+    await db.all(`SELECT g.* FROM grades g
          JOIN round_items ri ON ri.id = g.item_id
          WHERE ri.round_id = ?
-         ORDER BY ri.position`,
-      )
-      .all(roundId) as Row[]
+         ORDER BY ri.position`, roundId) as Row[]
   ).map(toGrade);
 }
 
@@ -573,19 +545,15 @@ function toGrade(row: Row): Grade {
  * during an open round: knowing that someone finished tells you nothing about
  * what they decided.
  */
-export function roundProgress(db: DB, roundId: string): { graderId: string; name: string; done: number; elapsedMs: number }[] {
+export async function roundProgress(db: DB, roundId: string): Promise<{ graderId: string; name: string; done: number; elapsedMs: number }[]> {
   return (
-    db
-      .prepare(
-        `SELECT g.grader_id AS grader_id, gr.name AS name, COUNT(*) AS done, COALESCE(SUM(g.elapsed_ms), 0) AS elapsed
+    await db.all(`SELECT g.grader_id AS grader_id, gr.name AS name, COUNT(*) AS done, COALESCE(SUM(g.elapsed_ms), 0) AS elapsed
          FROM grades g
          JOIN round_items ri ON ri.id = g.item_id
          JOIN graders gr ON gr.id = g.grader_id
          WHERE ri.round_id = ?
          GROUP BY g.grader_id, gr.name
-         ORDER BY gr.name`,
-      )
-      .all(roundId) as Row[]
+         ORDER BY gr.name`, roundId) as Row[]
   ).map((row) => ({
     graderId: str(row.grader_id),
     name: str(row.name),
@@ -594,9 +562,9 @@ export function roundProgress(db: DB, roundId: string): { graderId: string; name
   }));
 }
 
-export function verdictsForRound(db: DB, roundId: string): ItemVerdicts[] {
-  const items = listItems(db, roundId);
-  const grades = allGradesForRound(db, roundId);
+export async function verdictsForRound(db: DB, roundId: string): Promise<ItemVerdicts[]> {
+  const items = await listItems(db, roundId);
+  const grades = await allGradesForRound(db, roundId);
   const byItem = new Map<string, Record<string, string>>();
   for (const item of items) byItem.set(item.id, {});
   for (const g of grades) {
@@ -607,26 +575,22 @@ export function verdictsForRound(db: DB, roundId: string): ItemVerdicts[] {
 }
 
 /** Graders who actually submitted at least one grade in this round. */
-export function participantsOf(db: DB, roundId: string): Grader[] {
+export async function participantsOf(db: DB, roundId: string): Promise<Grader[]> {
   return (
-    db
-      .prepare(
-        `SELECT DISTINCT gr.* FROM graders gr
+    await db.all(`SELECT DISTINCT gr.* FROM graders gr
          JOIN grades g ON g.grader_id = gr.id
          JOIN round_items ri ON ri.id = g.item_id
          WHERE ri.round_id = ?
-         ORDER BY gr.created_at`,
-      )
-      .all(roundId) as Row[]
+         ORDER BY gr.created_at`, roundId) as Row[]
   ).map(toGrader);
 }
 
 /* ---- Resolutions -------------------------------------------------------- */
 
-export function saveResolution(
+export async function saveResolution(
   db: DB,
   args: { itemId: string; agreedVerdict: string; clauseText: string; rationale?: string; resolvedBy?: string },
-): Resolution {
+): Promise<Resolution> {
   const resolution: Resolution = {
     id: newId(),
     itemId: args.itemId,
@@ -637,41 +601,33 @@ export function saveResolution(
     resolvedBy: args.resolvedBy ?? '',
     createdAt: now(),
   };
-  db.prepare(
-    `INSERT INTO resolutions (id, item_id, agreed_verdict, clause_text, rationale, clause_id, resolved_by, created_at)
+  await db.run(`INSERT INTO resolutions (id, item_id, agreed_verdict, clause_text, rationale, clause_id, resolved_by, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (item_id) DO UPDATE SET
        agreed_verdict = excluded.agreed_verdict, clause_text = excluded.clause_text,
-       rationale = excluded.rationale, resolved_by = excluded.resolved_by, created_at = excluded.created_at`,
-  ).run(
-    resolution.id,
+       rationale = excluded.rationale, resolved_by = excluded.resolved_by, created_at = excluded.created_at`, resolution.id,
     resolution.itemId,
     resolution.agreedVerdict,
     resolution.clauseText,
     resolution.rationale,
     resolution.clauseId,
     resolution.resolvedBy,
-    resolution.createdAt,
-  );
-  const row = db.prepare('SELECT * FROM resolutions WHERE item_id = ?').get(args.itemId) as Row;
+    resolution.createdAt,);
+  const row = await db.get('SELECT * FROM resolutions WHERE item_id = ?', args.itemId) as Row;
   return toResolution(row);
 }
 
-export function resolutionsForRound(db: DB, roundId: string): Resolution[] {
+export async function resolutionsForRound(db: DB, roundId: string): Promise<Resolution[]> {
   return (
-    db
-      .prepare(
-        `SELECT r.* FROM resolutions r
+    await db.all(`SELECT r.* FROM resolutions r
          JOIN round_items ri ON ri.id = r.item_id
          WHERE ri.round_id = ?
-         ORDER BY ri.position`,
-      )
-      .all(roundId) as Row[]
+         ORDER BY ri.position`, roundId) as Row[]
   ).map(toResolution);
 }
 
-export function deleteResolution(db: DB, itemId: string): boolean {
-  const res = db.prepare('DELETE FROM resolutions WHERE item_id = ?').run(itemId);
+export async function deleteResolution(db: DB, itemId: string): Promise<boolean> {
+  const res = await db.run('DELETE FROM resolutions WHERE item_id = ?', itemId);
   return Number(res.changes) > 0;
 }
 
@@ -690,30 +646,26 @@ function toResolution(row: Row): Resolution {
 
 /* ---- Judge -------------------------------------------------------------- */
 
-export function createJudgeRun(
+export async function createJudgeRun(
   db: DB,
   args: { projectId: string; roundId: string; rubricVersionId: string; provider: string; model: string; arm: string },
-): string {
+): Promise<string> {
   const id = newId();
-  db.prepare(
-    `INSERT INTO judge_runs (id, project_id, round_id, rubric_version_id, provider, model, arm, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, args.projectId, args.roundId, args.rubricVersionId, args.provider, args.model, args.arm, now());
+  await db.run(`INSERT INTO judge_runs (id, project_id, round_id, rubric_version_id, provider, model, arm, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, args.projectId, args.roundId, args.rubricVersionId, args.provider, args.model, args.arm, now());
   return id;
 }
 
-export function saveJudgeVerdict(db: DB, runId: string, itemId: string, verdict: string, rationale: string): void {
-  db.prepare('INSERT INTO judge_verdicts (id, run_id, item_id, verdict, rationale) VALUES (?, ?, ?, ?, ?)').run(
-    newId(),
+export async function saveJudgeVerdict(db: DB, runId: string, itemId: string, verdict: string, rationale: string): Promise<void> {
+  await db.run('INSERT INTO judge_verdicts (id, run_id, item_id, verdict, rationale) VALUES (?, ?, ?, ?, ?)', newId(),
     runId,
     itemId,
     verdict,
-    rationale,
-  );
+    rationale,);
 }
 
-export function listJudgeRuns(db: DB, roundId: string) {
-  return (db.prepare('SELECT * FROM judge_runs WHERE round_id = ? ORDER BY created_at').all(roundId) as Row[]).map(
+export async function listJudgeRuns(db: DB, roundId: string) {
+  return (await db.all('SELECT * FROM judge_runs WHERE round_id = ? ORDER BY created_at', roundId) as Row[]).map(
     (row) => ({
       id: str(row.id),
       projectId: str(row.project_id),
@@ -727,8 +679,8 @@ export function listJudgeRuns(db: DB, roundId: string) {
   );
 }
 
-export function judgeVerdicts(db: DB, runId: string) {
-  return (db.prepare('SELECT * FROM judge_verdicts WHERE run_id = ?').all(runId) as Row[]).map((row) => ({
+export async function judgeVerdicts(db: DB, runId: string) {
+  return (await db.all('SELECT * FROM judge_verdicts WHERE run_id = ?', runId) as Row[]).map((row) => ({
     id: str(row.id),
     runId: str(row.run_id),
     itemId: str(row.item_id),

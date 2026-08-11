@@ -18,101 +18,65 @@ npm run dev      # http://localhost:5173
 
 `npm run seed` prints a shared link. Open it.
 
-## Running it for a team
+## Deploying it
 
-One container, one SQLite file on a volume. Deliberately not a cluster — v1 is
-one team and one project, and a single process serving the API and the built
-SPA from the same origin is the whole topology, which is why a shared link works
-with no CORS or session story.
+Frontend and API both run on Vercel; the data lives in Postgres. There is no
+server to keep alive and no disk to look after.
 
-```
-ANTHROPIC_API_KEY=sk-ant-... docker compose up -d --build
-open http://localhost:8787          # create a project, or open the demo
-```
+**1. A Postgres database.** Any provider works; [Neon](https://neon.tech) has a
+free tier. Copy the **pooled** connection string — serverless functions open
+connections quickly and a direct connection runs out of them.
 
-The seed script is a dev-time convenience and is not in the production image;
-create the demo from the home page instead, which hits the same endpoint.
+**2. Import the repo into Vercel** and set two environment variables:
 
-- Data lives on the `grading-room-data` volume at `/data`, never in the image.
-- `/api/health` performs a real read, so a wedged database fails the check.
-  Point your platform's health probe at it.
-- `SIGTERM` finishes in-flight requests before closing the database, so a
-  deploy does not drop a grader's verdict mid-submit. `init: true` in the
-  compose file ensures the signal actually reaches the process.
-- Put it behind TLS. The project key travels in the URL on first open, and the
-  app strips it from the address bar immediately, but the first request carries
-  it.
+| | |
+|---|---|
+| `DATABASE_URL` | the pooled connection string, required |
+| `ANTHROPIC_API_KEY` | optional; without it the judge and the rubric drafter are labelled stubs |
 
-**Backups.** `npm run backup -- backups/2026-08-11.db` uses SQLite's own
-`VACUUM INTO`, which is the difference between a restorable snapshot and one
-missing whatever was in the write-ahead log when you copied the file. Restore by
-pointing `GR_DB` at the backup, or copying it back while stopped.
+`vercel.json` already points the build at the SPA, routes `/api/*` to the single
+function in `api/`, and gives that function the full 60 seconds a judge run
+needs.
 
-### Fly.io
-
-`fly.toml` is checked in.
+**3. Create the schema.**
 
 ```
-fly launch --no-deploy
-fly volumes create grading_room_data --size 1
-fly secrets set ANTHROPIC_API_KEY=sk-ant-...    # optional; enables the real judge
-fly deploy
+DATABASE_URL='postgresql://…' npm run db:migrate
 ```
 
-**Keep it at one machine.** The database is a file on a volume, so two machines
-means two independent databases behind one hostname and graders silently landing
-on different ones. `fly.toml` pins `min_machines_running = 1` and disables
-auto-stop for that reason.
+`openDb()` also runs this on every cold start, so it is not strictly required —
+but running it explicitly means a bad connection string fails here, with a clear
+message, instead of as a 500 on somebody's first request.
 
-Railway and Render work the same way — point them at the `Dockerfile`, mount a
-volume at `/data`, and keep the instance count at one.
+Then open the deployment, create a project, and share the link.
 
-### Running it for free
-
-No mainstream platform offers a free tier with a persistent disk, and this
-app's database is a file. Render's free tier has no disk and idles out; a round
-costs several people half an hour of attention, so losing one is not a minor
-inconvenience. Free therefore means hardware you already control.
-
-**A machine you own, exposed by a tunnel.** Nothing to sign up for, works
-today, and the right answer for a first round with a team.
+### Running it locally
 
 ```
-docker compose up -d --build
-npx cloudflared tunnel --url http://localhost:8787
+npm install
+npm run dev      # API on :8787, UI on :5173
 ```
 
-That prints an HTTPS `*.trycloudflare.com` URL anyone can grade through. The
-database stays on your disk. Caveats worth knowing: the URL changes each time
-you restart the tunnel, and grading stops when your machine sleeps — so start
-it, run the round, and shut it down. A free Cloudflare account plus a domain
-gets you a stable named tunnel if you want to leave it up.
+With no `DATABASE_URL` the app runs on PGlite — Postgres compiled to WASM, held
+in memory. Nothing installed, nothing to start, and the data is gone when you
+stop it. That last part is the point: a local file that looked durable would not
+be the thing production runs on. Set `DATABASE_URL` to point at a real database.
 
-**An always-free VM.** Oracle Cloud's Always Free tier includes an ARM machine
-big enough for this several times over, with real block storage. Install Docker,
-`docker compose up -d`, put Caddy or Cloudflare in front for TLS. Genuinely free
-indefinitely; costs you an afternoon and a card for identity verification, and
-capacity in some regions is scarce.
+### What is not on the queue yet
 
-**Or pay a little.** Fly is roughly a couple of dollars a month for a small
-machine and a 1 GB volume; Render Starter is $7. If the team is real, this is
-the least of the costs involved.
-
-### Not Vercel
-
-Serverless is the wrong shape for this. The filesystem is ephemeral and
-per-invocation, there are no volumes, and this is a long-running process rather
-than a set of functions — so grades would be written to a disk that disappears.
-Making it fit would mean replacing SQLite with hosted Postgres, which turns
-every synchronous store call async and buys nothing for a single-tenant app.
+A judge run grades a whole arm through an LLM, which is the one operation here
+that does not fit inside a request. It runs inline, capped at 40 items, and the
+API refuses a larger batch rather than starting one it cannot finish — a run
+that dies halfway would leave a partial set of verdicts that got scored as
+though it were the whole arm. Lifting the cap means a queue, and that is not
+built.
 
 ## CI
 
-`.github/workflows/ci.yml` runs typecheck, tests and the build, then builds the
-Docker image and smoke-tests it: health probe, SPA served from the same origin,
-a seeded project written to the mounted volume, and a clean `SIGTERM` shutdown.
-The image build is the one thing that cannot be verified from a dev container,
-which is exactly why it runs there.
+`.github/workflows/ci.yml` runs typecheck, tests and the build. A second job
+boots `api/index.ts` — the file Vercel actually invokes — over real HTTP and
+creates a project through it, because the test suite drives the Express app
+directly and would not catch a broken import or a pool rebuilt per request.
 
 ## The loop
 
@@ -212,7 +176,7 @@ labelled, in the UI and in the API response, as not a judge.
 
 ```
 shared/     domain types and pure logic — metrics, splits, sampling, rubric rendering
-server/     Express API over SQLite (node:sqlite, no native deps)
+server/     Express API over Postgres; api/index.ts is the Vercel entry
 web/        React SPA (Vite)
 tests/      vitest — agreement math, split ordering, sampler, API behaviour
 ```
@@ -226,8 +190,8 @@ and the types the UI renders cannot drift.
 |---|---|
 | `npm run dev` | API on :8787, UI on :5173 with a proxy |
 | `npm run seed` | Create the demo project, print its link |
-| `npm run backup -- <path>` | Consistent snapshot of a live database |
-| `npm test` | 78 tests |
+| `npm run db:migrate` | Create or update the schema on `DATABASE_URL` |
+| `npm test` | 114 tests |
 | `npm run typecheck` | `tsc --noEmit` across shared, server, web, tests |
 | `npm run build` | SPA to `dist/web`, server bundle to `dist/server.js` |
 | `npm start` | Serve both from :8787 on one origin |
@@ -236,10 +200,12 @@ and the types the UI renders cannot drift.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `PORT` | `8787` | HTTP port |
-| `GR_DB` | `data/grading-room.db` | SQLite path; `:memory:` works |
-| `ANTHROPIC_API_KEY` | unset | Enables the real judge |
+| `DATABASE_URL` | unset | Postgres. Unset means in-memory PGlite, which is not durable |
+| `PORT` | `8787` | HTTP port, standalone server only |
+| `ANTHROPIC_API_KEY` | unset | Enables the real judge and the real rubric drafter |
 | `GR_JUDGE_MODEL` | `claude-opus-5` | Model for judge runs |
+| `GR_DRAFT_MODEL` | `claude-opus-5` | Model for rubric drafting |
+| `GR_PG_MAX` | `4` | Pool size per serverless instance |
 
 ## Scope
 
@@ -259,8 +225,11 @@ Known limits of this version, stated rather than managed away:
   something about it", tracked by provenance. It is not a semantic match.
 - Round-two sampling is splits-then-random. It is not a boundary-seeking
   sampler and does not claim to be.
-- One instance serves one team. There are no accounts and no tenancy, so
-  running it for several teams means running several containers.
-- The Dockerfile is unverified in CI — it was written against a verified
-  production run (`node dist/server.js`, health, graceful shutdown, backup and
-  restore all exercised) but the image build itself has not been executed.
+- The shared link is still the only tenancy. Every project in one deployment
+  sits in one database, separated by an unguessable slug and token and nothing
+  else. Accounts are meant to come from Clerk; see `ARCHITECTURE.md`.
+- Judge runs are capped at 40 items because they run inside the request. A
+  queue is the fix and is not built.
+- The deployment has been verified against PGlite — real Postgres, compiled to
+  WASM — and through the serverless entry over HTTP, but not yet against a
+  hosted Neon database on Vercel itself.

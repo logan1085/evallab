@@ -1,12 +1,12 @@
 # Where this is going
 
-The product shipped in this repo is single-tenant and self-hosted: one team, one
-SQLite file, a shared link as the only credential. That was the right shape for
-an eval lead who can run a container.
+This started single-tenant and self-hosted: one team, one SQLite file, a shared
+link as the only credential. That was the right shape for an eval lead who can
+run a container, and the wrong one for the teams we are aiming at — who have no
+evals yet and nobody who will run Docker.
 
-It is the wrong shape for the users we are now aiming at — teams who have no
-evals yet and nobody who will run Docker. This file records the decisions that
-follow from that, so the rebuild happens once.
+This file records the decisions that followed, and marks which are done. The
+data layer and the hosting are; identity and the judge queue are not.
 
 The flow these decisions serve is prototyped, clickable, at
 `prototype/flow.html` — eight screens, nothing wired up.
@@ -26,20 +26,25 @@ is a thin mapping — a project carries a Clerk organization id, a grader carrie
 Clerk user id — and roles are read from Clerk membership. Until then the existing
 shared-link model stands.
 
-**Postgres, not SQLite.** Forced twice over — by serverless (no local disk) and
-by multi-tenancy (one file per instance is a single point of failure with no
-horizontal scale). Every store function becomes async, and `PRAGMA` /
-`VACUUM INTO` / the backup script are replaced by the provider's tooling. Tests
-use PGlite, which is Postgres compiled to WASM and runs in-process, so the suite
-stays fast and needs no server.
+**Postgres, not SQLite.** *Done.* Forced twice over — by serverless (no local
+disk) and by multi-tenancy. Every store function is async; `PRAGMA`,
+`VACUUM INTO` and the backup script are gone, replaced by the provider's
+tooling. Tests use PGlite, which is Postgres compiled to WASM and runs
+in-process, so the suite needs no server. Sharing one instance per test file
+rather than per test kept it at fourteen seconds instead of ninety.
 
-**Frontend and API both on Vercel; Neon Postgres.** Use Neon's pooled
-connection string — serverless functions exhaust a normal Postgres connection
-limit quickly.
+**Frontend and API both on Vercel; Neon Postgres.** *Done.* `api/index.ts` is
+the single function; `vercel.json` routes `/api/*` to it and everything else to
+the SPA. The pool and the app are built once per instance, not once per request.
+Use Neon's pooled connection string — serverless functions exhaust a normal
+connection limit quickly.
 
-**Judge runs go on a queue.** A judge batch grades ~20 traces through an LLM,
-which takes minutes and cannot complete inside a serverless function's timeout.
-This is the one part of the system that does not fit request/response.
+**Judge runs go on a queue.** *Not done.* A judge batch grades a whole arm
+through an LLM, which is the one operation that does not fit request/response.
+The interim is a hard cap of 40 items and a refusal above it: a run that dies
+halfway leaves a partial set of verdicts that would be scored as though it were
+the whole arm, and reporting agreement over the items that happened to finish
+first is exactly the kind of unearned number this product exists to prevent.
 
 **Plain language everywhere.** No *held-out arm*, *calibration*, or
 *Krippendorff's alpha* in the interface. "The held-back conversations." "How
@@ -47,13 +52,17 @@ often your team agrees." The honesty guards have to survive the translation —
 small-sample caveats and the refusal to compare incomparable rounds are the
 product, not jargon around it.
 
-## What has to be rebuilt, and what does not
+## What moved, and what did not
 
 `shared/` is pure logic — agreement maths, split classification, sampling,
-rubric rendering — with 45 tests and no database access. It is untouched by any
-of this. That is most of the value in the test suite.
+rubric rendering, drafting — with no database access. The port did not touch a
+line of it, which is most of the value in the test suite and the reason the
+statistics were never at risk.
 
-`server/store.ts` and `server/app.ts` get rewritten for async Postgres.
+`server/store.ts` and `server/app.ts` are now async over Postgres. The store
+still writes `?` placeholders and `db.ts` rewrites them to `$1..$n`, so the port
+was one adapter plus a mechanical change at the call sites rather than a rewrite
+of every query string.
 
 ## Tenancy model
 
@@ -91,9 +100,8 @@ criterion; if the examples do not decide it, it goes in the open questions. The
 draft is never written on acceptance by the model, only by a human, and a
 drafted rubric is labelled as never having been read by a second person.
 
-Built in `shared/drafting.ts` (pure) and `server/drafter.ts` (providers), on
-SQLite. It ports to Postgres with the two new columns on `rubric_versions` and
-nothing else.
+Built in `shared/drafting.ts` (pure) and `server/drafter.ts` (providers), and
+carried through the Postgres port on two columns of `rubric_versions`.
 
 ## Still open
 

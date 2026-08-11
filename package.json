@@ -2,10 +2,10 @@
   "name": "grading-room",
   "version": "1.0.0",
   "private": true,
-  "description": "The Grading Room — a calibration layer for teams whose ground truth comes from human judgment.",
+  "description": "The Grading Room \u2014 a calibration layer for teams whose ground truth comes from human judgment.",
   "type": "module",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=20"
   },
   "scripts": {
     "dev": "concurrently -n server,web -c magenta,cyan \"npm:dev:server\" \"npm:dev:web\"",
@@ -16,10 +16,10 @@
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/server.js",
     "start": "node dist/server.js",
     "seed": "tsx server/scripts/seed-cli.ts",
-    "backup": "tsx server/scripts/backup-cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsx server/scripts/migrate-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

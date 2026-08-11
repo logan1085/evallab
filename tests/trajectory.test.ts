@@ -7,13 +7,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { createApp } from '../server/app.js';
-import { openDb, type DB } from '../server/db.js';
+import type { DB } from '../server/db.js';
+import { testDb } from './helpers.js';
 
 let db: DB;
 let app: Express;
 
-beforeEach(() => {
-  db = openDb(':memory:');
+beforeEach(async () => {
+  db = await testDb();
   app = createApp(db);
 });
 

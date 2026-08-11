@@ -1,19 +1,36 @@
-import { mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { createRequire } from 'node:module';
+/**
+ * Postgres, behind a deliberately small interface.
+ *
+ * The product ran on a SQLite file until it needed to run on Vercel, where
+ * there is no disk to keep one on: functions are ephemeral and a request can
+ * land on any machine. Postgres is forced by that, and then forced again by
+ * multi-tenancy, where one file per instance is a single point of failure.
+ *
+ * Two drivers sit behind the same four methods. Production uses a `pg` pool
+ * against Neon; tests use PGlite, which is Postgres compiled to WASM and runs
+ * in-process — so the suite exercises real Postgres semantics without a server
+ * to start or a container to wait on.
+ *
+ * The interface keeps `?` placeholders and rewrites them to `$1..$n` on the way
+ * through. That is not laziness about SQL dialects: it kept the port to this
+ * file plus a mechanical change at the call sites, instead of touching every
+ * query string in the store and risking a typo in each one.
+ */
+
 import { randomBytes, randomUUID } from 'node:crypto';
 
-// Loaded through createRequire rather than a static import: bundlers whose
-// builtin list predates Node 22 try to resolve `node:sqlite` from disk and fail.
-const require = createRequire(import.meta.url);
-const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+export type Row = Record<string, unknown>;
 
-export type DB = InstanceType<typeof DatabaseSync>;
+export interface DB {
+  get<T = Row>(sql: string, ...params: unknown[]): Promise<T | undefined>;
+  all<T = Row>(sql: string, ...params: unknown[]): Promise<T[]>;
+  run(sql: string, ...params: unknown[]): Promise<{ changes: number }>;
+  /** Multi-statement DDL. No parameters. */
+  exec(sql: string): Promise<void>;
+  close(): Promise<void>;
+}
 
 const SCHEMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS projects (
   id          TEXT PRIMARY KEY,
   slug        TEXT NOT NULL UNIQUE,
@@ -137,47 +154,121 @@ CREATE TABLE IF NOT EXISTS judge_verdicts (
 CREATE INDEX IF NOT EXISTS idx_judge_verdicts_run ON judge_verdicts(run_id);
 `;
 
-export function openDb(file = process.env.GR_DB ?? 'data/grading-room.db'): DB {
-  if (file !== ':memory:') mkdirSync(dirname(resolve(file)), { recursive: true });
-  const db = new DatabaseSync(file);
-  db.exec(SCHEMA);
-  migrate(db);
-  if (file !== ':memory:') {
-    // A round has several people submitting grades at once. WAL plus a wait —
-    // rather than an immediate SQLITE_BUSY — is the difference between a slow
-    // write and a grader losing a verdict they thought they had saved.
-    db.exec('PRAGMA busy_timeout = 5000');
-    db.exec('PRAGMA synchronous = NORMAL');
+/**
+ * Columns added after the first release. `ADD COLUMN IF NOT EXISTS` makes this
+ * safe to run on every boot, which matters on a platform that may start a new
+ * instance for any request.
+ */
+const MIGRATIONS = `
+ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
+`;
+
+/** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */
+export function toPositional(sql: string): string {
+  let out = '';
+  let n = 0;
+  let quote: string | null = null;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]!;
+    if (quote) {
+      out += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    out += ch === '?' ? `$${++n}` : ch;
   }
+  return out;
+}
+
+/* ---- Drivers ------------------------------------------------------------ */
+
+interface QueryResult {
+  rows: Row[];
+  changes: number;
+}
+
+function adapt(query: (sql: string, params: unknown[]) => Promise<QueryResult>, close: () => Promise<void>): DB {
+  return {
+    async get<T>(sql: string, ...params: unknown[]) {
+      const { rows } = await query(toPositional(sql), params);
+      return rows[0] as T | undefined;
+    },
+    async all<T>(sql: string, ...params: unknown[]) {
+      const { rows } = await query(toPositional(sql), params);
+      return rows as T[];
+    },
+    async run(sql: string, ...params: unknown[]) {
+      const { changes } = await query(toPositional(sql), params);
+      return { changes };
+    },
+    async exec(sql: string) {
+      await query(sql, []);
+    },
+    close,
+  };
+}
+
+async function pgliteDb(): Promise<DB> {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const lite = new PGlite();
+  return adapt(
+    async (sql, params) => {
+      // PGlite runs one statement per query(); exec() takes a whole script.
+      if (params.length === 0 && sql.includes(';')) {
+        await lite.exec(sql);
+        return { rows: [], changes: 0 };
+      }
+      const res = await lite.query(sql, params as never[]);
+      return { rows: (res.rows ?? []) as Row[], changes: res.affectedRows ?? 0 };
+    },
+    async () => {
+      await lite.close();
+    },
+  );
+}
+
+async function poolDb(connectionString: string): Promise<DB> {
+  const pg = await import('pg');
+  const pool = new pg.default.Pool({
+    connectionString,
+    // Serverless functions open connections fast and hold them briefly; a
+    // small ceiling per instance is what keeps the pooler from running out.
+    max: Number(process.env.GR_PG_MAX ?? 4),
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+  });
+  return adapt(
+    async (sql, params) => {
+      const res = await pool.query(sql, params);
+      return { rows: res.rows as Row[], changes: res.rowCount ?? 0 };
+    },
+    () => pool.end(),
+  );
+}
+
+/**
+ * `:memory:` and an unset DATABASE_URL both mean PGlite. The second is the
+ * developer default: `npm run dev` works with nothing installed, and the data
+ * is gone on restart — which is the honest behaviour, rather than a file that
+ * looks durable and is not the thing production runs on.
+ */
+export async function openDb(url = process.env.DATABASE_URL ?? ':memory:'): Promise<DB> {
+  const db = url === ':memory:' ? await pgliteDb() : await poolDb(url);
+  await ensureSchema(db);
   return db;
 }
 
-/**
- * Columns added after the first release.
- *
- * `CREATE TABLE IF NOT EXISTS` is a no-op against a database that already has
- * the table, so a new column in SCHEMA never reaches an existing file. Adding it
- * here keeps a running deployment working across an upgrade instead of failing
- * on the first query that mentions the column.
- */
-function migrate(db: DB): void {
-  addColumn(db, 'rubric_versions', 'open_questions', "TEXT NOT NULL DEFAULT '[]'");
-  addColumn(db, 'rubric_versions', 'drafted_from', 'TEXT');
-}
-
-function addColumn(db: DB, table: string, column: string, ddl: string): void {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
-  if (columns.some((c) => c.name === column)) return;
-  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
-}
-
-/**
- * Consistent on-disk copy while the server is running. SQLite's own backup
- * command handles the WAL correctly; copying the .db file by hand does not.
- */
-export function backupTo(db: DB, destination: string): void {
-  mkdirSync(dirname(resolve(destination)), { recursive: true });
-  db.prepare('VACUUM INTO ?').run(resolve(destination));
+/** Idempotent by construction, so it is safe on every cold start. */
+export async function ensureSchema(db: DB): Promise<void> {
+  await db.exec(SCHEMA);
+  await db.exec(MIGRATIONS);
 }
 
 export function newId(prefix = ''): string {

@@ -34,11 +34,17 @@ import {
   renderRubricMarkdown,
   splitsOf,
   type Project,
-} from '@shared/index.js';
+} from '../shared/index.js';
 
 interface ProjectRequest extends Request {
   project: Project;
 }
+
+/**
+ * Items a single judge run will grade. Sized to finish inside a serverless
+ * function's 60s ceiling at four concurrent calls; a real queue lifts it.
+ */
+export const MAX_JUDGE_BATCH = 40;
 
 export function createApp(db: DB) {
   const app = express();
@@ -47,9 +53,9 @@ export function createApp(db: DB) {
   const api = express.Router();
 
   /** Liveness plus a real read, so a wedged database fails the check. */
-  api.get('/health', (_req, res) => {
+  api.get('/health', async (_req, res) => {
     try {
-      db.prepare('SELECT 1 AS ok').get();
+      await db.get('SELECT 1 AS ok');
       res.json({ ok: true, judge: resolveProvider().id });
     } catch (error) {
       res.status(503).json({ ok: false, error: error instanceof Error ? error.message : 'database unavailable' });
@@ -58,9 +64,9 @@ export function createApp(db: DB) {
 
   /* ---- Project scoping -------------------------------------------------- */
 
-  function requireProject(req: Request, res: Response, next: NextFunction) {
+  async function requireProject(req: Request, res: Response, next: NextFunction) {
     const slug = req.params.slug!;
-    const project = store.getProjectBySlug(db, slug);
+    const project = await store.getProjectBySlug(db, slug);
     if (!project) return res.status(404).json({ error: 'No project with that link.' });
 
     const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
@@ -72,10 +78,10 @@ export function createApp(db: DB) {
   }
 
   /** Round routes are reached by round id, so the project is resolved from the round. */
-  function requireRound(req: Request, res: Response, next: NextFunction) {
-    const round = store.getRound(db, req.params.roundId!);
+  async function requireRound(req: Request, res: Response, next: NextFunction) {
+    const round = await store.getRound(db, req.params.roundId!);
     if (!round) return res.status(404).json({ error: 'No such round.' });
-    const project = store.getProjectBySlug(db, store.getProjectSlug(db, round.projectId) ?? '');
+    const project = await store.getProjectBySlug(db, await store.getProjectSlug(db, round.projectId) ?? '');
     if (!project) return res.status(404).json({ error: 'No such project.' });
 
     const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
@@ -88,16 +94,16 @@ export function createApp(db: DB) {
 
   /* ---- Projects --------------------------------------------------------- */
 
-  api.post('/projects', (req, res) => {
+  api.post('/projects', async (req, res) => {
     const body = z.object({ name: z.string().min(1).max(120) }).safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'A project name is required.' });
 
-    const project = store.createProject(db, {
+    const project = await store.createProject(db, {
       slug: newSlug(body.data.name),
       token: newToken(),
       name: body.data.name,
     });
-    const rubric = store.createRubricVersion(db, {
+    const rubric = await store.createRubricVersion(db, {
       projectId: project.id,
       name: 'Untitled rubric',
       preamble: '',
@@ -107,27 +113,29 @@ export function createApp(db: DB) {
     res.status(201).json({ project, rubric });
   });
 
-  api.post('/projects/demo', (req, res) => {
+  api.post('/projects/demo', async (req, res) => {
     const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : undefined;
-    const seeded = seedDemoProject(db, name);
+    const seeded = await seedDemoProject(db, name);
     res.status(201).json(seeded);
   });
 
-  api.get('/projects/:slug', requireProject, (req, res) => {
+  api.get('/projects/:slug', requireProject, async (req, res) => {
     const { project } = req as ProjectRequest;
     res.json({
       project,
-      rubric: store.currentRubric(db, project.id),
-      traceCount: store.listTraces(db, project.id).length,
-      graders: store.listGraders(db, project.id),
-      rounds: store.listRounds(db, project.id).map((round) => ({
-        ...round,
-        items: store.listItems(db, round.id).length,
-        samplingNote: store.roundSamplingNote(db, round.id),
-        // Each round pins its own rubric version, so this has to come from the
-        // round rather than from whatever the current version happens to be.
-        rubricVersion: store.getRubric(db, round.rubricVersionId)?.version ?? null,
-      })),
+      rubric: await store.currentRubric(db, project.id),
+      traceCount: (await store.listTraces(db, project.id)).length,
+      graders: await store.listGraders(db, project.id),
+      rounds: await Promise.all(
+        (await store.listRounds(db, project.id)).map(async (round) => ({
+          ...round,
+          items: (await store.listItems(db, round.id)).length,
+          samplingNote: await store.roundSamplingNote(db, round.id),
+          // Each round pins its own rubric version, so this has to come from the
+          // round rather than from whatever the current version happens to be.
+          rubricVersion: (await store.getRubric(db, round.rubricVersionId))?.version ?? null,
+        })),
+      ),
     });
   });
 
@@ -142,17 +150,18 @@ export function createApp(db: DB) {
    * either and the delta is measuring something else, so it is reported as
    * incomparable rather than plotted.
    */
-  api.get('/projects/:slug/trajectory', requireProject, (req, res) => {
+  api.get('/projects/:slug/trajectory', requireProject, async (req, res) => {
     const { project } = req as ProjectRequest;
-    const closed = store.listRounds(db, project.id).filter((r) => r.status === 'closed');
+    const closed = (await store.listRounds(db, project.id)).filter((r) => r.status === 'closed');
 
-    const points = closed.map((round) => {
-      const rubric = store.getRubric(db, round.rubricVersionId);
+    const points = await Promise.all(
+      closed.map(async (round) => {
+      const rubric = await store.getRubric(db, round.rubricVersionId);
       const scale = rubric?.scale ?? DEFAULT_SCALE;
-      const graders = store.participantsOf(db, round.id);
+      const graders = await store.participantsOf(db, round.id);
       const graderIds = graders.map((g) => g.id);
-      const verdicts = store.verdictsForRound(db, round.id);
-      const items = store.listItems(db, round.id);
+      const verdicts = await store.verdictsForRound(db, round.id);
+      const items = await store.listItems(db, round.id);
 
       const idsFor = (arm: 'calibration' | 'heldout') =>
         new Set(items.filter((i) => i.arm === arm).map((i) => i.id));
@@ -165,8 +174,8 @@ export function createApp(db: DB) {
         };
       };
 
-      const rows = buildSplitReport(verdicts, itemContexts(db, round.id), scale);
-      const resolutions = store.resolutionsForRound(db, round.id);
+      const rows = buildSplitReport(verdicts, await itemContexts(db, round.id), scale);
+      const resolutions = await store.resolutionsForRound(db, round.id);
 
       return {
         roundId: round.id,
@@ -188,8 +197,9 @@ export function createApp(db: DB) {
           .map((i) => i.traceId)
           .sort()
           .join('|'),
-      };
-    });
+        };
+      }),
+    );
 
     const series = points.map((point, i) => {
       const previous = i > 0 ? points[i - 1]! : null;
@@ -232,11 +242,11 @@ export function createApp(db: DB) {
 
   /* ---- Traces ----------------------------------------------------------- */
 
-  api.get('/projects/:slug/traces', requireProject, (req, res) => {
-    res.json({ traces: store.listTraces(db, (req as ProjectRequest).project.id) });
+  api.get('/projects/:slug/traces', requireProject, async (req, res) => {
+    res.json({ traces: await store.listTraces(db, (req as ProjectRequest).project.id) });
   });
 
-  api.post('/projects/:slug/traces', requireProject, (req, res) => {
+  api.post('/projects/:slug/traces', requireProject, async (req, res) => {
     const body = z
       .object({
         traces: z
@@ -253,11 +263,11 @@ export function createApp(db: DB) {
       .safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'Each trace needs content.' });
 
-    const traces = store.addTraces(db, (req as ProjectRequest).project.id, body.data.traces);
+    const traces = await store.addTraces(db, (req as ProjectRequest).project.id, body.data.traces);
     res.status(201).json({ traces });
   });
 
-  api.post('/projects/:slug/traces/import', requireProject, (req, res) => {
+  api.post('/projects/:slug/traces/import', requireProject, async (req, res) => {
     const body = z
       .object({ format: z.enum(['jsonl', 'csv', 'paste']), body: z.string().min(1) })
       .safeParse(req.body);
@@ -271,7 +281,7 @@ export function createApp(db: DB) {
       });
     }
 
-    const traces = store.addTraces(
+    const traces = await store.addTraces(
       db,
       (req as ProjectRequest).project.id,
       parsed.traces.map((t) => ({ ...t, source: body.data.format })),
@@ -279,15 +289,15 @@ export function createApp(db: DB) {
     res.status(201).json({ traces, skipped: parsed.skipped });
   });
 
-  api.delete('/projects/:slug/traces/:traceId', requireProject, (req, res) => {
-    const ok = store.deleteTrace(db, (req as ProjectRequest).project.id, req.params.traceId!);
+  api.delete('/projects/:slug/traces/:traceId', requireProject, async (req, res) => {
+    const ok = await store.deleteTrace(db, (req as ProjectRequest).project.id, req.params.traceId!);
     res.status(ok ? 204 : 404).end();
   });
 
   /* ---- Rubric ----------------------------------------------------------- */
 
-  api.get('/projects/:slug/rubrics', requireProject, (req, res) => {
-    res.json({ rubrics: store.listRubrics(db, (req as ProjectRequest).project.id) });
+  api.get('/projects/:slug/rubrics', requireProject, async (req, res) => {
+    res.json({ rubrics: await store.listRubrics(db, (req as ProjectRequest).project.id) });
   });
 
   /**
@@ -312,7 +322,7 @@ export function createApp(db: DB) {
     const usedTraceIds: string[] = [];
 
     for (const traceId of body.data.traceIds ?? []) {
-      const trace = store.getTrace(db, traceId);
+      const trace = await store.getTrace(db, traceId);
       // Scoped by hand: getTrace is keyed on the trace id alone, so without this
       // a valid link to one project could draft from another project's traces.
       if (!trace || trace.projectId !== project.id) {
@@ -355,7 +365,7 @@ export function createApp(db: DB) {
     }
   });
 
-  api.put('/projects/:slug/rubric', requireProject, (req, res) => {
+  api.put('/projects/:slug/rubric', requireProject, async (req, res) => {
     const body = z
       .object({
         name: z.string().min(1).max(160),
@@ -386,14 +396,14 @@ export function createApp(db: DB) {
     if (!body.success) return res.status(400).json({ error: 'A rubric needs a name and at least two verdict levels.' });
 
     const { project } = req as ProjectRequest;
-    const current = store.currentRubric(db, project.id);
+    const current = await store.currentRubric(db, project.id);
     if (!current) return res.status(404).json({ error: 'This project has no rubric yet.' });
 
     // A version a round has already pinned is immutable — otherwise a closed
     // round's numbers would silently start referring to a rubric nobody graded
     // against. Editing one forks a new version instead.
-    if (store.rubricIsPinned(db, current.id)) {
-      const forked = store.createRubricVersion(db, {
+    if (await store.rubricIsPinned(db, current.id)) {
+      const forked = await store.createRubricVersion(db, {
         projectId: project.id,
         name: body.data.name,
         preamble: body.data.preamble,
@@ -411,14 +421,14 @@ export function createApp(db: DB) {
       return res.json({ rubric: forked, forked: true });
     }
 
-    const updated = store.updateRubricInPlace(db, current.id, body.data);
+    const updated = await store.updateRubricInPlace(db, current.id, body.data);
     res.json({ rubric: updated, forked: false });
   });
 
-  api.get('/rubrics/:rubricId/export', (req, res) => {
-    const rubric = store.getRubric(db, req.params.rubricId!);
+  api.get('/rubrics/:rubricId/export', async (req, res) => {
+    const rubric = await store.getRubric(db, req.params.rubricId!);
     if (!rubric) return res.status(404).json({ error: 'No such rubric version.' });
-    const project = store.getProjectById(db, rubric.projectId);
+    const project = await store.getProjectById(db, rubric.projectId);
     const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
     if (!project || token !== project.token) return res.status(403).json({ error: 'Wrong or missing key.' });
 
@@ -439,15 +449,15 @@ export function createApp(db: DB) {
 
   /* ---- Graders ---------------------------------------------------------- */
 
-  api.post('/projects/:slug/graders', requireProject, (req, res) => {
+  api.post('/projects/:slug/graders', requireProject, async (req, res) => {
     const body = z.object({ name: z.string().min(1).max(60) }).safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'Enter a name so your grades can be told apart.' });
-    res.status(201).json({ grader: store.upsertGrader(db, (req as ProjectRequest).project.id, body.data.name) });
+    res.status(201).json({ grader: await store.upsertGrader(db, (req as ProjectRequest).project.id, body.data.name) });
   });
 
   /* ---- Rounds ----------------------------------------------------------- */
 
-  api.post('/projects/:slug/rounds', requireProject, (req, res) => {
+  api.post('/projects/:slug/rounds', requireProject, async (req, res) => {
     const body = z
       .object({
         name: z.string().default(''),
@@ -462,10 +472,10 @@ export function createApp(db: DB) {
     if (!body.success) return res.status(400).json({ error: 'A round needs a calibration size.' });
 
     const { project } = req as ProjectRequest;
-    const rubric = store.currentRubric(db, project.id);
+    const rubric = await store.currentRubric(db, project.id);
     if (!rubric) return res.status(400).json({ error: 'Write a rubric before running a round.' });
 
-    const traces = store.listTraces(db, project.id);
+    const traces = await store.listTraces(db, project.id);
     if (traces.length === 0) return res.status(400).json({ error: 'Add some traces before running a round.' });
 
     const wanted = body.data.calibrationSize + body.data.heldoutSize;
@@ -479,19 +489,18 @@ export function createApp(db: DB) {
     let reuseHeldoutTraceIds: string[] | undefined;
 
     if (body.data.strategy === 'from_splits') {
-      const source = body.data.sourceRoundId ? store.getRound(db, body.data.sourceRoundId) : null;
+      const source = body.data.sourceRoundId ? await store.getRound(db, body.data.sourceRoundId) : null;
       if (!source || source.projectId !== project.id) {
         return res.status(400).json({ error: 'Pick a previous round to draw splits from.' });
       }
       if (source.status !== 'closed') {
         return res.status(400).json({ error: 'The source round is still open, so its splits are not final.' });
       }
-      const report = reportRows(db, source.id, rubric.scale);
+      const report = await reportRows(db, source.id, rubric.scale);
       priorSplitTraceIds = splitsOf(report).map((r) => r.traceId);
 
       if (body.data.reuseHeldout) {
-        reuseHeldoutTraceIds = store
-          .listItems(db, source.id)
+        reuseHeldoutTraceIds = (await store.listItems(db, source.id))
           .filter((item) => item.arm === 'heldout')
           .map((item) => item.traceId);
       }
@@ -511,7 +520,7 @@ export function createApp(db: DB) {
       seed,
     });
 
-    const { round, items } = store.createRound(db, {
+    const { round, items } = await store.createRound(db, {
       projectId: project.id,
       rubricVersionId: rubric.id,
       name: body.data.name,
@@ -531,12 +540,12 @@ export function createApp(db: DB) {
     });
   });
 
-  api.get('/rounds/:roundId', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
-    const items = store.listItems(db, round.id);
+  api.get('/rounds/:roundId', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const items = await store.listItems(db, round.id);
     res.json({
       round,
-      samplingNote: store.roundSamplingNote(db, round.id),
+      samplingNote: await store.roundSamplingNote(db, round.id),
       itemCount: items.length,
       arms: {
         calibration: items.filter((i) => i.arm === 'calibration').length,
@@ -544,8 +553,8 @@ export function createApp(db: DB) {
       },
       attention: attentionEstimate(items.length),
       // Counts only. Who has finished is not a verdict, so this is safe while open.
-      progress: store.roundProgress(db, round.id),
-      rubric: store.getRubric(db, round.rubricVersionId),
+      progress: await store.roundProgress(db, round.id),
+      rubric: await store.getRubric(db, round.rubricVersionId),
     });
   });
 
@@ -554,17 +563,18 @@ export function createApp(db: DB) {
    * other grader appears in this payload at all, so there is nothing to anchor
    * on even if the client is modified.
    */
-  api.get('/rounds/:roundId/queue', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
+  api.get('/rounds/:roundId/queue', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     const graderId = String(req.query.graderId ?? '');
-    const grader = store.getGrader(db, graderId);
+    const grader = await store.getGrader(db, graderId);
     if (!grader || grader.projectId !== round.projectId) {
       return res.status(400).json({ error: 'Join the round with a name first.' });
     }
 
-    const mine = new Map(store.gradesForGrader(db, round.id, graderId).map((g) => [g.itemId, g]));
-    const items = store.listItems(db, round.id).map((item) => {
-      const trace = store.getTrace(db, item.traceId);
+    const mine = new Map((await store.gradesForGrader(db, round.id, graderId)).map((g) => [g.itemId, g]));
+    const items = await Promise.all(
+      (await store.listItems(db, round.id)).map(async (item) => {
+      const trace = await store.getTrace(db, item.traceId);
       const own = mine.get(item.id);
       return {
         itemId: item.id,
@@ -576,12 +586,13 @@ export function createApp(db: DB) {
         meta: trace?.meta ?? {},
         myVerdict: own?.verdict ?? null,
         myNote: own?.note ?? '',
-      };
-    });
+        };
+      }),
+    );
 
     res.json({
       round: { id: round.id, name: round.name, status: round.status },
-      rubric: store.getRubric(db, round.rubricVersionId),
+      rubric: await store.getRubric(db, round.rubricVersionId),
       grader,
       items,
       done: items.filter((i) => i.myVerdict).length,
@@ -589,8 +600,8 @@ export function createApp(db: DB) {
     });
   });
 
-  api.post('/rounds/:roundId/grades', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
+  api.post('/rounds/:roundId/grades', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status === 'closed') {
       return res.status(409).json({ error: 'This round is closed. Its report is visible, so it cannot take new grades.' });
     }
@@ -606,55 +617,55 @@ export function createApp(db: DB) {
       .safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'A grade needs a grader, an item, and a verdict.' });
 
-    const grader = store.getGrader(db, body.data.graderId);
+    const grader = await store.getGrader(db, body.data.graderId);
     if (!grader || grader.projectId !== round.projectId) {
       return res.status(403).json({ error: 'That grader does not belong to this project.' });
     }
 
-    const item = store.getItem(db, body.data.itemId);
+    const item = await store.getItem(db, body.data.itemId);
     if (!item || item.roundId !== round.id) return res.status(404).json({ error: 'That item is not in this round.' });
 
-    const rubric = store.getRubric(db, round.rubricVersionId);
+    const rubric = await store.getRubric(db, round.rubricVersionId);
     const allowed = new Set([...(rubric?.scale ?? DEFAULT_SCALE).map((s) => s.id), ABSTAIN]);
     if (!allowed.has(body.data.verdict)) return res.status(400).json({ error: 'That verdict is not on this scale.' });
 
-    const grade = store.submitGrade(db, body.data);
-    const done = store.gradesForGrader(db, round.id, body.data.graderId).length;
-    res.json({ grade, done, total: store.listItems(db, round.id).length });
+    const grade = await store.submitGrade(db, body.data);
+    const done = (await store.gradesForGrader(db, round.id, body.data.graderId)).length;
+    res.json({ grade, done, total: (await store.listItems(db, round.id)).length });
   });
 
-  api.post('/rounds/:roundId/close', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
-    const participants = store.participantsOf(db, round.id);
+  api.post('/rounds/:roundId/close', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const participants = await store.participantsOf(db, round.id);
     if (participants.length < 2) {
       return res.status(400).json({
         error: 'A round needs at least two graders before it can be closed — agreement is not defined for one.',
       });
     }
-    res.json({ round: store.closeRound(db, round.id) });
+    res.json({ round: await store.closeRound(db, round.id) });
   });
 
   /** The report, and the only place another grader's verdict is ever returned. */
-  api.get('/rounds/:roundId/report', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
+  api.get('/rounds/:roundId/report', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') {
       return res.status(409).json({
         error: 'This round is still open. Verdicts stay hidden until it closes — that is what makes the number mean anything.',
       });
     }
 
-    const rubric = store.getRubric(db, round.rubricVersionId);
+    const rubric = await store.getRubric(db, round.rubricVersionId);
     const scale = rubric?.scale ?? DEFAULT_SCALE;
-    const graders = store.participantsOf(db, round.id);
+    const graders = await store.participantsOf(db, round.id);
     const graderIds = graders.map((g) => g.id);
-    const verdicts = store.verdictsForRound(db, round.id);
-    const allRows = buildSplitReport(verdicts, itemContexts(db, round.id), scale);
+    const verdicts = await store.verdictsForRound(db, round.id);
+    const allRows = buildSplitReport(verdicts, await itemContexts(db, round.id), scale);
 
     // A trace that is also sitting in a round somebody is still grading has its
     // verdicts withheld here. Otherwise reusing a held-out set — which is how
     // before-and-after is measured on the same cases — would hand the later
     // round's graders last round's answers.
-    const embargoed = traceIdsInOpenRounds(db, round.projectId, round.id);
+    const embargoed = await traceIdsInOpenRounds(db, round.projectId, round.id);
     const rows = allRows.map((row) =>
       embargoed.has(row.traceId) ? { ...row, byGrader: {}, embargoed: true } : row,
     );
@@ -682,7 +693,7 @@ export function createApp(db: DB) {
       round,
       rubric,
       graders,
-      samplingNote: store.roundSamplingNote(db, round.id),
+      samplingNote: await store.roundSamplingNote(db, round.id),
       rows,
       clusters: clusterSplits(resolvable),
       splitCount: splitsOf(resolvable).length,
@@ -694,17 +705,17 @@ export function createApp(db: DB) {
       },
       calibration: byArm('calibration'),
       heldout: byArm('heldout'),
-      resolutions: store.resolutionsForRound(db, round.id),
-      notes: store
-        .allGradesForRound(db, round.id)
-        .filter((g) => g.note.trim() && !embargoedItemIds.has(g.itemId)),
+      resolutions: await store.resolutionsForRound(db, round.id),
+      notes: (await store.allGradesForRound(db, round.id)).filter(
+        (g) => g.note.trim() && !embargoedItemIds.has(g.itemId),
+      ),
     });
   });
 
   /* ---- Resolutions and shipping ----------------------------------------- */
 
-  api.post('/rounds/:roundId/items/:itemId/resolve', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
+  api.post('/rounds/:roundId/items/:itemId/resolve', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') {
       return res.status(409).json({ error: 'Resolve splits after the round closes, not during it.' });
     }
@@ -723,7 +734,7 @@ export function createApp(db: DB) {
       });
     }
 
-    const item = store.getItem(db, req.params.itemId!);
+    const item = await store.getItem(db, req.params.itemId!);
     if (!item || item.roundId !== round.id) return res.status(404).json({ error: 'That item is not in this round.' });
 
     // Held-out traces are graded but never discussed. A clause written about
@@ -737,24 +748,24 @@ export function createApp(db: DB) {
       });
     }
 
-    res.json({ resolution: store.saveResolution(db, { itemId: item.id, ...body.data }) });
+    res.json({ resolution: await store.saveResolution(db, { itemId: item.id, ...body.data }) });
   });
 
-  api.delete('/rounds/:roundId/items/:itemId/resolve', requireRound, (req, res) => {
-    const ok = store.deleteResolution(db, req.params.itemId!);
+  api.delete('/rounds/:roundId/items/:itemId/resolve', requireRound, async (req, res) => {
+    const ok = await store.deleteResolution(db, req.params.itemId!);
     res.status(ok ? 204 : 404).end();
   });
 
   /** Turn this round's resolutions into the next rubric version. */
-  api.post('/rounds/:roundId/ship', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
+  api.post('/rounds/:roundId/ship', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     const { project } = req as ProjectRequest;
     if (round.status !== 'closed') return res.status(409).json({ error: 'Close the round first.' });
 
-    const base = store.getRubric(db, round.rubricVersionId);
+    const base = await store.getRubric(db, round.rubricVersionId);
     if (!base) return res.status(404).json({ error: 'The round has no rubric to build on.' });
 
-    const resolutions = store.resolutionsForRound(db, round.id);
+    const resolutions = await store.resolutionsForRound(db, round.id);
     if (resolutions.length === 0) {
       return res.status(400).json({ error: 'Resolve at least one split before shipping a revision.' });
     }
@@ -764,7 +775,7 @@ export function createApp(db: DB) {
       .filter((r) => !existing.has(r.clauseText.trim().toLowerCase()))
       .map((r) => ({ text: r.clauseText, originItemId: r.itemId, originRoundId: round.id }));
 
-    const shipped = store.createRubricVersion(db, {
+    const shipped = await store.createRubricVersion(db, {
       projectId: project.id,
       name: base.name,
       preamble: base.preamble,
@@ -786,13 +797,13 @@ export function createApp(db: DB) {
 
   /* ---- Judge ------------------------------------------------------------ */
 
-  api.get('/judge/provider', (_req, res) => {
+  api.get('/judge/provider', async (_req, res) => {
     const provider = resolveProvider();
     res.json({ provider: provider.id, model: provider.model, real: provider.real });
   });
 
   api.post('/rounds/:roundId/judge', requireRound, async (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     const { project } = req as ProjectRequest;
     if (round.status !== 'closed') {
       return res.status(409).json({ error: 'Run the judge against a closed round, so there are human verdicts to compare with.' });
@@ -806,14 +817,28 @@ export function createApp(db: DB) {
       .safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'Pick a rubric version to build the judge from.' });
 
-    const rubric = store.getRubric(db, body.data.rubricVersionId);
+    const rubric = await store.getRubric(db, body.data.rubricVersionId);
     if (!rubric || rubric.projectId !== project.id) return res.status(404).json({ error: 'No such rubric version.' });
 
-    const items = store.listItems(db, round.id).filter((i) => i.arm === body.data.arm);
+    const items = (await store.listItems(db, round.id)).filter((i) => i.arm === body.data.arm);
     if (items.length === 0) return res.status(400).json({ error: `This round has no ${body.data.arm} items.` });
 
+    // A judge batch is the one thing here that does not fit request/response.
+    // Four at a time at a few seconds each puts ~40 items near the platform's
+    // function ceiling, and a run that dies halfway leaves a partial set of
+    // verdicts that would be scored as though it were the whole arm. Refusing
+    // is better than silently reporting agreement computed over the items that
+    // happened to finish first. Above this, the run needs a queue.
+    if (items.length > MAX_JUDGE_BATCH) {
+      return res.status(413).json({
+        error: `This arm has ${items.length} items, and a judge run is capped at ${MAX_JUDGE_BATCH} so it finishes inside the request. Run the judge on a smaller round.`,
+        code: 'batch_too_large',
+        limit: MAX_JUDGE_BATCH,
+      });
+    }
+
     const provider = resolveProvider();
-    const runId = store.createJudgeRun(db, {
+    const runId = await store.createJudgeRun(db, {
       projectId: project.id,
       roundId: round.id,
       rubricVersionId: rubric.id,
@@ -824,12 +849,12 @@ export function createApp(db: DB) {
 
     try {
       const results = await mapLimit(items, 4, async (item) => {
-        const trace = store.getTrace(db, item.traceId);
+        const trace = await store.getTrace(db, item.traceId);
         if (!trace) return { itemId: item.id, verdict: ABSTAIN, rationale: 'Trace missing.' };
         const graded = await provider.grade(rubric, trace);
         return { itemId: item.id, ...graded };
       });
-      for (const r of results) store.saveJudgeVerdict(db, runId, r.itemId, r.verdict, r.rationale);
+      for (const r of results) await store.saveJudgeVerdict(db, runId, r.itemId, r.verdict, r.rationale);
     } catch (error) {
       if (error instanceof JudgeError) return res.status(502).json({ error: error.message, code: error.code });
       throw error;
@@ -838,16 +863,17 @@ export function createApp(db: DB) {
     res.status(201).json({ runId, provider: provider.id, model: provider.model, real: provider.real });
   });
 
-  api.get('/rounds/:roundId/judge', requireRound, (req, res) => {
-    const round = (req as Request & { round: ReturnType<typeof store.getRound> }).round!;
-    const rubricScale = store.getRubric(db, round.rubricVersionId)?.scale ?? DEFAULT_SCALE;
-    const verdicts = store.verdictsForRound(db, round.id);
+  api.get('/rounds/:roundId/judge', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const rubricScale = (await store.getRubric(db, round.rubricVersionId))?.scale ?? DEFAULT_SCALE;
+    const verdicts = await store.verdictsForRound(db, round.id);
     const byItem = new Map(verdicts.map((v) => [v.itemId, v.byGrader]));
-    const items = store.listItems(db, round.id);
+    const items = await store.listItems(db, round.id);
     const armOf = new Map(items.map((i) => [i.id, i.arm]));
 
-    const runs = store.listJudgeRuns(db, round.id).map((run) => {
-      const judged = store.judgeVerdicts(db, run.id);
+    const runs = await Promise.all(
+      (await store.listJudgeRuns(db, round.id)).map(async (run) => {
+      const judged = await store.judgeVerdicts(db, run.id);
       const scoped = judged.filter((j) => armOf.get(j.itemId) === run.arm);
 
       // The judge is treated as one more rater on the same units, so its
@@ -869,15 +895,16 @@ export function createApp(db: DB) {
 
       return {
         ...run,
-        rubricVersion: store.getRubric(db, run.rubricVersionId)?.version ?? null,
+        rubricVersion: (await store.getRubric(db, run.rubricVersionId))?.version ?? null,
         itemCount: scoped.length,
         judgeAbstentions: scoped.filter((j) => j.verdict === ABSTAIN).length,
         agreementWithHumans: compared === 0 ? null : agreed / compared,
         comparisons: compared,
         perGrader: versusHuman,
         verdicts: scoped,
-      };
-    });
+        };
+      }),
+    );
 
     res.json({ runs, real: resolveProvider().real });
   });
@@ -894,11 +921,11 @@ export function createApp(db: DB) {
 
 /* ---- Helpers ------------------------------------------------------------ */
 
-function itemContexts(db: DB, roundId: string): Map<string, ItemContext> {
-  const resolved = new Set(store.resolutionsForRound(db, roundId).map((r) => r.itemId));
+async function itemContexts(db: DB, roundId: string): Promise<Map<string, ItemContext>> {
+  const resolved = new Set((await store.resolutionsForRound(db, roundId)).map((r) => r.itemId));
   const map = new Map<string, ItemContext>();
-  for (const item of store.listItems(db, roundId)) {
-    const trace = store.getTrace(db, item.traceId);
+  for (const item of await store.listItems(db, roundId)) {
+    const trace = await store.getTrace(db, item.traceId);
     map.set(item.id, {
       itemId: item.id,
       traceId: item.traceId,
@@ -914,17 +941,17 @@ function itemContexts(db: DB, roundId: string): Map<string, ItemContext> {
  * Traces currently sitting in a round somebody is still grading. Their verdicts
  * are withheld from every other round's report until that round closes.
  */
-function traceIdsInOpenRounds(db: DB, projectId: string, exceptRoundId: string): Set<string> {
+async function traceIdsInOpenRounds(db: DB, projectId: string, exceptRoundId: string): Promise<Set<string>> {
   const ids = new Set<string>();
-  for (const round of store.listRounds(db, projectId)) {
+  for (const round of await store.listRounds(db, projectId)) {
     if (round.status !== 'open' || round.id === exceptRoundId) continue;
-    for (const item of store.listItems(db, round.id)) ids.add(item.traceId);
+    for (const item of await store.listItems(db, round.id)) ids.add(item.traceId);
   }
   return ids;
 }
 
-function reportRows(db: DB, roundId: string, scale: { id: string; label: string; rank: number }[]) {
-  return buildSplitReport(store.verdictsForRound(db, roundId), itemContexts(db, roundId), scale);
+async function reportRows(db: DB, roundId: string, scale: { id: string; label: string; rank: number }[]) {
+  return buildSplitReport(await store.verdictsForRound(db, roundId), await itemContexts(db, roundId), scale);
 }
 
 /**

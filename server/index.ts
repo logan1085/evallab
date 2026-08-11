@@ -6,7 +6,7 @@ import { createApp } from './app.js';
 import { openDb } from './db.js';
 
 const port = Number(process.env.PORT ?? 8787);
-const db = openDb();
+const db = await openDb();
 const app = createApp(db);
 
 // In production the built SPA is served from the same origin, so a shared link
@@ -32,8 +32,7 @@ const server = app.listen(port, () => {
 /**
  * Finish in-flight requests before closing the database. A grader submitting a
  * verdict during a deploy should get their verdict stored, not a dropped
- * connection — and closing SQLite underneath an open request corrupts nothing
- * but does lose that write.
+ * connection — and ending the pool underneath an open request loses that write.
  */
 let shuttingDown = false;
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
@@ -48,9 +47,9 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     }, 10_000);
     force.unref();
 
-    server.close((err) => {
+    server.close(async (err) => {
       try {
-        db.close();
+        await db.close();
       } catch {
         // Already closed; nothing to salvage.
       }

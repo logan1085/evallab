@@ -19,8 +19,8 @@ import {
   type RubricDraft,
   draftJsonSchema,
   normalizeDraft,
-} from '@shared/drafting.js';
-import { DEFAULT_SCALE } from '@shared/types.js';
+} from '../shared/drafting.js';
+import { DEFAULT_SCALE } from '../shared/types.js';
 
 export const DEFAULT_DRAFT_MODEL = 'claude-opus-5';
 

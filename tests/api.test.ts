@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { createApp } from '../server/app.js';
-import { openDb, type DB } from '../server/db.js';
+import { createApp, MAX_JUDGE_BATCH } from '../server/app.js';
+import type { DB } from '../server/db.js';
+import { testDb } from './helpers.js';
 import { seedDemoProject } from '../server/seed.js';
 import * as store from '../server/store.js';
 
 let db: DB;
 let app: Express;
 
-beforeEach(() => {
-  db = openDb(':memory:');
+beforeEach(async () => {
+  db = await testDb();
   app = createApp(db);
 });
 
@@ -223,9 +224,9 @@ describe('rounds and sampling', () => {
 
 describe('the demo project', () => {
   it('opens on a closed round with real splits in it', async () => {
-    const seeded = seedDemoProject(db);
+    const seeded = await seedDemoProject(db);
     const report = await request(app)
-      .get(`/api/rounds/${seeded.roundId}/report?k=${store.getProjectById(db, seeded.projectId)!.token}`)
+      .get(`/api/rounds/${seeded.roundId}/report?k=${(await store.getProjectById(db, seeded.projectId))!.token}`)
       .expect(200);
 
     expect(report.body.splitCount).toBeGreaterThan(0);
@@ -235,8 +236,8 @@ describe('the demo project', () => {
   });
 
   it('orders the report so the widest disagreements come first', async () => {
-    const seeded = seedDemoProject(db);
-    const token = store.getProjectById(db, seeded.projectId)!.token;
+    const seeded = await seedDemoProject(db);
+    const token = (await store.getProjectById(db, seeded.projectId))!.token;
     const report = await request(app).get(`/api/rounds/${seeded.roundId}/report?k=${token}`).expect(200);
 
     const spreads = report.body.rows.map((r: { spread: number }) => r.spread);
@@ -244,8 +245,8 @@ describe('the demo project', () => {
   });
 
   it('flags the seeded traces as authored rather than captured', async () => {
-    const seeded = seedDemoProject(db);
-    const token = store.getProjectById(db, seeded.projectId)!.token;
+    const seeded = await seedDemoProject(db);
+    const token = (await store.getProjectById(db, seeded.projectId))!.token;
     const traces = await request(app).get(`/api/projects/${seeded.slug}/traces?k=${token}`).expect(200);
     expect(traces.body.traces.every((t: { source: string }) => t.source === 'authored-demo')).toBe(true);
   });
@@ -367,9 +368,9 @@ describe('trace import', () => {
 
 describe('judge', () => {
   it('scores the judge against humans as one more rater on the same items', async () => {
-    const seeded = seedDemoProject(db);
-    const project = store.getProjectById(db, seeded.projectId)!;
-    const rubric = store.currentRubric(db, seeded.projectId)!;
+    const seeded = await seedDemoProject(db);
+    const project = (await store.getProjectById(db, seeded.projectId))!;
+    const rubric = (await store.currentRubric(db, seeded.projectId))!;
 
     const run = await request(app)
       .post(`/api/rounds/${seeded.roundId}/judge?k=${project.token}`)
@@ -387,7 +388,7 @@ describe('judge', () => {
 
   it('will not judge an open round', async () => {
     const { project, auth } = await makeProject(2);
-    const rubric = store.currentRubric(db, store.getProjectBySlug(db, project.slug)!.id)!;
+    const rubric = (await store.currentRubric(db, (await store.getProjectBySlug(db, project.slug))!.id))!;
     const round = (
       await auth(request(app).post(`/api/projects/${project.slug}/rounds`)).send({ calibrationSize: 2 }).expect(201)
     ).body.round;
@@ -545,5 +546,49 @@ describe('drafting a rubric from conversations', () => {
       .send({ name: 'v1', openQuestions: kept })
       .expect(200);
     expect(res.body.rubric.openQuestions).toEqual(kept);
+  });
+});
+
+describe('judge batch limits', () => {
+  it('refuses a batch too large to finish inside a serverless function', async () => {
+    const size = MAX_JUDGE_BATCH + 1;
+    const { project, auth } = await makeProject(size + 1);
+    const rubric = (await store.currentRubric(db, (await store.getProjectBySlug(db, project.slug))!.id))!;
+
+    const ana = (await auth(request(app).post(`/api/projects/${project.slug}/graders`)).send({ name: 'Ana' })).body
+      .grader;
+    const ben = (await auth(request(app).post(`/api/projects/${project.slug}/graders`)).send({ name: 'Ben' })).body
+      .grader;
+
+    const round = (
+      await auth(request(app).post(`/api/projects/${project.slug}/rounds`))
+        .send({ calibrationSize: size, heldoutSize: 1 })
+        .expect(201)
+    ).body.round;
+
+    const items = (await auth(request(app).get(`/api/rounds/${round.id}/queue?graderId=${ana.id}`))).body.items;
+    for (const item of items) {
+      for (const grader of [ana, ben]) {
+        await auth(request(app).post(`/api/rounds/${round.id}/grades`))
+          .send({ graderId: grader.id, itemId: item.itemId, verdict: 'pass' })
+          .expect(200);
+      }
+    }
+    await auth(request(app).post(`/api/rounds/${round.id}/close`)).expect(200);
+
+    const res = await auth(request(app).post(`/api/rounds/${round.id}/judge`))
+      .send({ rubricVersionId: rubric.id, arm: 'calibration' })
+      .expect(413);
+    expect(res.body.code).toBe('batch_too_large');
+    expect(res.body.limit).toBe(MAX_JUDGE_BATCH);
+
+    // A half-finished run is worse than none, so nothing should be recorded.
+    const runs = await auth(request(app).get(`/api/rounds/${round.id}/judge`)).expect(200);
+    expect(runs.body.runs).toHaveLength(0);
+
+    // The held-out arm is one item, so it still runs.
+    await auth(request(app).post(`/api/rounds/${round.id}/judge`))
+      .send({ rubricVersionId: rubric.id, arm: 'heldout' })
+      .expect(201);
   });
 });

@@ -10,8 +10,8 @@
 import type { DB } from './db.js';
 import { newSlug, newToken } from './db.js';
 import * as store from './store.js';
-import { DEFAULT_SCALE } from '@shared/types.js';
-import { planSample } from '@shared/sampling.js';
+import { DEFAULT_SCALE } from '../shared/types.js';
+import { planSample } from '../shared/sampling.js';
 
 interface SeedTrace {
   title: string;
@@ -317,10 +317,10 @@ export interface SeedResult {
  * has something in it the moment someone opens the link. The round is closed,
  * which is also what makes the report legal to look at.
  */
-export function seedDemoProject(db: DB, name = 'The Grading Room — demo'): SeedResult {
-  const project = store.createProject(db, { slug: newSlug('grading-room-demo'), token: newToken(), name });
+export async function seedDemoProject(db: DB, name = 'The Grading Room — demo'): Promise<SeedResult> {
+  const project = await store.createProject(db, { slug: newSlug('grading-room-demo'), token: newToken(), name });
 
-  const rubric = store.createRubricVersion(db, {
+  const rubric = await store.createRubricVersion(db, {
     projectId: project.id,
     name: 'Agent run acceptance',
     preamble: RUBRIC_PREAMBLE,
@@ -328,7 +328,7 @@ export function seedDemoProject(db: DB, name = 'The Grading Room — demo'): See
     criteria: CRITERIA,
   });
 
-  const traces = store.addTraces(
+  const traces = await store.addTraces(
     db,
     project.id,
     TRACES.map((t) => ({
@@ -339,7 +339,7 @@ export function seedDemoProject(db: DB, name = 'The Grading Room — demo'): See
     })),
   );
 
-  const graders = GRADER_NAMES.map((n) => store.upsertGrader(db, project.id, n));
+  const graders = await Promise.all(GRADER_NAMES.map((n) => store.upsertGrader(db, project.id, n)));
 
   // Round one is random by definition, but the demo needs every authored trace
   // in play, so the sample is the whole corpus with four traces held out.
@@ -351,7 +351,7 @@ export function seedDemoProject(db: DB, name = 'The Grading Room — demo'): See
     seed: 'demo-round-1',
   });
 
-  const { round, items } = store.createRound(db, {
+  const { round, items } = await store.createRound(db, {
     projectId: project.id,
     rubricVersionId: rubric.id,
     name: 'Round 1',
@@ -368,18 +368,18 @@ export function seedDemoProject(db: DB, name = 'The Grading Room — demo'): See
     const seedIndex = traceIndexById.get(item.traceId);
     if (seedIndex === undefined) continue;
     const spec = TRACES[seedIndex]!;
-    graders.forEach((grader, gi) => {
-      store.submitGrade(db, {
+    for (const [gi, grader] of graders.entries()) {
+      await store.submitGrade(db, {
         itemId: item.id,
         graderId: grader.id,
         verdict: spec.grades[gi]!,
         note: spec.notes?.[gi] ?? '',
         elapsedMs: 45_000 + ((seedIndex * 7919 + gi * 104729) % 60_000),
       });
-    });
+    }
   }
 
-  store.closeRound(db, round.id);
+  await store.closeRound(db, round.id);
 
   return { slug: project.slug, token: project.token, projectId: project.id, roundId: round.id };
 }
