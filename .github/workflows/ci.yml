@@ -80,8 +80,8 @@ jobs:
           echo "database owner: $owner"
           [ "$owner" = "node" ]
 
-          # And the server itself must not be running as root.
-          user=$(docker exec gr sh -c 'ps -o user= -p 1 | tr -d " "' || true)
+          # And the server itself must not be running as root. BusyBox ps has no
+          # -p, so select by column and match the node process.
           runner=$(docker exec gr sh -c 'ps -o user=,comm= | grep node | head -1')
           echo "process table: $runner"
           echo "$runner" | grep -q '^node' || { echo "server is not running as node"; exit 1; }
