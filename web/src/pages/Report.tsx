@@ -1,0 +1,661 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import type { SplitCluster } from '@shared/splits';
+import type { ItemArm, RubricVersion, SplitReportRow, VerdictLevel } from '@shared/types';
+import { api, recallGrader, recallKey, type JudgeRunView, type ReportView } from '../api';
+import { AgreementPanel, ErrorBanner, Loading, Masthead, pct, useAsync, Verdict } from '../ui';
+
+/**
+ * The report.
+ *
+ * Splits come first and the aggregate comes second, on purpose. The number at
+ * the top of a dashboard is the thing teams already have; the specific cases
+ * where two people disagreed are the thing they do not, and they are the only
+ * part of this screen that can be acted on.
+ */
+export function ReportPage() {
+  const { slug, roundId } = useParams<{ slug: string; roundId: string }>();
+  const token = recallKey(slug!) ?? '';
+  const [error, setError] = useState<string | null>(null);
+
+  const { data, loading, reload } = useAsync<ReportView>(() => api.report(roundId!, token), [roundId, token]);
+
+  // The primary metric is "did held-out agreement improve after a calibration
+  // round", so the previous round's held-out number has to be on this screen.
+  const [previousHeldout, setPreviousHeldout] = useState<number | null>(null);
+  useEffect(() => {
+    const source = data?.round.sourceRoundId;
+    if (!source) {
+      setPreviousHeldout(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .report(source, token)
+      .then((prev) => {
+        if (!cancelled) setPreviousHeldout(prev.heldout.agreement.units > 0 ? prev.heldout.agreement.observed : null);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviousHeldout(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data?.round.sourceRoundId, token]);
+
+  if (loading && !data) return <main className="sheet"><Loading what="report" /></main>;
+  if (!data) return <main className="sheet"><ErrorBanner message="Could not load this report." /></main>;
+
+  const scale = data.rubric?.scale ?? [];
+  const unresolved = data.clusters.reduce((n, c) => n + c.rows.filter((r) => !r.resolved).length, 0);
+
+  return (
+    <main className="sheet sheet--wide">
+      <Masthead
+        crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `rubric v${data.rubric?.version ?? '—'}`]}
+        title={
+          data.splitCount === 0
+            ? 'No splits in this round'
+            : `${data.splitCount} split${data.splitCount === 1 ? '' : 's'} to turn into rubric sentences`
+        }
+        standfirst={
+          data.splitCount === 0
+            ? 'Everyone landed in the same place on every trace. That is either a well-specified rubric or a sample that avoided the boundary.'
+            : 'Each of these is a sentence the rubric does not contain yet. Resolve them before looking at the aggregate.'
+        }
+      />
+
+      <ErrorBanner message={error} onDismiss={() => setError(null)} />
+
+      <p className="note" style={{ marginBottom: 26 }}>
+        {data.samplingNote}
+      </p>
+
+      {/* ---- Splits first ------------------------------------------------ */}
+
+      <section className="band rail-grid">
+        <div className="rail">
+          <span className="num">01</span>
+          <span className="rail-label">The splits</span>
+          <span className="rail-note">Clustered by kind.</span>
+        </div>
+        <div className="col">
+          {data.clusters.length === 0 ? (
+            <div className="empty">Nothing to resolve.</div>
+          ) : (
+            data.clusters.map((cluster) => (
+              <ClusterBlock
+                key={cluster.key}
+                cluster={cluster}
+                report={data}
+                scale={scale}
+                roundId={roundId!}
+                token={token}
+                slug={slug!}
+                onChange={reload}
+                onError={setError}
+              />
+            ))
+          )}
+        </div>
+      </section>
+
+      {/* ---- Ship -------------------------------------------------------- */}
+
+      <ShipSection
+        report={data}
+        roundId={roundId!}
+        token={token}
+        unresolved={unresolved}
+        onChange={reload}
+        onError={setError}
+      />
+
+      {/* ---- Aggregate --------------------------------------------------- */}
+
+      <section className="band rail-grid">
+        <div className="rail">
+          <span className="num">03</span>
+          <span className="rail-label">The number</span>
+          <span className="rail-note">Second, not first.</span>
+        </div>
+        <div className="col">
+          <h2>Agreement, with coverage next to it</h2>
+          <p className="lede">
+            Coverage sits beside agreement because a rubric can buy agreement by saying less. If agreement climbs while
+            coverage falls, the metric is eating the product.
+          </p>
+
+          {data.heldout.agreement.units > 0 ? (
+            <>
+              <h3>Held out — the primary metric</h3>
+              <p className="note">
+                These traces were graded but never discussed, so they are the honest test of whether a calibration round
+                moved anything.
+              </p>
+              <AgreementPanel
+                label="Held-out"
+                agreement={data.heldout.agreement}
+                coverage={data.heldout.coverage}
+                compareTo={previousHeldout}
+              />
+            </>
+          ) : (
+            <div className="warn">
+              <span className="metric-k">No held-out arm</span>
+              <p style={{ margin: '6px 0 0' }}>
+                This round reserved no held-out traces, so there is no clean before-and-after to measure. Add a held-out
+                arm to the next round.
+              </p>
+            </div>
+          )}
+
+          <h3>Calibration arm</h3>
+          <AgreementPanel label="Calibration" agreement={data.calibration.agreement} coverage={data.calibration.coverage} />
+
+          <h3>Per-pair agreement</h3>
+          <p className="note">
+            With three to five graders this is often more useful than the aggregate: it shows whether disagreement is
+            spread evenly or coming from one person reading the rubric differently.
+          </p>
+          <div className="scroll-x">
+            <table>
+              <caption>Observed agreement between each pair, across the whole round</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Pair</th>
+                  <th scope="col">Agreed</th>
+                  <th scope="col">Compared</th>
+                  <th scope="col">Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(data.overall.agreement.pairwise).map(([key, value]) => {
+                  const [a, b] = key.split('|');
+                  const nameOf = (id: string) => data.graders.find((g) => g.id === id)?.name ?? id;
+                  return (
+                    <tr key={key}>
+                      <td className="case">
+                        {nameOf(a!)} &amp; {nameOf(b!)}
+                      </td>
+                      <td>{value.agreed}</td>
+                      <td>{value.compared}</td>
+                      <td>{pct(value.rate, 1)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ---- Matrix ------------------------------------------------------ */}
+
+      <section className="band rail-grid">
+        <div className="rail">
+          <span className="num">04</span>
+          <span className="rail-label">Every trace</span>
+          <span className="rail-note">Splits shaded.</span>
+        </div>
+        <div className="col">
+          <div className="scroll-x">
+            <table>
+              <caption>
+                {data.rows.length} traces × {data.graders.length} graders
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Trace</th>
+                  {data.graders.map((g) => (
+                    <th key={g.id} scope="col">
+                      {g.name}
+                    </th>
+                  ))}
+                  <th scope="col">Arm</th>
+                  <th scope="col" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.rows.map((row) => (
+                  <tr key={row.itemId} className={row.kind === 'unanimous' ? '' : 'is-split'}>
+                    <td className="case">{row.title}</td>
+                    {data.graders.map((g) => (
+                      <td key={g.id}>
+                        <Verdict verdict={row.byGrader[g.id]} scale={scale} />
+                      </td>
+                    ))}
+                    <td>{row.arm === 'heldout' ? 'held out' : 'calibration'}</td>
+                    <td className="flag">
+                      {row.kind === 'unanimous' ? '' : row.resolved ? <span className="resolved-badge">resolved</span> : row.kind}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ---- Judge ------------------------------------------------------- */}
+
+      <JudgeSection slug={slug!} roundId={roundId!} token={token} report={data} onError={setError} />
+    </main>
+  );
+}
+
+/* ---- Clusters ----------------------------------------------------------- */
+
+function ClusterBlock({
+  cluster,
+  report,
+  scale,
+  roundId,
+  token,
+  slug,
+  onChange,
+  onError,
+}: {
+  cluster: SplitCluster;
+  report: ReportView;
+  scale: VerdictLevel[];
+  roundId: string;
+  token: string;
+  slug: string;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const label = cluster.verdicts
+    .map((v) => scale.find((s) => s.id === v)?.label ?? v)
+    .join(' vs ');
+
+  return (
+    <div className="cluster">
+      <div className="cluster-head">
+        <span className="verdict v-fail">{cluster.kind}</span>
+        <strong style={{ fontFamily: 'var(--display)', fontSize: 15 }}>{label}</strong>
+        <span className="tiny">
+          {cluster.rows.length} trace{cluster.rows.length === 1 ? '' : 's'} · {cluster.rows.filter((r) => r.resolved).length} resolved
+        </span>
+      </div>
+      <div className="cluster-body">
+        {cluster.rows.map((row) => (
+          <SplitRow
+            key={row.itemId}
+            row={row}
+            report={report}
+            scale={scale}
+            roundId={roundId}
+            token={token}
+            slug={slug}
+            onChange={onChange}
+            onError={onError}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SplitRow({
+  row,
+  report,
+  scale,
+  roundId,
+  token,
+  slug,
+  onChange,
+  onError,
+}: {
+  row: SplitReportRow;
+  report: ReportView;
+  scale: VerdictLevel[];
+  roundId: string;
+  token: string;
+  slug: string;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const existing = report.resolutions.find((r) => r.itemId === row.itemId);
+  const notes = report.notes.filter((n) => n.itemId === row.itemId);
+  const [open, setOpen] = useState(false);
+  const [agreedVerdict, setAgreedVerdict] = useState(existing?.agreedVerdict ?? row.verdicts[0] ?? '');
+  const [clauseText, setClauseText] = useState(existing?.clauseText ?? '');
+  const [busy, setBusy] = useState(false);
+  const me = recallGrader(slug);
+
+  return (
+    <div className="split-row">
+      <div className="between">
+        <div className="split-title">{row.title}</div>
+        {existing ? <span className="resolved-badge">resolved</span> : null}
+      </div>
+
+      <div className="grader-verdicts">
+        {report.graders.map((g) => (
+          <div key={g.id} className="grader-verdict">
+            <b>{g.name}</b>
+            <Verdict verdict={row.byGrader[g.id]} scale={scale} />
+          </div>
+        ))}
+      </div>
+
+      {notes.length > 0 ? (
+        <ul className="plain" style={{ fontSize: 15 }}>
+          {notes.map((note, i) => (
+            <li key={i}>
+              <strong>{report.graders.find((g) => g.id === note.graderId)?.name ?? 'Someone'}:</strong> {note.note}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {existing ? (
+        <div className="keyline">
+          <p>{existing.clauseText}</p>
+          <p className="tiny" style={{ margin: 0 }}>
+            Agreed: {scale.find((s) => s.id === existing.agreedVerdict)?.label ?? existing.agreedVerdict}
+            {existing.resolvedBy ? ` · recorded by ${existing.resolvedBy}` : ''}
+            {'  '}
+            <button
+              className="ghost tiny-btn"
+              style={{ marginLeft: 8 }}
+              onClick={async () => {
+                try {
+                  await api.unresolve(roundId, token, row.itemId);
+                  onChange();
+                } catch (err) {
+                  onError(err instanceof Error ? err.message : 'Could not undo that resolution.');
+                }
+              }}
+            >
+              undo
+            </button>
+          </p>
+        </div>
+      ) : open ? (
+        <form
+          className="panel"
+          style={{ marginTop: 10, marginBottom: 0 }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setBusy(true);
+            try {
+              await api.resolve(roundId, token, row.itemId, {
+                agreedVerdict,
+                clauseText,
+                rationale: '',
+                resolvedBy: me?.name ?? '',
+              });
+              setOpen(false);
+              onChange();
+            } catch (err) {
+              onError(err instanceof Error ? err.message : 'Could not save that resolution.');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <div className="field">
+            <label>Where did you land?</label>
+            <div className="verdict-picker">
+              {[...scale]
+                .sort((a, b) => b.rank - a.rank)
+                .map((level) => (
+                  <button
+                    key={level.id}
+                    type="button"
+                    className={agreedVerdict === level.id ? 'selected' : ''}
+                    onClick={() => setAgreedVerdict(level.id)}
+                  >
+                    {level.label}
+                  </button>
+                ))}
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor={`clause-${row.itemId}`}>
+              What would the rubric have to say for you to have landed in the same place?
+            </label>
+            <textarea
+              id={`clause-${row.itemId}`}
+              rows={3}
+              value={clauseText}
+              onChange={(e) => setClauseText(e.target.value)}
+              placeholder="One sentence, general enough to apply to the next trace like this one."
+            />
+          </div>
+          <button type="submit" disabled={busy || clauseText.trim().length < 3 || !agreedVerdict}>
+            {busy ? 'Saving…' : 'Add this sentence to the rubric'}
+          </button>{' '}
+          <button type="button" className="ghost" onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+        </form>
+      ) : (
+        <button className="ghost tiny-btn" onClick={() => setOpen(true)}>
+          Resolve this split
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ---- Ship --------------------------------------------------------------- */
+
+function ShipSection({
+  report,
+  roundId,
+  token,
+  unresolved,
+  onChange,
+  onError,
+}: {
+  report: ReportView;
+  roundId: string;
+  token: string;
+  unresolved: number;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [shipped, setShipped] = useState<RubricVersion | null>(null);
+
+  return (
+    <section className="band rail-grid">
+      <div className="rail">
+        <span className="num">02</span>
+        <span className="rail-label">Ship it</span>
+        <span className="rail-note">Resolutions become clauses.</span>
+      </div>
+      <div className="col">
+        <h2>Turn the resolutions into the next rubric version</h2>
+        <p className="lede">
+          {report.resolutions.length === 0
+            ? 'Nothing resolved yet. Each resolution becomes one clause on a new rubric version, carrying the trace it came from so you can always answer "why does the rubric say this?".'
+            : `${report.resolutions.length} resolution${report.resolutions.length === 1 ? '' : 's'} ready to ship${unresolved > 0 ? `, with ${unresolved} split${unresolved === 1 ? '' : 's'} still unresolved` : ''}.`}
+        </p>
+
+        {shipped ? (
+          <div className="panel">
+            <span className="metric-k">Shipped</span>
+            <p style={{ marginTop: 6 }}>
+              Rubric v{shipped.version} now carries {shipped.clauses.length} clause
+              {shipped.clauses.length === 1 ? '' : 's'}. Run the next round against it, reusing this round&rsquo;s
+              held-out traces, to see whether agreement actually moved.
+            </p>
+            <a className="btn ghost" href={api.exportUrl(shipped.id, token, 'md')} target="_blank" rel="noreferrer">
+              Export the revised rubric
+            </a>
+          </div>
+        ) : (
+          <button
+            disabled={busy || report.resolutions.length === 0}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                const res = await api.ship(roundId, token);
+                setShipped(res.rubric);
+                onChange();
+              } catch (err) {
+                onError(err instanceof Error ? err.message : 'Could not ship the revision.');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? 'Shipping…' : `Ship rubric v${(report.rubric?.version ?? 1) + 1}`}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* ---- Judge -------------------------------------------------------------- */
+
+function JudgeSection({
+  slug,
+  roundId,
+  token,
+  report,
+  onError,
+}: {
+  slug: string;
+  roundId: string;
+  token: string;
+  report: ReportView;
+  onError: (m: string) => void;
+}) {
+  const { data, reload } = useAsync<{ runs: JudgeRunView[]; real: boolean }>(
+    () => api.judgeRuns(roundId, token),
+    [roundId, token],
+  );
+  const rubrics = useAsync(() => api.rubrics(slug, token), [slug, token]);
+  const [arm, setArm] = useState<ItemArm>('heldout');
+  const [rubricId, setRubricId] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const versions = useMemo(() => rubrics.data?.rubrics ?? [], [rubrics.data]);
+  useEffect(() => {
+    if (!rubricId && versions.length > 0) setRubricId(versions[versions.length - 1]!.id);
+  }, [versions, rubricId]);
+
+  const runs = data?.runs ?? [];
+  const real = data?.real ?? false;
+
+  return (
+    <section className="band rail-grid">
+      <div className="rail">
+        <span className="num">05</span>
+        <span className="rail-label">The judge</span>
+        <span className="rail-note">Why this exists.</span>
+      </div>
+      <div className="col">
+        <h2>Build a judge from a rubric version and score it against the humans</h2>
+        <p className="lede">
+          The judge is given the rubric verbatim — the same text the graders read — and is then treated as one more
+          rater on the same items, so its agreement with humans is computed exactly the way theirs is with each other.
+          Run it against two rubric versions to see whether calibration bought anything.
+        </p>
+
+        {!real ? (
+          <div className="warn">
+            <span className="metric-k">Offline stub, not a judge</span>
+            <p style={{ margin: '6px 0 0' }}>
+              No <code>ANTHROPIC_API_KEY</code> is set, so runs use a deterministic keyword scorer. It exercises the
+              workflow and nothing more — do not read its agreement number as evidence about anything.
+            </p>
+          </div>
+        ) : null}
+
+        <div className="panel">
+          <div className="row">
+            <div className="field">
+              <label htmlFor="judge-rubric">Rubric version</label>
+              <select id="judge-rubric" value={rubricId} onChange={(e) => setRubricId(e.target.value)}>
+                {versions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    v{r.version} — {r.clauses.length} clause{r.clauses.length === 1 ? '' : 's'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="judge-arm">Arm</label>
+              <select id="judge-arm" value={arm} onChange={(e) => setArm(e.target.value as ItemArm)}>
+                <option value="heldout">Held out</option>
+                <option value="calibration">Calibration</option>
+              </select>
+            </div>
+            <div className="shrink" style={{ paddingBottom: 16 }}>
+              <button
+                disabled={busy || !rubricId}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api.runJudge(roundId, token, rubricId, arm);
+                    reload();
+                  } catch (err) {
+                    onError(err instanceof Error ? err.message : 'The judge run failed.');
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? 'Grading…' : 'Run the judge'}
+              </button>
+            </div>
+          </div>
+          <p className="tiny" style={{ margin: 0 }}>
+            Held out is the honest arm: the judge has not been tuned on it and neither has the rubric.
+          </p>
+        </div>
+
+        {runs.length === 0 ? (
+          <div className="empty">No judge runs yet.</div>
+        ) : (
+          <div className="scroll-x">
+            <table>
+              <caption>Judge runs, oldest first</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Rubric</th>
+                  <th scope="col">Arm</th>
+                  <th scope="col">Model</th>
+                  <th scope="col">Items</th>
+                  <th scope="col">Agreement with humans</th>
+                  <th scope="col">Judge abstained</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run) => (
+                  <tr key={run.id}>
+                    <td>v{run.rubricVersion ?? '—'}</td>
+                    <td>{run.arm === 'heldout' ? 'held out' : 'calibration'}</td>
+                    <td>{run.model}</td>
+                    <td>{run.itemCount}</td>
+                    <td style={{ color: 'var(--ink)' }}>{pct(run.agreementWithHumans, 1)}</td>
+                    <td>{run.judgeAbstentions}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {runs.length >= 2 ? (
+          <p className="note" style={{ marginTop: 14 }}>
+            Two runs on the same arm with different rubric versions is the comparison that matters. If the calibrated
+            version does not beat the original by more than a couple of points, that is a finding about the product,
+            not a bug in the run.
+          </p>
+        ) : null}
+
+        <p className="tiny" style={{ marginTop: 18 }}>
+          <Link to={`/p/${slug}`}>Back to the project</Link> · {report.graders.length} graders in this round
+        </p>
+      </div>
+    </section>
+  );
+}

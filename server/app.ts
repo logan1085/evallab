@@ -112,6 +112,9 @@ export function createApp(db: DB) {
         ...round,
         items: store.listItems(db, round.id).length,
         samplingNote: store.roundSamplingNote(db, round.id),
+        // Each round pins its own rubric version, so this has to come from the
+        // round rather than from whatever the current version happens to be.
+        rubricVersion: store.getRubric(db, round.rubricVersionId)?.version ?? null,
       })),
     });
   });
