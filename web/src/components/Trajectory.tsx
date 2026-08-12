@@ -52,14 +52,14 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
           {/* Recessive solid hairline grid — never dashed. */}
           {[0, 0.25, 0.5, 0.75, 1].map((v) => (
             <g key={v}>
-              <line x1={PAD.left} x2={W - PAD.right} y1={y(v)} y2={y(v)} stroke="var(--rule-soft)" strokeWidth={1} />
+              <line x1={PAD.left} x2={W - PAD.right} y1={y(v)} y2={y(v)} stroke="var(--hairline-soft)" strokeWidth={1} />
               <text
                 x={PAD.left - 10}
                 y={y(v) + 3.5}
                 textAnchor="end"
                 fontSize={10}
                 fontFamily="var(--data)"
-                fill="var(--faint)"
+                fill="var(--ink-4)"
               >
                 {v * 100}%
               </text>
@@ -77,7 +77,7 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
                 y1={y(series[i - 1]!.heldout.agreement.observed)}
                 x2={x(i)}
                 y2={y(point.heldout.agreement.observed)}
-                stroke="var(--chart-line)"
+                stroke="var(--chart)"
                 strokeWidth={2}
                 strokeLinecap="round"
               />
@@ -96,7 +96,7 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
                     x2={cx}
                     y1={PAD.top}
                     y2={PAD.top + PLOT_H}
-                    stroke="var(--rule)"
+                    stroke="var(--hairline)"
                     strokeWidth={1}
                     opacity={0.6}
                   />
@@ -106,7 +106,7 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
                     textAnchor="middle"
                     fontSize={10}
                     fontFamily="var(--data)"
-                    fill="var(--faint)"
+                    fill="var(--ink-4)"
                   >
                     no held-out arm
                   </text>
@@ -118,7 +118,7 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
             return (
               <g key={point.roundId}>
                 {stats.observedCI ? (
-                  <g stroke="var(--chart-line)" strokeWidth={2} opacity={0.32} strokeLinecap="round">
+                  <g stroke="var(--chart)" strokeWidth={2} opacity={0.32} strokeLinecap="round">
                     <line x1={cx} x2={cx} y1={y(stats.observedCI[0])} y2={y(stats.observedCI[1])} />
                     <line x1={cx - 4} x2={cx + 4} y1={y(stats.observedCI[0])} y2={y(stats.observedCI[0])} />
                     <line x1={cx - 4} x2={cx + 4} y1={y(stats.observedCI[1])} y2={y(stats.observedCI[1])} />
@@ -129,8 +129,8 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
                   cx={cx}
                   cy={cy}
                   r={5}
-                  fill="var(--chart-line)"
-                  stroke="var(--panel)"
+                  fill="var(--chart)"
+                  stroke="var(--surface)"
                   strokeWidth={2}
                   opacity={hover === null || hover === i ? 1 : 0.45}
                 />
@@ -159,10 +159,10 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
               textAnchor="middle"
               fontSize={10}
               fontFamily="var(--data)"
-              fill={hover === i ? 'var(--ink)' : 'var(--faint)'}
+              fill={hover === i ? 'var(--ink)' : 'var(--ink-4)'}
             >
               R{point.index}
-              <tspan x={x(i)} dy={13} fill="var(--faint)">
+              <tspan x={x(i)} dy={13} fill="var(--ink-4)">
                 v{point.rubricVersion ?? '—'}
               </tspan>
             </text>
@@ -218,8 +218,8 @@ function Tooltip({ point, left }: { point: TrajectoryPoint; left: number }) {
         left: `${left}%`,
         top: 0,
         transform: 'translateX(-50%)',
-        background: 'var(--panel)',
-        border: '1px solid var(--rule)',
+        background: 'var(--surface)',
+        border: '1px solid var(--hairline)',
         padding: '9px 12px',
         pointerEvents: 'none',
         minWidth: 190,

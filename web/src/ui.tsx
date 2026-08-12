@@ -182,7 +182,7 @@ export function AgreementPanel({
           <span className="metric-k">Sample</span>
           <span className="metric-big">
             {agreement.units}
-            <span style={{ fontSize: 18, color: 'var(--faint)' }}> × {agreement.raters}</span>
+            <span style={{ fontSize: 18, color: 'var(--ink-4)' }}> × {agreement.raters}</span>
           </span>
           <span className="metric-sub">comparable items × graders</span>
         </div>

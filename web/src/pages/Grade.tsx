@@ -157,9 +157,17 @@ export function GradePage() {
                 </button>
               ))}
             </div>
-            <div className="verdict-picker" style={{ marginTop: 10 }}>
-              <button className={`abstain ${item.myVerdict === ABSTAIN ? 'selected' : ''}`} onClick={() => grade(ABSTAIN)}>
-                can&rsquo;t tell from this trace
+            {/*
+              Abstaining is a real outcome, not a fourth verdict — it never counts
+              as agreement. Giving it the same weight as pass/partial/fail would
+              invite it as an easy way out of a hard call.
+            */}
+            <div className="abstain-row">
+              <button
+                className={`abstain ${item.myVerdict === ABSTAIN ? 'selected' : ''}`}
+                onClick={() => grade(ABSTAIN)}
+              >
+                Can&rsquo;t tell from this trace
               </button>
             </div>
 

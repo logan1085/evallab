@@ -177,11 +177,6 @@ function RoundsTab({
 
   return (
     <section className="rail-grid">
-      <div className="rail">
-        <span className="num">R</span>
-        <span className="rail-label">Rounds</span>
-        <span className="rail-note">One blind pass each.</span>
-      </div>
       <div className="col">
         <TrajectorySection slug={slug} token={token} rounds={view.rounds} />
 
@@ -281,12 +276,11 @@ function RoundsTab({
             </div>
 
             {strategy === 'from_splits' ? (
-              <label style={{ textTransform: 'none', letterSpacing: 0, fontFamily: 'var(--body)', fontSize: 15, color: 'var(--ink-soft)' }}>
+              <label className="check">
                 <input
                   type="checkbox"
                   checked={reuseHeldout}
                   onChange={(e) => setReuseHeldout(e.target.checked)}
-                  style={{ width: 'auto', marginRight: 8 }}
                 />
                 Reuse the previous round&rsquo;s held-out traces, so before and after are measured on the same cases
               </label>
@@ -466,11 +460,6 @@ function TracesTab({
 
   return (
     <section className="rail-grid">
-      <div className="rail">
-        <span className="num">T</span>
-        <span className="rail-label">Traces</span>
-        <span className="rail-note">The corpus to grade.</span>
-      </div>
       <div className="col">
         {authored > 0 ? (
           <div className="warn">
@@ -731,7 +720,7 @@ function DraftPanel({
             {[...draft.draft.scale]
               .sort((a, b) => b.rank - a.rank)
               .map((level) => (
-                <span key={level.id} className="pill on">
+                <span key={level.id} className="pill static">
                   {level.label}
                 </span>
               ))}
@@ -855,11 +844,6 @@ function RubricTab({
 
   return (
     <section className="rail-grid">
-      <div className="rail">
-        <span className="num">B</span>
-        <span className="rail-label">Rubric</span>
-        <span className="rail-note">What a pass means.</span>
-      </div>
       <div className="col">
         <DraftPanel
           slug={slug}
@@ -916,11 +900,11 @@ function RubricTab({
                 {[...scale]
                   .sort((a, b) => b.rank - a.rank)
                   .map((level) => (
-                    <span key={level.id} className="pill on">
+                    <span key={level.id} className="pill static">
                       {level.label}
                     </span>
                   ))}
-                <span className="pill">abstain</span>
+                <span className="pill static muted">abstain</span>
               </div>
               {scale.map((l) => l.id).join('|') !== rubric.scale.map((l) => l.id).join('|') ? (
                 <p className="tiny" style={{ margin: 0 }}>

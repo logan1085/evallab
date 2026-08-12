@@ -51,7 +51,7 @@ export function Home() {
           <span className="rail-label">Start</span>
           <span className="rail-note">Two ways in.</span>
         </div>
-        <div className="col">
+        <div className="col two-up">
           <div className="panel">
             <h2>Open the demo</h2>
             <p className="lede">
