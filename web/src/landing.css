@@ -1,0 +1,426 @@
+/*
+ * The landing page, which is a different design world from the product.
+ *
+ * The app is a light grey instrument you operate for an hour. This is the page
+ * you read once, so it gets the opposite treatment: near-black, full-bleed,
+ * type at display sizes, and content that arrives as you scroll rather than all
+ * at once. Committing to dark here is a choice, not an omission — the page
+ * ignores the viewer's theme entirely, the way a product launch page does.
+ *
+ * The one vibrant thing on the page is a gradient that runs rose → amber →
+ * green. That is not decoration picked for warmth: it is the verdict scale, in
+ * order, fail through partial to pass. Every accent on this page is a slice of
+ * the thing the product actually measures.
+ */
+
+:root {
+  --l-ground: #08080a;
+  --l-raised: #121216;
+  --l-raised-2: #1a1a20;
+  --l-text: #f7f7f9;
+  --l-text-2: #a8a8b3;
+  --l-text-3: #71717d;
+  --l-line: #26262e;
+
+  --l-fail: #ff3b6b;
+  --l-partial: #ffb020;
+  --l-pass: #25d0a0;
+  --l-spectrum: linear-gradient(100deg, var(--l-fail) 0%, var(--l-partial) 48%, var(--l-pass) 100%);
+}
+
+/* The page owns the whole viewport, including the overscroll gutter. */
+html[data-page="landing"],
+html[data-page="landing"] body {
+  background: var(--l-ground);
+}
+
+.landing {
+  background: var(--l-ground);
+  color: var(--l-text-2);
+  min-height: 100vh;
+  overflow-x: hidden;
+  font-family: var(--ui);
+  padding-bottom: 0;
+}
+
+.landing ::selection { background: rgba(37, 208, 160, 0.28); color: #fff; }
+
+.l-wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 28px;
+}
+
+/* Reveal ------------------------------------------------------------------ */
+
+/*
+ * Hidden only when motion is welcome. Under prefers-reduced-motion the rule
+ * never applies, so every element is simply visible from the start rather than
+ * depending on an observer that may never fire.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  .landing [data-reveal] {
+    opacity: 0;
+    transform: translateY(26px);
+    transition:
+      opacity 0.75s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+    transition-delay: var(--d, 0ms);
+  }
+  .landing [data-reveal][data-shown] {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Hero -------------------------------------------------------------------- */
+
+.l-hero {
+  position: relative;
+  min-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 120px 0 80px;
+  isolation: isolate;
+}
+
+/* A single wide, very soft bloom. One light source, not a glow on everything. */
+.l-hero::before {
+  content: "";
+  position: absolute;
+  inset: -20% -30% auto;
+  height: 720px;
+  background: radial-gradient(58% 52% at 50% 40%, rgba(255, 59, 107, 0.16), transparent 70%),
+    radial-gradient(46% 44% at 72% 46%, rgba(37, 208, 160, 0.14), transparent 70%);
+  filter: blur(20px);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.l-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  color: var(--l-text-2);
+  border: 1px solid var(--l-line);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 7px 14px 7px 9px;
+  border-radius: 999px;
+  margin-bottom: 30px;
+}
+.l-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--l-spectrum);
+  flex: 0 0 auto;
+}
+
+.landing h1.l-title {
+  font-family: var(--display);
+  font-size: clamp(42px, 7.4vw, 92px);
+  font-weight: 680;
+  letter-spacing: -0.042em;
+  line-height: 0.98;
+  color: var(--l-text);
+  margin: 0 0 26px;
+  max-width: 15ch;
+  text-wrap: balance;
+}
+
+.l-grad {
+  background: var(--l-spectrum);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.l-sub {
+  font-size: clamp(17px, 2vw, 21px);
+  line-height: 1.5;
+  color: var(--l-text-2);
+  max-width: 52ch;
+  margin: 0 0 38px;
+}
+
+.l-cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+
+.landing button.l-primary,
+.landing .l-primary {
+  font-family: var(--ui);
+  font-size: 16px;
+  font-weight: 560;
+  padding: 14px 26px;
+  border-radius: 999px;
+  border: none;
+  background: var(--l-text);
+  color: var(--l-ground);
+  cursor: pointer;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s ease;
+}
+.landing button.l-primary:hover:not(:disabled) { background: var(--l-text); transform: translateY(-1px); }
+.landing button.l-primary:disabled { background: var(--l-raised-2); color: var(--l-text-3); cursor: not-allowed; }
+
+.landing button.l-secondary {
+  font-family: var(--ui);
+  font-size: 16px;
+  font-weight: 520;
+  padding: 14px 24px;
+  border-radius: 999px;
+  border: 1px solid var(--l-line);
+  background: transparent;
+  color: var(--l-text);
+  cursor: pointer;
+  transition: border-color 0.18s ease, background 0.18s ease;
+}
+.landing button.l-secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); border-color: #3a3a45; }
+
+/* Sections ---------------------------------------------------------------- */
+
+.l-section { padding: 120px 0; border-top: 1px solid var(--l-line); }
+
+.l-kicker {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--l-text-3);
+  margin: 0 0 18px;
+}
+
+.landing h2.l-h2 {
+  font-family: var(--display);
+  font-size: clamp(30px, 4.4vw, 54px);
+  font-weight: 660;
+  letter-spacing: -0.032em;
+  line-height: 1.04;
+  color: var(--l-text);
+  margin: 0 0 20px;
+  max-width: 20ch;
+  text-wrap: balance;
+}
+
+.l-lede {
+  font-size: clamp(16px, 1.7vw, 19px);
+  line-height: 1.6;
+  color: var(--l-text-2);
+  max-width: 56ch;
+  margin: 0;
+}
+
+/* The disagreement demonstration ------------------------------------------ */
+
+.l-demo {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.l-card {
+  background: var(--l-raised);
+  border: 1px solid var(--l-line);
+  border-radius: 18px;
+  padding: 26px 28px;
+}
+
+.l-trace-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--l-text-3);
+  margin-bottom: 14px;
+}
+.l-trace {
+  font-family: var(--data);
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--l-text-2);
+  white-space: pre-wrap;
+  margin: 0;
+}
+.l-trace b { color: var(--l-text); font-weight: 500; }
+
+.l-verdicts { display: flex; flex-direction: column; gap: 12px; }
+
+.l-verdict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--l-raised);
+  border: 1px solid var(--l-line);
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+.l-who { font-size: 15px; font-weight: 540; color: var(--l-text); }
+.l-said { font-size: 13px; color: var(--l-text-3); margin-top: 2px; }
+.l-chip {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.l-chip.pass { background: rgba(37, 208, 160, 0.14); color: var(--l-pass); }
+.l-chip.partial { background: rgba(255, 176, 32, 0.14); color: var(--l-partial); }
+.l-chip.fail { background: rgba(255, 59, 107, 0.14); color: var(--l-fail); }
+
+.l-punch {
+  margin-top: 26px;
+  font-size: clamp(19px, 2.4vw, 26px);
+  font-weight: 600;
+  letter-spacing: -0.022em;
+  color: var(--l-text);
+  line-height: 1.3;
+  max-width: 34ch;
+}
+
+/* Steps ------------------------------------------------------------------- */
+
+.l-steps {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+.l-step {
+  background: var(--l-raised);
+  border: 1px solid var(--l-line);
+  border-radius: 18px;
+  padding: 26px;
+  position: relative;
+  overflow: hidden;
+}
+/* The rule at the top of each card is one slice of the spectrum, so the row of
+   cards reads left-to-right as fail → pass. */
+.l-step::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--l-spectrum);
+  background-size: 400% 100%;
+  background-position: var(--slice, 0%) 0;
+}
+.l-step-n {
+  font-family: var(--data);
+  font-size: 12px;
+  color: var(--l-text-3);
+  margin-bottom: 12px;
+}
+.l-step h3 {
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  color: var(--l-text);
+  margin: 0 0 8px;
+}
+.l-step p { font-size: 14.5px; line-height: 1.6; color: var(--l-text-2); margin: 0; }
+
+/* The number -------------------------------------------------------------- */
+
+.l-numbers {
+  margin-top: 56px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+.l-num-card {
+  background: var(--l-raised);
+  border: 1px solid var(--l-line);
+  border-radius: 18px;
+  padding: 28px;
+}
+.l-num {
+  font-family: var(--display);
+  font-size: clamp(40px, 5vw, 62px);
+  font-weight: 660;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--l-text);
+}
+.l-num.up { color: var(--l-pass); }
+.l-num-k { font-size: 14px; color: var(--l-text-2); margin-top: 12px; }
+
+/* Not-this list ----------------------------------------------------------- */
+
+.l-nots { margin-top: 44px; display: grid; gap: 2px; }
+.l-not {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  padding: 20px 0;
+  border-top: 1px solid var(--l-line);
+  font-size: clamp(16px, 1.8vw, 19px);
+}
+.l-not b { color: var(--l-text); font-weight: 560; flex: 0 0 auto; }
+.l-not span { color: var(--l-text-3); }
+
+/* Closing ----------------------------------------------------------------- */
+
+.l-close {
+  padding: 140px 0 160px;
+  border-top: 1px solid var(--l-line);
+  text-align: center;
+}
+.l-close .l-h2 { margin-left: auto; margin-right: auto; }
+.l-close .l-lede { margin: 0 auto 38px; }
+.l-close .l-cta-row { justify-content: center; }
+
+.l-start {
+  margin: 34px auto 0;
+  max-width: 460px;
+  display: flex;
+  gap: 10px;
+}
+.landing .l-start input {
+  flex: 1 1 auto;
+  background: var(--l-raised);
+  border: 1px solid var(--l-line);
+  color: var(--l-text);
+  border-radius: 999px;
+  padding: 13px 20px;
+  font-size: 15px;
+}
+.landing .l-start input::placeholder { color: var(--l-text-3); }
+.landing .l-start input:focus {
+  outline: none;
+  border-color: #3f3f4b;
+  box-shadow: none;
+}
+
+.l-foot {
+  border-top: 1px solid var(--l-line);
+  padding: 30px 0 60px;
+  font-size: 13.5px;
+  color: var(--l-text-3);
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.landing .error-banner {
+  background: rgba(255, 59, 107, 0.1);
+  border-color: rgba(255, 59, 107, 0.4);
+  color: var(--l-text);
+  max-width: 460px;
+  margin: 18px auto 0;
+  text-align: left;
+}
+
+@media (max-width: 860px) {
+  .l-demo { grid-template-columns: 1fr; }
+  .l-section { padding: 84px 0; }
+  .l-hero { min-height: auto; padding: 90px 0 60px; }
+  .l-not { flex-direction: column; gap: 6px; }
+}
