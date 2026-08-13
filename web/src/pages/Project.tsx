@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ATTENTION_BUDGET_MINUTES, attentionEstimate } from '@shared/sampling';
 import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
-import type { DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
+import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
 import {
   api,
   forgetGrader,
@@ -16,7 +16,7 @@ import {
 import { Trajectory } from '../components/Trajectory';
 import { ErrorBanner, Loading, Masthead, minutes, pct, useAsync } from '../ui';
 
-type Tab = 'rounds' | 'traces' | 'rubric';
+type Tab = 'rounds' | 'operations' | 'traces' | 'rubric';
 
 export function ProjectPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -36,7 +36,12 @@ export function ProjectPage() {
       <Masthead
         crumbs={[{ label: 'Home', to: '/' }, data.project.name]}
         title={data.project.name}
-        standfirst={`${data.traceCount} traces · rubric v${data.rubric?.version ?? 1} · ${data.rounds.length} round${data.rounds.length === 1 ? '' : 's'}`}
+        standfirst={[
+          `${data.documentCount} document${data.documentCount === 1 ? '' : 's'}`,
+          `${data.traceCount} conversation${data.traceCount === 1 ? '' : 's'}`,
+          `rubric v${data.rubric?.version ?? 1}`,
+          `${data.rounds.length} round${data.rounds.length === 1 ? '' : 's'}`,
+        ].join(' · ')}
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
@@ -60,14 +65,15 @@ export function ProjectPage() {
       </div>
 
       <div className="tabs">
-        {(['rounds', 'traces', 'rubric'] as Tab[]).map((t) => (
+        {(['rounds', 'operations', 'traces', 'rubric'] as Tab[]).map((t) => (
           <button key={t} className={`tab ${tab === t ? 'on' : ''}`} onClick={() => setTab(t)}>
-            {t === 'rounds' ? 'Rounds' : t === 'traces' ? 'Traces' : 'Rubric'}
+            {t === 'rounds' ? 'Rounds' : t === 'operations' ? 'Operations' : t === 'traces' ? 'Traces' : 'Rubric'}
           </button>
         ))}
       </div>
 
       {tab === 'rounds' ? <RoundsTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
+      {tab === 'operations' ? <OperationsTab slug={slug!} token={token} onError={setError} /> : null}
       {tab === 'traces' ? <TracesTab slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
       {tab === 'rubric' ? <RubricTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
     </main>
@@ -417,6 +423,147 @@ function TrajectorySection({
   );
 }
 
+/* ---- Operating documents ------------------------------------------------ */
+
+const DOC_KINDS: { id: DocumentKind; label: string; hint: string }[] = [
+  { id: 'policy', label: 'Policy', hint: 'The rules. Refund limits, escalation thresholds, what is never allowed.' },
+  { id: 'sop', label: 'Procedure', hint: 'How the work is done, step by step.' },
+  { id: 'decision', label: 'Decision record', hint: 'The thread or memo where someone settled a hard case.' },
+  { id: 'other', label: 'Other', hint: 'Anything else that encodes how you decide.' },
+];
+
+/**
+ * Where a team puts what they have already written down.
+ *
+ * These are read, never graded. They are kept apart from traces on purpose: a
+ * policy in a grading queue would be nonsense, and the separation is enforced
+ * by the schema rather than by remembering.
+ */
+function OperationsTab({ slug, token, onError }: { slug: string; token: string; onError: (m: string) => void }) {
+  const { data, loading, reload } = useAsync(() => api.documents(slug, token), [slug, token]);
+  const [title, setTitle] = useState('');
+  const [kind, setKind] = useState<DocumentKind>('policy');
+  const [content, setContent] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const documents = data?.documents ?? [];
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!content.trim()) return;
+    setBusy(true);
+    try {
+      await api.addDocuments(slug, token, [{ title: title.trim() || 'Untitled document', kind, content }]);
+      setTitle('');
+      setContent('');
+      reload();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not save that document.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rail-grid">
+      <div className="col">
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>What you already have written down</h3>
+          <p className="tiny" style={{ marginTop: 0 }}>
+            Your refund policy, your escalation rules, the thread where someone settled a hard case. These become the
+            rubric — each criterion quotes the sentence it came from, and anything that contradicts itself or cannot be
+            checked from a conversation gets handed back rather than quietly tidied up.
+          </p>
+
+          <form onSubmit={add}>
+            <div className="row">
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label htmlFor="doc-title">Title</label>
+                <input
+                  id="doc-title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Refund policy, Q3"
+                />
+              </div>
+              <div className="field shrink" style={{ marginBottom: 0, width: 200 }}>
+                <label htmlFor="doc-kind">Kind</label>
+                <select id="doc-kind" value={kind} onChange={(e) => setKind(e.target.value as DocumentKind)}>
+                  {DOC_KINDS.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="field" style={{ marginTop: 14 }}>
+              <label htmlFor="doc-body">Paste it in</label>
+              <textarea
+                id="doc-body"
+                rows={8}
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder={DOC_KINDS.find((k) => k.id === kind)?.hint}
+              />
+            </div>
+            <button type="submit" disabled={busy || !content.trim()}>
+              {busy ? 'Saving…' : 'Add document'}
+            </button>
+          </form>
+        </div>
+
+        {loading && !data ? (
+          <Loading what="documents" />
+        ) : documents.length === 0 ? (
+          <div className="empty">
+            Nothing yet. Most teams already have this written somewhere — start with whatever governs the decisions your
+            agent is making.
+          </div>
+        ) : (
+          <div className="scroll-x">
+            <table>
+              <caption>{documents.length} document{documents.length === 1 ? '' : 's'}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Title</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Length</th>
+                  <th scope="col" />
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map((doc) => (
+                  <tr key={doc.id}>
+                    <td className="case">{doc.title}</td>
+                    <td>{DOC_KINDS.find((k) => k.id === doc.kind)?.label ?? doc.kind}</td>
+                    <td>{doc.content.length.toLocaleString()} chars</td>
+                    <td>
+                      <button
+                        className="ghost tiny-btn"
+                        onClick={async () => {
+                          try {
+                            await api.deleteDocument(slug, token, doc.id);
+                            reload();
+                          } catch (err) {
+                            onError(err instanceof Error ? err.message : 'Could not remove that document.');
+                          }
+                        }}
+                      >
+                        remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /* ---- Traces ------------------------------------------------------------- */
 
 function TracesTab({
@@ -591,11 +738,19 @@ function DraftPanel({
   const [open, setOpen] = useState(startOpen);
   const [description, setDescription] = useState('');
   const [picked, setPicked] = useState<Set<string> | null>(null);
+  const [pickedDocs, setPickedDocs] = useState<Set<string> | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<DraftResponse | null>(null);
 
   const traces = useAsync(() => (open ? api.traces(slug, token) : Promise.resolve({ traces: [] })), [slug, token, open]);
+  const docs = useAsync(
+    () => (open ? api.documents(slug, token) : Promise.resolve({ documents: [] })),
+    [slug, token, open],
+  );
   const available = traces.data?.traces ?? [];
+  const availableDocs = docs.data?.documents ?? [];
+  // Documents are the point, so they are all selected by default.
+  const selectedDocs = pickedDocs ?? new Set(availableDocs.map((d) => d.id));
 
   // Pre-select enough to see a pattern without making the first click a chore.
   const selected = picked ?? new Set(available.slice(0, Math.min(6, available.length)).map((t) => t.id));
@@ -607,12 +762,25 @@ function DraftPanel({
     setPicked(next);
   }
 
+  function toggleDoc(id: string) {
+    const next = new Set(selectedDocs);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPickedDocs(next);
+  }
+
   async function requestDraft(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setDraft(null);
     try {
-      setDraft(await api.draftRubric(slug, token, { description, traceIds: [...selected] }));
+      setDraft(
+        await api.draftRubric(slug, token, {
+          description,
+          documentIds: [...selectedDocs],
+          traceIds: [...selected],
+        }),
+      );
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Could not draft a rubric.');
     } finally {
@@ -644,9 +812,10 @@ function DraftPanel({
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>Draft a rubric from your conversations</h3>
 
-      {traceCount === 0 ? (
+      {traceCount === 0 && availableDocs.length === 0 ? (
         <div className="empty">
-          Add some conversations on the Traces tab first. A rubric drafted from nothing is just a guess with formatting.
+          Add what you have already written down on the Operations tab, or some conversations on Traces. A rubric
+          drafted from nothing is just a guess with formatting.
         </div>
       ) : (
         <form onSubmit={requestDraft}>
@@ -664,8 +833,31 @@ function DraftPanel({
             </p>
           </div>
 
+          {availableDocs.length > 0 ? (
+            <div className="field">
+              <label>Which of your operating documents to read</label>
+              <div className="pill-row">
+                {availableDocs.map((doc) => (
+                  <button
+                    type="button"
+                    key={doc.id}
+                    className={`pill${selectedDocs.has(doc.id) ? ' on' : ''}`}
+                    onClick={() => toggleDoc(doc.id)}
+                    aria-pressed={selectedDocs.has(doc.id)}
+                  >
+                    {doc.title}
+                  </button>
+                ))}
+              </div>
+              <p className="tiny" style={{ margin: 0 }}>
+                Every criterion will quote the sentence it came from. Anything that contradicts itself, or that nobody
+                could check from a conversation, comes back as a conflict instead of a rule.
+              </p>
+            </div>
+          ) : null}
+
           <div className="field">
-            <label>Which conversations to read</label>
+            <label>Which conversations to read{availableDocs.length > 0 ? ' as well' : ''}</label>
             {traces.loading ? (
               <Loading what="conversations" />
             ) : (
@@ -691,8 +883,18 @@ function DraftPanel({
             </p>
           </div>
 
-          <button type="submit" disabled={busy || selected.size === 0 || description.trim().length < 10}>
-            {busy ? 'Reading…' : `Draft from ${selected.size} conversation${selected.size === 1 ? '' : 's'}`}
+          <button
+            type="submit"
+            disabled={busy || (selected.size === 0 && selectedDocs.size === 0) || description.trim().length < 10}
+          >
+            {busy
+              ? 'Reading…'
+              : `Draft from ${[
+                  selectedDocs.size > 0 ? `${selectedDocs.size} document${selectedDocs.size === 1 ? '' : 's'}` : '',
+                  selected.size > 0 ? `${selected.size} conversation${selected.size === 1 ? '' : 's'}` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' and ')}`}
           </button>
           <button type="button" className="ghost" style={{ marginLeft: 8 }} onClick={() => setOpen(false)}>
             Cancel
@@ -729,11 +931,43 @@ function DraftPanel({
           {draft.draft.criteria.length > 0 ? (
             <ul className="plain">
               {draft.draft.criteria.map((c) => (
-                <li key={c.id}>
+                <li key={c.id} style={{ marginBottom: 12 }}>
                   <strong>{c.title}</strong> — {c.body}
+                  {c.source ? (
+                    <div className="quote">
+                      “{c.source.quote}”
+                      <span className="quote-src">{c.source.document}</span>
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
+          ) : null}
+
+          {draft.draft.conflicts.length > 0 ? (
+            <>
+              <h4>What could not become a rule</h4>
+              <p className="tiny" style={{ marginTop: 0 }}>
+                These are left exactly as found. Reconciling them here would hand you a tidy rubric built on a decision
+                nobody in your team actually made.
+              </p>
+              <ul className="plain">
+                {draft.draft.conflicts.map((c) => (
+                  <li key={c.id} style={{ marginBottom: 10 }}>
+                    <span className={`verdict ${c.kind === 'contradiction' ? 'v-fail' : 'v-mid'}`}>
+                      {c.kind === 'contradiction' ? 'contradiction' : 'not checkable'}
+                    </span>{' '}
+                    <strong>{c.statement}</strong>
+                    {c.detail ? (
+                      <div className="tiny" style={{ marginTop: 3 }}>
+                        {c.detail}
+                        {c.documents.length > 0 ? ` — ${c.documents.join(', ')}` : ''}
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
 
           <h4>What it does not answer</h4>
@@ -796,6 +1030,7 @@ function RubricTab({
   const [criteria, setCriteria] = useState<RubricCriterion[]>(rubric?.criteria ?? []);
   const [scale, setScale] = useState<VerdictLevel[]>(rubric?.scale ?? []);
   const [questions, setQuestions] = useState<DraftQuestion[]>(rubric?.openQuestions ?? []);
+  const [conflicts, setConflicts] = useState<DraftConflict[]>(rubric?.conflicts ?? []);
   const [draftedFrom, setDraftedFrom] = useState(rubric?.draftedFrom ?? null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
@@ -811,6 +1046,7 @@ function RubricTab({
     setCriteria(draft.draft.criteria);
     setScale(draft.draft.scale);
     setQuestions(draft.draft.openQuestions);
+    setConflicts(draft.draft.conflicts);
     setDraftedFrom(draft.draftedFrom);
     setSaved(null);
   }
@@ -826,6 +1062,7 @@ function RubricTab({
         criteria,
         scale,
         openQuestions: questions,
+        conflicts,
         draftedFrom,
       });
       setSaved(
@@ -958,6 +1195,39 @@ function RubricTab({
                 Add criterion
               </button>
             </div>
+
+            {conflicts.length > 0 ? (
+              <div className="field">
+                <label>Rules that could not become tests</label>
+                <p className="tiny" style={{ marginTop: 0 }}>
+                  Straight from your own documents, unreconciled. Settle each one where it lives — in the policy — then
+                  strike it here and redraft.
+                </p>
+                {conflicts.map((c, i) => (
+                  <div key={c.id} className="panel" style={{ marginBottom: 10, padding: '14px 16px' }}>
+                    <div className="between">
+                      <span className={`verdict ${c.kind === 'contradiction' ? 'v-fail' : 'v-mid'}`}>
+                        {c.kind === 'contradiction' ? 'contradiction' : 'not checkable'}
+                      </span>
+                      <button
+                        type="button"
+                        className="ghost tiny-btn"
+                        onClick={() => setConflicts(conflicts.filter((_, j) => j !== i))}
+                      >
+                        settled
+                      </button>
+                    </div>
+                    <p style={{ margin: '8px 0 0' }}>{c.statement}</p>
+                    {c.detail ? (
+                      <p className="tiny" style={{ margin: '4px 0 0' }}>
+                        {c.detail}
+                        {c.documents.length > 0 ? ` — ${c.documents.join(', ')}` : ''}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {questions.length > 0 ? (
               <div className="field">

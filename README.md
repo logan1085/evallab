@@ -83,17 +83,22 @@ directly and would not catch a broken import or a pool rebuilt per request.
 1. **Bring in traces.** Paste, JSONL, or CSV. Field names are matched loosely,
    because eval platforms disagree about whether the transcript lives under
    `output`, `completion`, `messages`, or `trace`.
-2. **Write a rubric,** import the one you have, or draft one from the traces
-   you just brought in — for teams whose honest answer is that no rubric
-   exists.
-3. **Run a round.** Everyone grades the same sample independently and blind.
-4. **See the splits first,** clustered by the kind of disagreement.
-5. **Resolve each one.** The prompt is always the same: what would the rubric
+2. **Bring in what you already decided.** Your refund policy, your escalation
+   SOP, the thread where someone settled a hard case. These are read, never
+   graded, and they live in their own table so a policy can never appear in
+   somebody's grading queue.
+3. **Turn them into a rubric.** Every rule you have written down gets exactly
+   one of three fates: a criterion that quotes the sentence it came from, a
+   conflict handed back unreconciled, or an open question because the documents
+   never covered the case.
+4. **Run a round.** Everyone grades the same sample independently and blind.
+5. **See the splits first,** clustered by the kind of disagreement.
+6. **Resolve each one.** The prompt is always the same: what would the rubric
    have to say for us to have landed in the same place?
-6. **Ship the revised rubric,** with the agreement number before and after.
-7. **Generate a judge** from the calibrated rubric and score it against the
+7. **Ship the revised rubric,** with the agreement number before and after.
+8. **Generate a judge** from the calibrated rubric and score it against the
    humans on cases it has not seen.
-8. **Run it again.** Shipping a rubric offers the next round in one click,
+9. **Run it again.** Shipping a rubric offers the next round in one click,
    drawn from this round's splits and reusing the identical held-out set. The
    project page then plots held-out agreement across rounds — the only view
    that answers whether any of this worked.
@@ -143,6 +148,21 @@ only means "the rubric improved" if the later round graded the same held-out
 traces with the same panel. Change either and the rounds are reported as
 incomparable, the delta is withheld, and the chart leaves the gap open rather
 than bridging it — naming who joined or dropped out.
+
+**Translating a policy has exactly three outcomes, and only one of them is a
+rule.** A sentence of policy either becomes a criterion — carrying the sentence
+it encodes, quoted, so a person can check the translation did not add or drop a
+condition — or it becomes a conflict, or it becomes an open question. The
+drafter is explicitly forbidden from repairing a contradiction into a clean
+criterion, because a model asked to turn a messy policy into a tidy rubric will
+happily reconcile two conflicting rules and hand back something that looks
+finished. That destroys the most valuable thing the translation finds: written
+operations contradict themselves constantly, and most companies learn this the
+first time somebody tries to automate them.
+
+Conflicts never reach the judge — a rule that contradicts another rule is not
+gradable by anybody, so a judge could only guess or abstain. Citations do reach
+it, because the judge must read exactly what the humans read.
 
 **A drafted rubric has to carry its own gaps.** Asked to draft from a handful
 of transcripts, a model can produce something authoritative-sounding that is,

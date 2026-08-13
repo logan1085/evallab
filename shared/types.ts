@@ -24,10 +24,62 @@ export const DEFAULT_SCALE: VerdictLevel[] = [
   { id: 'pass', label: 'pass', rank: 2 },
 ];
 
+/**
+ * Where a criterion came from in the team's own written operations.
+ *
+ * A criterion drafted from a policy has to be traceable back to the sentence it
+ * encodes, for the same reason a clause carries the trace that produced it: the
+ * question "why does the rubric say this?" must always have an answer that is
+ * not "a model decided". The quote is verbatim so a person can check that the
+ * translation from policy to test did not quietly add or drop a condition.
+ */
+export interface CriterionSource {
+  /** Title of the operating document. */
+  document: string;
+  /** The sentence in that document this criterion encodes, quoted verbatim. */
+  quote: string;
+}
+
 export interface RubricCriterion {
   id: string;
   title: string;
   body: string;
+  /** Set when drafted from a document. Null or absent when a human wrote it. */
+  source?: CriterionSource | null;
+}
+
+/** What a company's written operations say they do. Read, never graded. */
+export type DocumentKind = 'policy' | 'sop' | 'decision' | 'other';
+
+export interface OperatingDocument {
+  id: string;
+  projectId: string;
+  title: string;
+  kind: DocumentKind;
+  content: string;
+  createdAt: string;
+}
+
+/**
+ * A place the written operations cannot be turned into a test.
+ *
+ * This is the honest half of "translate your operations into evals". Real
+ * policies contradict themselves and contain sentences nobody could check from
+ * a transcript, and a drafter that silently produced a clean rubric from a
+ * messy one would be hiding the most useful thing it found. A conflict is
+ * never converted into a criterion — it is handed back for a human to settle.
+ */
+export type ConflictKind = 'contradiction' | 'untestable';
+
+export interface DraftConflict {
+  id: string;
+  kind: ConflictKind;
+  /** What the documents say, in the team's own words. */
+  statement: string;
+  /** Why it cannot become a test as written. */
+  detail: string;
+  /** Documents involved, by title. */
+  documents: string[];
 }
 
 /**
@@ -72,6 +124,8 @@ export interface DraftProvenance {
   model: string;
   /** How the team described their agent when they asked for a draft. */
   describedAs: string;
+  /** Operating documents read. */
+  documentCount: number;
   exampleCount: number;
   /** True when transcripts were trimmed to fit the request. */
   truncated: boolean;
@@ -91,6 +145,8 @@ export interface RubricVersion {
   clauses: RubricClause[];
   /** Carried forward across versions until a resolution answers one and a human removes it. */
   openQuestions: DraftQuestion[];
+  /** Rules from the team's documents that could not become tests. Unresolved by design. */
+  conflicts: DraftConflict[];
   draftedFrom: DraftProvenance | null;
   createdAt: string;
 }

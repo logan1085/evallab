@@ -675,6 +675,21 @@ button.abstain.selected, button.abstain.selected:hover:not(:disabled) {
   margin-bottom: 10px;
 }
 
+/* A criterion's citation: the policy sentence it encodes, verbatim. */
+.quote {
+  border-left: 2px solid var(--hairline);
+  padding: 2px 0 2px 12px;
+  margin-top: 6px;
+  font-size: 13.5px;
+  color: var(--ink-3);
+}
+.quote-src {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink-4);
+  margin-top: 3px;
+}
+
 ul.plain { margin: 0 0 12px; padding-left: 18px; }
 ul.plain li { margin-bottom: 8px; }
 ul.plain li::marker { color: var(--ink-4); }

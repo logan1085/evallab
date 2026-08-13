@@ -10,7 +10,7 @@ import type { RubricVersion, Trace } from './types.js';
 
 export function renderRubricMarkdown(
   rubric: RubricVersion,
-  opts: { includeProvenance?: boolean; includeOpenQuestions?: boolean } = {},
+  opts: { includeProvenance?: boolean; includeOpenQuestions?: boolean; includeConflicts?: boolean } = {},
 ): string {
   const lines: string[] = [];
   lines.push(`# ${rubric.name}`);
@@ -37,6 +37,15 @@ export function renderRubricMarkdown(
       lines.push('');
       lines.push(c.body.trim());
       lines.push('');
+      // The citation is part of the rubric, not a footnote about it, so it goes
+      // to the judge as well as to people. Splitting them would break the one
+      // guarantee that makes a judge's disagreement diagnostic: that it read
+      // exactly what the humans read.
+      if (c.source?.quote) {
+        lines.push(`> ${c.source.quote.trim()}`);
+        lines.push(`> — ${c.source.document}`);
+        lines.push('');
+      }
     }
   }
 
@@ -51,6 +60,21 @@ export function renderRubricMarkdown(
       const provenance =
         opts.includeProvenance && clause.originRoundId ? `  <!-- from round ${clause.originRoundId} -->` : '';
       lines.push(`- ${clause.text.trim()}${provenance}`);
+    }
+    lines.push('');
+  }
+
+  if (opts.includeConflicts && rubric.conflicts.length > 0) {
+    lines.push('## Rules that could not become tests');
+    lines.push('');
+    lines.push(
+      'These came out of the operating documents and are unresolved on purpose. A contradiction is for the team to settle; nothing here has been quietly reconciled.',
+    );
+    lines.push('');
+    for (const c of rubric.conflicts) {
+      const where = c.documents.length > 0 ? ` (${c.documents.join(', ')})` : '';
+      lines.push(`- **${c.kind === 'contradiction' ? 'Contradiction' : 'Not checkable'}${where}:** ${c.statement.trim()}`);
+      if (c.detail.trim()) lines.push(`  ${c.detail.trim()}`);
     }
     lines.push('');
   }
@@ -85,6 +109,10 @@ export function renderRubricMarkdown(
  * measurement artefact is worth more than the honesty gained, so the judge grades
  * the settled rubric and its mistakes on unsettled cases stay visible as
  * disagreement.
+ *
+ * Conflicts are left out for the same reason, and a stronger one: a rule that
+ * contradicts another rule is not gradable by anybody, so handing it to a judge
+ * could only produce a guess or an abstention.
  */
 export function buildJudgeSystemPrompt(rubric: RubricVersion): string {
   const scale = [...rubric.scale].sort((a, b) => b.rank - a.rank);

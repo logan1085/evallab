@@ -143,6 +143,10 @@ function offlineDrafter(): DrafterProvider {
         // Deliberately empty. Criteria are the part that has to come from the
         // transcripts, and this provider has not read them.
         criteria: [],
+        // Finding a contradiction requires reading the documents, which this
+        // provider cannot do. Reporting none is the honest answer, not evidence
+        // that the operating rules are consistent.
+        conflicts: [],
         openQuestions: COMMON_QUESTIONS.map((q, i) => ({ id: `q${i + 1}`, ...q })),
       };
     },

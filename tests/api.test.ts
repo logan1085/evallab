@@ -4,7 +4,7 @@ import type { Express } from 'express';
 import { createApp, MAX_JUDGE_BATCH } from '../server/app.js';
 import type { DB } from '../server/db.js';
 import { testDb } from './helpers.js';
-import { seedDemoProject } from '../server/seed.js';
+import { SEED_DOCUMENT_COUNT, SEED_TRACE_COUNT, seedDemoProject } from '../server/seed.js';
 import * as store from '../server/store.js';
 
 let db: DB;
@@ -590,5 +590,150 @@ describe('judge batch limits', () => {
     await auth(request(app).post(`/api/rounds/${round.id}/judge`))
       .send({ rubricVersionId: rubric.id, arm: 'heldout' })
       .expect(201);
+  });
+});
+
+describe('operating documents', () => {
+  const description = 'A support agent that answers billing questions and can issue refunds.';
+
+  it('stores documents and keeps them out of the grading corpus entirely', async () => {
+    const { project, auth } = await makeProject(4);
+
+    await auth(request(app).post(`/api/projects/${project.slug}/documents`))
+      .send({
+        documents: [
+          { title: 'Refund policy', kind: 'policy', content: 'Refunds under $50 need no approval.' },
+          { title: 'Escalation SOP', kind: 'sop', content: 'Anything over $50 goes to a human.' },
+        ],
+      })
+      .expect(201);
+
+    const docs = (await auth(request(app).get(`/api/projects/${project.slug}/documents`)).expect(200)).body.documents;
+    expect(docs).toHaveLength(2);
+    expect(docs.map((d: { kind: string }) => d.kind)).toEqual(['policy', 'sop']);
+
+    // The whole reason documents live in their own table: a policy in someone's
+    // grading queue is nonsense, and the trace count must not move.
+    const traces = (await auth(request(app).get(`/api/projects/${project.slug}/traces`))).body.traces;
+    expect(traces).toHaveLength(4);
+    expect(JSON.stringify(traces)).not.toContain('Refunds under $50');
+
+    const view = (await auth(request(app).get(`/api/projects/${project.slug}`))).body;
+    expect(view.traceCount).toBe(4);
+  });
+
+  it('drafts from documents alone, with no conversations at all', async () => {
+    const { project, auth } = await makeProject(0);
+    await auth(request(app).post(`/api/projects/${project.slug}/documents`))
+      .send({ documents: [{ title: 'Refund policy', kind: 'policy', content: 'Refunds under $50 need no approval.' }] })
+      .expect(201);
+    const docs = (await auth(request(app).get(`/api/projects/${project.slug}/documents`))).body.documents;
+
+    const res = await auth(request(app).post(`/api/projects/${project.slug}/rubric/draft`))
+      .send({ description, documentIds: [docs[0].id] })
+      .expect(200);
+
+    expect(res.body.draftedFrom.documentCount).toBe(1);
+    expect(res.body.draftedFrom.exampleCount).toBe(0);
+    expect(res.body.usedDocumentIds).toEqual([docs[0].id]);
+    expect(res.body.draft.conflicts).toEqual([]);
+  });
+
+  it('refuses to read another project\'s documents', async () => {
+    const mine = await makeProject(1);
+    const theirs = await makeProject(1);
+    await theirs
+      .auth(request(app).post(`/api/projects/${theirs.project.slug}/documents`))
+      .send({ documents: [{ title: 'Theirs', kind: 'policy', content: 'secret rule' }] })
+      .expect(201);
+    const theirDoc = (await theirs.auth(request(app).get(`/api/projects/${theirs.project.slug}/documents`))).body
+      .documents[0];
+
+    const res = await mine
+      .auth(request(app).post(`/api/projects/${mine.project.slug}/rubric/draft`))
+      .send({ description, documentIds: [theirDoc.id] })
+      .expect(404);
+    expect(res.body.error).toMatch(/not in this project/i);
+  });
+
+  it('carries conflicts and citations onto the saved rubric and into the exports', async () => {
+    const { project, auth } = await makeProject(2);
+    const saved = (
+      await auth(request(app).put(`/api/projects/${project.slug}/rubric`))
+        .send({
+          name: 'From policy',
+          preamble: 'Decide whether the refund was handled to policy.',
+          criteria: [
+            {
+              id: 'c1',
+              title: 'Stays inside the approval limit',
+              body: 'The agent refunds no more than $50 without a human.',
+              source: { document: 'Refund policy', quote: 'Refunds under $50 need no approval.' },
+            },
+          ],
+          conflicts: [
+            {
+              id: 'x1',
+              kind: 'contradiction',
+              statement: 'Two different approval limits.',
+              detail: 'The policy says $50 and the SOP says $100.',
+              documents: ['Refund policy', 'Escalation SOP'],
+            },
+          ],
+        })
+        .expect(200)
+    ).body.rubric;
+
+    expect(saved.conflicts).toHaveLength(1);
+    expect(saved.criteria[0].source.quote).toBe('Refunds under $50 need no approval.');
+
+    const markdown = (await auth(request(app).get(`/api/rubrics/${saved.id}/export?format=md`)).expect(200)).text;
+    expect(markdown).toContain('Refunds under $50 need no approval.');
+    expect(markdown).toContain('could not become tests');
+    expect(markdown).toContain('Two different approval limits.');
+
+    // The judge reads the criterion and its citation — the same text a human
+    // reads — but never the contradiction, which nobody could grade.
+    const judge = (await auth(request(app).get(`/api/rubrics/${saved.id}/export?format=judge`)).expect(200)).text;
+    expect(judge).toContain('Refunds under $50 need no approval.');
+    expect(judge).not.toContain('Two different approval limits.');
+  });
+
+  it('removes a document without touching the rubric drafted from it', async () => {
+    const { project, auth } = await makeProject(1);
+    await auth(request(app).post(`/api/projects/${project.slug}/documents`))
+      .send({ documents: [{ title: 'Temp', kind: 'other', content: 'x' }] })
+      .expect(201);
+    const doc = (await auth(request(app).get(`/api/projects/${project.slug}/documents`))).body.documents[0];
+
+    await auth(request(app).delete(`/api/projects/${project.slug}/documents/${doc.id}`)).expect(204);
+    expect((await auth(request(app).get(`/api/projects/${project.slug}/documents`))).body.documents).toHaveLength(0);
+    await auth(request(app).delete(`/api/projects/${project.slug}/documents/${doc.id}`)).expect(404);
+  });
+});
+
+describe('the demo project', () => {
+  it('ships operating documents that contradict each other on purpose', async () => {
+    const seeded = await seedDemoProject(db);
+    const project = (await store.getProjectById(db, seeded.projectId))!;
+    const auth = (r: request.Test) => r.set('x-gr-token', project.token);
+
+    const docs = (await auth(request(app).get(`/api/projects/${project.slug}/documents`)).expect(200)).body.documents;
+    expect(docs).toHaveLength(SEED_DOCUMENT_COUNT);
+
+    const byTitle = Object.fromEntries(docs.map((d: { title: string; content: string }) => [d.title, d.content]));
+
+    // The defect the demo exists to show: the standard forbids reporting
+    // incomplete work as done, the checklist accepts it when the gap is listed,
+    // and nobody has reconciled them.
+    expect(byTitle['Engineering agent standard']).toMatch(/must not report a task as complete/i);
+    expect(byTitle['Review checklist']).toMatch(/Partial completion is acceptable/i);
+
+    // And one rule that is real but unverifiable from a transcript.
+    expect(byTitle['Engineering agent standard']).toMatch(/use good judgment/i);
+
+    // Documents are not traces, and seeding must not have blurred that.
+    const view = (await auth(request(app).get(`/api/projects/${project.slug}`))).body;
+    expect(view.traceCount).toBe(SEED_TRACE_COUNT);
   });
 });

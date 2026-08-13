@@ -11,8 +11,11 @@ import type { DB } from './db.js';
 import { newId, now } from './db.js';
 import {
   DEFAULT_SCALE,
+  type DocumentKind,
+  type DraftConflict,
   type DraftProvenance,
   type DraftQuestion,
+  type OperatingDocument,
   type Grade,
   type Grader,
   type ItemArm,
@@ -179,6 +182,59 @@ function toTrace(row: Row): Trace {
   };
 }
 
+/* ---- Operating documents ------------------------------------------------ */
+
+export async function addDocuments(
+  db: DB,
+  projectId: string,
+  docs: { title: string; kind?: DocumentKind; content: string }[],
+): Promise<OperatingDocument[]> {
+  const sql = 'INSERT INTO documents (id, project_id, title, kind, content, created_at) VALUES (?, ?, ?, ?, ?, ?)';
+  const out: OperatingDocument[] = [];
+  for (const d of docs) {
+    const doc: OperatingDocument = {
+      id: newId(),
+      projectId,
+      title: d.title.trim() || 'Untitled document',
+      kind: d.kind ?? 'policy',
+      content: d.content,
+      createdAt: now(),
+    };
+    await db.run(sql, doc.id, projectId, doc.title, doc.kind, doc.content, doc.createdAt);
+    out.push(doc);
+  }
+  return out;
+}
+
+export async function listDocuments(db: DB, projectId: string): Promise<OperatingDocument[]> {
+  const rows = (await db.all(
+    'SELECT * FROM documents WHERE project_id = ? ORDER BY created_at, id',
+    projectId,
+  )) as Row[];
+  return rows.map(toDocument);
+}
+
+export async function getDocument(db: DB, id: string): Promise<OperatingDocument | null> {
+  const row = (await db.get('SELECT * FROM documents WHERE id = ?', id)) as Row | undefined;
+  return row ? toDocument(row) : null;
+}
+
+export async function deleteDocument(db: DB, projectId: string, id: string): Promise<boolean> {
+  const res = await db.run('DELETE FROM documents WHERE id = ? AND project_id = ?', id, projectId);
+  return Number(res.changes) > 0;
+}
+
+function toDocument(row: Row): OperatingDocument {
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    title: str(row.title),
+    kind: str(row.kind, 'policy') as DocumentKind,
+    content: str(row.content),
+    createdAt: str(row.created_at),
+  };
+}
+
 /* ---- Rubrics ------------------------------------------------------------ */
 
 export async function createRubricVersion(
@@ -192,6 +248,7 @@ export async function createRubricVersion(
     parentVersionId?: string | null;
     clauses?: { text: string; originItemId?: string | null; originRoundId?: string | null }[];
     openQuestions?: DraftQuestion[];
+    conflicts?: DraftConflict[];
     draftedFrom?: DraftProvenance | null;
   },
 ): Promise<RubricVersion> {
@@ -209,13 +266,14 @@ export async function createRubricVersion(
     criteria: args.criteria ?? [],
     clauses: [],
     openQuestions: args.openQuestions ?? [],
+    conflicts: args.conflicts ?? [],
     draftedFrom: args.draftedFrom ?? null,
     createdAt: now(),
   };
 
   await db.run(`INSERT INTO rubric_versions
-       (id, project_id, version, parent_version_id, name, preamble, scale, criteria, open_questions, drafted_from, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, rubric.id,
+       (id, project_id, version, parent_version_id, name, preamble, scale, criteria, open_questions, conflicts, drafted_from, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, rubric.id,
     rubric.projectId,
     rubric.version,
     rubric.parentVersionId,
@@ -224,6 +282,7 @@ export async function createRubricVersion(
     JSON.stringify(rubric.scale),
     JSON.stringify(rubric.criteria),
     JSON.stringify(rubric.openQuestions),
+    JSON.stringify(rubric.conflicts),
     rubric.draftedFrom ? JSON.stringify(rubric.draftedFrom) : null,
     rubric.createdAt,);
 
@@ -278,6 +337,7 @@ export async function updateRubricInPlace(
     scale?: VerdictLevel[];
     criteria?: RubricVersion['criteria'];
     openQuestions?: DraftQuestion[];
+    conflicts?: DraftConflict[];
     draftedFrom?: DraftProvenance | null;
   },
 ): Promise<RubricVersion | null> {
@@ -289,15 +349,17 @@ export async function updateRubricInPlace(
     scale: patch.scale ?? existing.scale,
     criteria: patch.criteria ?? existing.criteria,
     openQuestions: patch.openQuestions ?? existing.openQuestions,
+    conflicts: patch.conflicts ?? existing.conflicts,
     draftedFrom: patch.draftedFrom === undefined ? existing.draftedFrom : patch.draftedFrom,
   };
   await db.run(`UPDATE rubric_versions
-        SET name = ?, preamble = ?, scale = ?, criteria = ?, open_questions = ?, drafted_from = ?
+        SET name = ?, preamble = ?, scale = ?, criteria = ?, open_questions = ?, conflicts = ?, drafted_from = ?
       WHERE id = ?`, next.name,
     next.preamble,
     JSON.stringify(next.scale),
     JSON.stringify(next.criteria),
     JSON.stringify(next.openQuestions),
+    JSON.stringify(next.conflicts),
     next.draftedFrom ? JSON.stringify(next.draftedFrom) : null,
     id,);
   return await getRubric(db, id);
@@ -327,6 +389,7 @@ async function hydrateRubric(db: DB, row: Row): Promise<RubricVersion> {
     criteria: parseJson<RubricVersion['criteria']>(row.criteria, []),
     clauses,
     openQuestions: parseJson<DraftQuestion[]>(row.open_questions, []),
+    conflicts: parseJson<DraftConflict[]>(row.conflicts, []),
     draftedFrom: row.drafted_from == null ? null : parseJson<DraftProvenance | null>(row.drafted_from, null),
     createdAt: str(row.created_at),
   };

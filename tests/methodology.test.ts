@@ -198,6 +198,7 @@ describe('open questions do not reach the judge', () => {
     openQuestions: [
       { id: 'q1', question: 'Is an escalation a pass?', why: 'No example shows the agent escalating.' },
     ],
+    conflicts: [],
     draftedFrom: null,
     createdAt: '2026-01-01T00:00:00.000Z',
   };

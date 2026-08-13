@@ -58,6 +58,23 @@ CREATE TABLE IF NOT EXISTS traces (
 );
 CREATE INDEX IF NOT EXISTS idx_traces_project ON traces(project_id);
 
+/*
+ * Written operations: policies, SOPs, decision records. Deliberately a separate
+ * table from traces rather than a trace with a different source column, because
+ * the two are never interchangeable: a trace gets graded, a document gets read.
+ * Sharing a table would make "a refund policy appeared in someone's grading
+ * queue" a one-line mistake away.
+ */
+CREATE TABLE IF NOT EXISTS documents (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'policy',
+  content     TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_documents_project ON documents(project_id);
+
 CREATE TABLE IF NOT EXISTS rubric_versions (
   id                TEXT PRIMARY KEY,
   project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -162,6 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_judge_verdicts_run ON judge_verdicts(run_id);
 const MIGRATIONS = `
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
+ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';
 `;
 
 /** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */

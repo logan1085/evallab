@@ -10,8 +10,10 @@
 import type {
   AgreementStats,
   CoverageStats,
+  DocumentKind,
   Grader,
   ItemArm,
+  OperatingDocument,
   Project,
   Resolution,
   Round,
@@ -90,14 +92,16 @@ export interface ProjectView {
   project: Project;
   rubric: RubricVersion | null;
   traceCount: number;
+  documentCount: number;
   graders: Grader[];
   rounds: RoundSummary[];
 }
 
 export interface DraftResponse {
-  draft: Pick<RubricVersion, 'name' | 'preamble' | 'scale' | 'criteria' | 'openQuestions'>;
+  draft: Pick<RubricVersion, 'name' | 'preamble' | 'scale' | 'criteria' | 'openQuestions' | 'conflicts'>;
   provider: { id: string; model: string; real: boolean };
   draftedFrom: NonNullable<RubricVersion['draftedFrom']>;
+  usedDocumentIds: string[];
   usedTraceIds: string[];
 }
 
@@ -235,15 +239,36 @@ export const api = {
     slug: string,
     token: string,
     patch: Pick<RubricVersion, 'name' | 'preamble'> &
-      Partial<Pick<RubricVersion, 'scale' | 'criteria' | 'openQuestions' | 'draftedFrom'>>,
+      Partial<Pick<RubricVersion, 'scale' | 'criteria' | 'openQuestions' | 'conflicts' | 'draftedFrom'>>,
   ) => call<{ rubric: RubricVersion; forked: boolean }>(`/projects/${slug}/rubric`, { method: 'PUT', token, body: json(patch) }),
 
   draftRubric: (
     slug: string,
     token: string,
-    body: { description: string; traceIds?: string[]; examples?: { title: string; content: string }[] },
+    body: {
+      description: string;
+      documentIds?: string[];
+      traceIds?: string[];
+      examples?: { title: string; content: string }[];
+    },
+  ) => call<DraftResponse>(`/projects/${slug}/rubric/draft`, { method: 'POST', token, body: json(body) }),
+
+  documents: (slug: string, token: string) =>
+    call<{ documents: OperatingDocument[] }>(`/projects/${slug}/documents`, { token }),
+
+  addDocuments: (
+    slug: string,
+    token: string,
+    documents: { title: string; kind: DocumentKind; content: string }[],
   ) =>
-    call<DraftResponse>(`/projects/${slug}/rubric/draft`, { method: 'POST', token, body: json(body) }),
+    call<{ documents: OperatingDocument[] }>(`/projects/${slug}/documents`, {
+      method: 'POST',
+      token,
+      body: json({ documents }),
+    }),
+
+  deleteDocument: (slug: string, token: string, id: string) =>
+    call<void>(`/projects/${slug}/documents/${id}`, { method: 'DELETE', token }),
 
   exportUrl: (rubricId: string, token: string, format: 'md' | 'json' | 'judge') =>
     `/api/rubrics/${rubricId}/export?format=${format}&k=${encodeURIComponent(token)}`,

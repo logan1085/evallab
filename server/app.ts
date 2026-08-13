@@ -29,7 +29,9 @@ import {
   coverageStats,
   type ItemContext,
   type ItemVerdicts,
+  type DocumentKind,
   planSample,
+  prepareDocuments,
   prepareExamples,
   renderRubricMarkdown,
   splitsOf,
@@ -125,6 +127,7 @@ export function createApp(db: DB) {
       project,
       rubric: await store.currentRubric(db, project.id),
       traceCount: (await store.listTraces(db, project.id)).length,
+      documentCount: (await store.listDocuments(db, project.id)).length,
       graders: await store.listGraders(db, project.id),
       rounds: await Promise.all(
         (await store.listRounds(db, project.id)).map(async (round) => ({
@@ -267,6 +270,41 @@ export function createApp(db: DB) {
     res.status(201).json({ traces });
   });
 
+  /* ---- Operating documents ---------------------------------------------- */
+
+  api.get('/projects/:slug/documents', requireProject, async (req, res) => {
+    const { project } = req as ProjectRequest;
+    res.json({ documents: await store.listDocuments(db, project.id) });
+  });
+
+  api.post('/projects/:slug/documents', requireProject, async (req, res) => {
+    const body = z
+      .object({
+        documents: z
+          .array(
+            z.object({
+              title: z.string().default(''),
+              kind: z.enum(['policy', 'sop', 'decision', 'other']).default('policy'),
+              content: z.string().min(1),
+            }),
+          )
+          .min(1),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'A document needs some text in it.' });
+
+    const { project } = req as ProjectRequest;
+    const documents = await store.addDocuments(db, project.id, body.data.documents);
+    res.status(201).json({ documents });
+  });
+
+  api.delete('/projects/:slug/documents/:documentId', requireProject, async (req, res) => {
+    const { project } = req as ProjectRequest;
+    const removed = await store.deleteDocument(db, project.id, req.params.documentId!);
+    if (!removed) return res.status(404).json({ error: 'No such document.' });
+    res.status(204).end();
+  });
+
   api.post('/projects/:slug/traces/import', requireProject, async (req, res) => {
     const body = z
       .object({ format: z.enum(['jsonl', 'csv', 'paste']), body: z.string().min(1) })
@@ -309,6 +347,7 @@ export function createApp(db: DB) {
     const body = z
       .object({
         description: z.string().min(10).max(2000),
+        documentIds: z.array(z.string().min(1)).optional(),
         traceIds: z.array(z.string().min(1)).optional(),
         examples: z.array(z.object({ title: z.string().default(''), content: z.string().min(1) })).optional(),
       })
@@ -320,6 +359,17 @@ export function createApp(db: DB) {
     const { project } = req as ProjectRequest;
     const chosen: { title: string; content: string }[] = [];
     const usedTraceIds: string[] = [];
+    const chosenDocs: { title: string; kind: DocumentKind; content: string }[] = [];
+    const usedDocumentIds: string[] = [];
+
+    for (const documentId of body.data.documentIds ?? []) {
+      const doc = await store.getDocument(db, documentId);
+      if (!doc || doc.projectId !== project.id) {
+        return res.status(404).json({ error: 'One of those documents is not in this project.' });
+      }
+      chosenDocs.push({ title: doc.title, kind: doc.kind, content: doc.content });
+      usedDocumentIds.push(doc.id);
+    }
 
     for (const traceId of body.data.traceIds ?? []) {
       const trace = await store.getTrace(db, traceId);
@@ -335,15 +385,22 @@ export function createApp(db: DB) {
       chosen.push({ title: example.title || 'Pasted conversation', content: example.content });
     }
 
-    if (chosen.length === 0) {
-      return res.status(400).json({ error: 'Pick or paste at least one conversation to draft from.' });
+    if (chosen.length === 0 && chosenDocs.length === 0) {
+      return res
+        .status(400)
+        .json({ error: 'Pick at least one operating document or conversation to draft from.' });
     }
 
     const prepared = prepareExamples(chosen);
+    const preparedDocs = prepareDocuments(chosenDocs);
     const drafter = resolveDrafter();
 
     try {
-      const draft = await drafter.draft({ description: body.data.description, examples: prepared.examples });
+      const draft = await drafter.draft({
+        description: body.data.description,
+        documents: preparedDocs.documents,
+        examples: prepared.examples,
+      });
       res.json({
         draft,
         provider: { id: drafter.id, model: drafter.model, real: drafter.real },
@@ -351,10 +408,12 @@ export function createApp(db: DB) {
           provider: drafter.id,
           model: drafter.model,
           describedAs: body.data.description.trim(),
+          documentCount: preparedDocs.documents.length,
           exampleCount: prepared.examples.length,
-          truncated: prepared.truncated,
+          truncated: prepared.truncated || preparedDocs.truncated,
           createdAt: new Date().toISOString(),
         },
+        usedDocumentIds,
         usedTraceIds,
       });
     } catch (error) {
@@ -375,16 +434,40 @@ export function createApp(db: DB) {
           .min(2)
           .optional(),
         criteria: z
-          .array(z.object({ id: z.string().min(1), title: z.string().min(1), body: z.string().default('') }))
+          .array(
+            z.object({
+              id: z.string().min(1),
+              title: z.string().min(1),
+              body: z.string().default(''),
+              // Without this the citation is silently stripped, and a criterion
+              // drafted from a policy loses the sentence that justifies it.
+              source: z
+                .object({ document: z.string().min(1), quote: z.string().min(1) })
+                .nullable()
+                .optional(),
+            }),
+          )
           .optional(),
         openQuestions: z
           .array(z.object({ id: z.string().min(1), question: z.string().min(1), why: z.string().default('') }))
+          .optional(),
+        conflicts: z
+          .array(
+            z.object({
+              id: z.string().min(1),
+              kind: z.enum(['contradiction', 'untestable']),
+              statement: z.string().min(1),
+              detail: z.string().default(''),
+              documents: z.array(z.string()).default([]),
+            }),
+          )
           .optional(),
         draftedFrom: z
           .object({
             provider: z.string(),
             model: z.string(),
             describedAs: z.string(),
+            documentCount: z.number().int().nonnegative().default(0),
             exampleCount: z.number().int().nonnegative(),
             truncated: z.boolean(),
             createdAt: z.string(),
@@ -416,6 +499,7 @@ export function createApp(db: DB) {
           originRoundId: c.originRoundId,
         })),
         openQuestions: body.data.openQuestions ?? current.openQuestions,
+        conflicts: body.data.conflicts ?? current.conflicts,
         draftedFrom: body.data.draftedFrom === undefined ? current.draftedFrom : body.data.draftedFrom,
       });
       return res.json({ rubric: forked, forked: true });
@@ -444,7 +528,7 @@ export function createApp(db: DB) {
       return res.send(buildJudgeSystemPrompt(rubric));
     }
     res.setHeader('content-type', 'text/markdown; charset=utf-8');
-    res.send(renderRubricMarkdown(rubric, { includeProvenance: false, includeOpenQuestions: true }));
+    res.send(renderRubricMarkdown(rubric, { includeProvenance: false, includeOpenQuestions: true, includeConflicts: true }));
   });
 
   /* ---- Graders ---------------------------------------------------------- */
