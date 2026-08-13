@@ -71,6 +71,59 @@ that dies halfway would leave a partial set of verdicts that got scored as
 though it were the whole arm. Lifting the cap means a queue, and that is not
 built.
 
+## An agent as the operator
+
+Agents are a first-class user here, not an afterthought. `mcp/server.ts` is an
+MCP server that lets Claude — or anything else that speaks MCP — run the whole
+loop: create a project, feed it your policies, translate them into a rubric,
+open a round, read the report, score a judge.
+
+```
+npm run build:mcp
+```
+
+Then point your agent host at it. For Claude Code:
+
+```
+claude mcp add grading-room --env GR_BASE_URL=https://your-deployment.vercel.app -- node /abs/path/to/dist/mcp.js
+```
+
+Or in a Claude Desktop config:
+
+```json
+{
+  "mcpServers": {
+    "grading-room": {
+      "command": "node",
+      "args": ["/abs/path/to/dist/mcp.js"],
+      "env": { "GR_BASE_URL": "https://your-deployment.vercel.app" }
+    }
+  }
+}
+```
+
+It talks to the HTTP API rather than the database, so the same binary works
+against a local dev instance or the deployed one.
+
+### The one thing an agent cannot do
+
+**It cannot join a round as a grader.** There is no tool for it, and a test
+asserts no tool name even contains "grade".
+
+The product's central number is agreement between independent human raters. If
+a model quietly becomes one of those raters, "your team agreed 72% of the time"
+turns into "two people and a language model agreed 72% of the time" — a
+different claim, under the same name, that no caller would notice. The HTTP API
+will happily let anything join with any name, so the guard lives where the agent
+actually is.
+
+An agent that wants a model's verdicts has a correct path: `run_judge` builds a
+judge from the rubric and scores it *against* the humans on cases it has not
+seen. Scored against, never counted among. That is the same line the schema
+draws between `graders` and `judge_runs`, and the MCP surface refuses to blur
+it — including in the tool descriptions, since a description is the only thing
+the calling model reads before it picks a tool.
+
 ## CI
 
 `.github/workflows/ci.yml` runs typecheck, tests and the build. A second job
@@ -211,7 +264,9 @@ and the types the UI renders cannot drift.
 | `npm run dev` | API on :8787, UI on :5173 with a proxy |
 | `npm run seed` | Create the demo project, print its link |
 | `npm run db:migrate` | Create or update the schema on `DATABASE_URL` |
-| `npm test` | 114 tests |
+| `npm run mcp` | Run the MCP server over stdio (dev) |
+| `npm run build:mcp` | Bundle it to `dist/mcp.js` for an agent host |
+| `npm test` | 137 tests |
 | `npm run typecheck` | `tsc --noEmit` across shared, server, web, tests |
 | `npm run build` | SPA to `dist/web`, server bundle to `dist/server.js` |
 | `npm start` | Serve both from :8787 on one origin |
@@ -226,6 +281,7 @@ and the types the UI renders cannot drift.
 | `GR_JUDGE_MODEL` | `claude-opus-5` | Model for judge runs |
 | `GR_DRAFT_MODEL` | `claude-opus-5` | Model for rubric drafting |
 | `GR_PG_MAX` | `4` | Pool size per serverless instance |
+| `GR_BASE_URL` | `http://localhost:8787` | Which instance the MCP server talks to |
 
 ## Scope
 
