@@ -124,6 +124,19 @@ draws between `graders` and `judge_runs`, and the MCP surface refuses to blur
 it — including in the tool descriptions, since a description is the only thing
 the calling model reads before it picks a tool.
 
+### A second direction, prototyped
+
+`web/public/agent.html` — served at `/agent.html` — sketches the version of this
+aimed at agents rather than companies: Claude reads a repository's own standards
+(`CLAUDE.md`, the contributing guide, the review checklist) and hands back the
+rules that cancel each other out. Same machinery, pointed somewhere new.
+
+It is a prototype and says so on the page. The MCP server underneath it is real.
+
+The page shares the landing page's design tokens by copy, and a test asserts the
+two never drift — "it matches the landing page" is the sort of claim that
+quietly stops being true.
+
 ## CI
 
 `.github/workflows/ci.yml` runs typecheck, tests and the build. A second job
@@ -266,7 +279,7 @@ and the types the UI renders cannot drift.
 | `npm run db:migrate` | Create or update the schema on `DATABASE_URL` |
 | `npm run mcp` | Run the MCP server over stdio (dev) |
 | `npm run build:mcp` | Bundle it to `dist/mcp.js` for an agent host |
-| `npm test` | 137 tests |
+| `npm test` | 148 tests |
 | `npm run typecheck` | `tsc --noEmit` across shared, server, web, tests |
 | `npm run build` | SPA to `dist/web`, server bundle to `dist/server.js` |
 | `npm start` | Serve both from :8787 on one origin |
