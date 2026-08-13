@@ -5,7 +5,14 @@
  * both idempotent and actually effective, and this exercises each.
  */
 import { describe, expect, it } from 'vitest';
-import { ensureSchema, openDb, toPositional, type DB } from '../server/db.js';
+import {
+  CONNECTION_URL_VARS,
+  ensureSchema,
+  openDb,
+  resolveConnection,
+  toPositional,
+  type DB,
+} from '../server/db.js';
 import * as store from '../server/store.js';
 
 async function columns(db: DB): Promise<string[]> {
@@ -82,5 +89,42 @@ describe('placeholder rewriting', () => {
     expect(toPositional('UPDATE t\n  SET a = ?,\n      b = ?\n  WHERE id = ?')).toBe(
       'UPDATE t\n  SET a = $1,\n      b = $2\n  WHERE id = $3',
     );
+  });
+});
+
+/**
+ * Provisioning Postgres from inside Vercel writes the credentials into a
+ * variable whose name depends on which integration was used. Reading only one
+ * name turns a two-click setup into a 503 with no visible cause.
+ */
+describe('finding the connection string', () => {
+  it('accepts every variable the hosting integrations write', () => {
+    for (const name of CONNECTION_URL_VARS) {
+      const found = resolveConnection({ [name]: 'postgresql://u:p@host/db' } as NodeJS.ProcessEnv);
+      expect(found.via, name).toBe(name);
+      expect(found.url).toBe('postgresql://u:p@host/db');
+    }
+  });
+
+  it('prefers a pooled variable over an unpooled one when both are present', () => {
+    // Neon's integration sets both. Serving traffic on the direct connection
+    // works until load arrives and then exhausts Postgres.
+    const found = resolveConnection({
+      DATABASE_URL_UNPOOLED: 'postgresql://u:p@ep-x-123.aws.neon.tech/db',
+      DATABASE_URL: 'postgresql://u:p@ep-x-123-pooler.aws.neon.tech/db',
+    } as NodeJS.ProcessEnv);
+    expect(found.via).toBe('DATABASE_URL');
+    expect(found.pooled).toBe(true);
+  });
+
+  it('recognises a direct connection so it can be warned about', () => {
+    expect(resolveConnection({ DATABASE_URL: 'postgresql://u:p@ep-x-123.aws.neon.tech/db' } as NodeJS.ProcessEnv).pooled)
+      .toBe(false);
+  });
+
+  it('treats blank and absent the same, so an empty dashboard field falls through', () => {
+    const found = resolveConnection({ DATABASE_URL: '   ', POSTGRES_URL: 'postgresql://u:p@h/d' } as NodeJS.ProcessEnv);
+    expect(found.via).toBe('POSTGRES_URL');
+    expect(resolveConnection({} as NodeJS.ProcessEnv).url).toBeNull();
   });
 });

@@ -23,30 +23,48 @@ npm run dev      # http://localhost:5173
 Frontend and API both run on Vercel; the data lives in Postgres. There is no
 server to keep alive and no disk to look after.
 
-**1. A Postgres database.** Any provider works; [Neon](https://neon.tech) has a
-free tier. Copy the **pooled** connection string — serverless functions open
-connections quickly and a direct connection runs out of them.
+**1. Import the repo into Vercel.** Change no build settings — `vercel.json`
+already handles them.
 
-**2. Import the repo into Vercel** and set two environment variables:
+**2. Add a database from inside Vercel.** Project → Storage → Create Database →
+Neon. It provisions one and writes the credentials into the project for you, so
+you never handle the connection string. Redeploy once afterwards so the new
+variables are picked up.
 
-| | |
-|---|---|
-| `DATABASE_URL` | the pooled connection string, required |
-| `ANTHROPIC_API_KEY` | optional; without it the judge and the rubric drafter are labelled stubs |
+The app reads whichever variable the integration wrote — `DATABASE_URL`,
+`POSTGRES_URL`, or their unpooled counterparts — preferring a pooled one,
+because serverless functions exhaust a direct connection under load. Provisioning
+by hand from [neon.tech](https://neon.tech) works identically: set `DATABASE_URL`
+to the **pooled** string, the one with `-pooler` in the hostname.
+
+**Optionally** set `ANTHROPIC_API_KEY`. Without it the judge and the rubric
+drafter run as clearly labelled stubs: no criteria are invented and no conflicts
+are found, which is honest but is not the demo worth showing.
 
 `vercel.json` already points the build at the SPA, routes `/api/*` to the single
 function in `api/`, and gives that function the full 60 seconds a judge run
 needs.
 
-**3. Create the schema.**
+**3. Create the schema.** If Vercel provisioned the database, pull its
+variables first:
 
 ```
-DATABASE_URL='postgresql://…' npm run db:migrate
+npx vercel env pull .env.local
+set -a && . ./.env.local && set +a && npm run db:migrate
 ```
 
-`openDb()` also runs this on every cold start, so it is not strictly required —
-but running it explicitly means a bad connection string fails here, with a clear
-message, instead of as a 500 on somebody's first request.
+Or with a string you hold yourself — single quotes, because `?` and `&` mean
+things to your shell and a password can contain `$`:
+
+```
+DATABASE_URL='postgresql://…?sslmode=require' npm run db:migrate
+```
+
+It prints which variable it used, warns if that connection is unpooled, and
+names any missing table. `openDb()` runs the same migration on every cold start,
+so this is not strictly required — but running it explicitly means a bad
+connection string fails here, with a clear message, rather than as a 500 on
+somebody's first request.
 
 Then open the deployment, create a project, and share the link.
 
@@ -287,7 +305,7 @@ and the types the UI renders cannot drift.
 | `npm run db:migrate` | Create or update the schema on `DATABASE_URL` |
 | `npm run mcp` | Run the MCP server over stdio (dev) |
 | `npm run build:mcp` | Bundle it to `dist/mcp.js` for an agent host |
-| `npm test` | 148 tests |
+| `npm test` | 152 tests |
 | `npm run typecheck` | `tsc --noEmit` across shared, server, web, tests |
 | `npm run build` | SPA to `dist/web`, server bundle to `dist/server.js` |
 | `npm start` | Serve both from :8787 on one origin |
@@ -297,6 +315,7 @@ and the types the UI renders cannot drift.
 | Variable | Default | Meaning |
 |---|---|---|
 | `DATABASE_URL` | unset | Postgres. Unset means in-memory PGlite, which is not durable |
+| `POSTGRES_URL` | unset | Accepted too; whichever variable your host's integration wrote |
 | `PORT` | `8787` | HTTP port, standalone server only |
 | `ANTHROPIC_API_KEY` | unset | Enables the real judge and the real rubric drafter |
 | `GR_JUDGE_MODEL` | `claude-opus-5` | Model for judge runs |

@@ -272,12 +272,51 @@ async function poolDb(connectionString: string): Promise<DB> {
 }
 
 /**
- * `:memory:` and an unset DATABASE_URL both mean PGlite. The second is the
- * developer default: `npm run dev` works with nothing installed, and the data
- * is gone on restart — which is the honest behaviour, rather than a file that
- * looks durable and is not the thing production runs on.
+ * Where a connection string can come from, best first.
+ *
+ * Provisioning Postgres from inside Vercel's Storage tab injects the credentials
+ * for you, which is the easiest way to set this up — but the variable it writes
+ * depends on which integration you picked. Neon's marketplace listing writes
+ * DATABASE_URL; the older Vercel Postgres writes POSTGRES_URL. Reading only one
+ * of those turns a two-click setup into a 503 whose cause is invisible from the
+ * dashboard, so all four names are accepted.
+ *
+ * Pooled entries come first on purpose. An unpooled connection works fine until
+ * traffic arrives and then exhausts Postgres's connection limit, which fails
+ * intermittently and looks like anything but a configuration mistake.
  */
-export async function openDb(url = process.env.DATABASE_URL ?? ':memory:'): Promise<DB> {
+export const CONNECTION_URL_VARS = [
+  'DATABASE_URL',
+  'POSTGRES_URL',
+  'DATABASE_URL_UNPOOLED',
+  'POSTGRES_URL_NON_POOLING',
+] as const;
+
+export interface ResolvedConnection {
+  url: string | null;
+  /** Which variable it came from, so a misconfiguration can be named. */
+  via: string | null;
+  /** Neon marks pooled endpoints with `-pooler` in the hostname. */
+  pooled: boolean;
+}
+
+export function resolveConnection(env: NodeJS.ProcessEnv = process.env): ResolvedConnection {
+  for (const name of CONNECTION_URL_VARS) {
+    const value = env[name];
+    if (value && value.trim()) {
+      return { url: value.trim(), via: name, pooled: /-pooler\./.test(value) };
+    }
+  }
+  return { url: null, via: null, pooled: false };
+}
+
+/**
+ * No connection string at all means PGlite. That is the developer default:
+ * `npm run dev` works with nothing installed, and the data is gone on restart —
+ * the honest behaviour, rather than a file that looks durable and is not the
+ * thing production runs on.
+ */
+export async function openDb(url = resolveConnection().url ?? ':memory:'): Promise<DB> {
   const db = url === ':memory:' ? await pgliteDb() : await poolDb(url);
   await ensureSchema(db);
   return db;
