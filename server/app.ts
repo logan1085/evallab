@@ -43,10 +43,24 @@ interface ProjectRequest extends Request {
 }
 
 /**
- * Items a single judge run will grade. Sized to finish inside a serverless
- * function's 60s ceiling at four concurrent calls; a real queue lifts it.
+ * Items a single judge run will grade.
+ *
+ * Derived, not picked. Items run four at a time, so N items is ceil(N/4) waves;
+ * a judge call with thinking on takes roughly 5-12s. Sixteen is four waves, so
+ * about 48s at the pessimistic end — inside a 60s function with room to spare.
+ * Forty would have been ten waves and up to two minutes, which is a timeout
+ * dressed as a limit.
+ *
+ * Nothing real wants more than this anyway. A round is bounded by the
+ * thirty-minute attention budget at ~24 traces, and a judge run scores one arm
+ * of one round. The statistics want *enough*, not many: five comparable items
+ * before alpha is reported at all, eight before an interval is. Sixteen clears
+ * both with headroom.
+ *
+ * A queue lifts the ceiling. Until then the API refuses above it rather than
+ * starting a run it cannot finish.
  */
-export const MAX_JUDGE_BATCH = 40;
+export const MAX_JUDGE_BATCH = 16;
 
 export function createApp(db: DB) {
   const app = express();
@@ -915,7 +929,7 @@ export function createApp(db: DB) {
     // happened to finish first. Above this, the run needs a queue.
     if (items.length > MAX_JUDGE_BATCH) {
       return res.status(413).json({
-        error: `This arm has ${items.length} items, and a judge run is capped at ${MAX_JUDGE_BATCH} so it finishes inside the request. Run the judge on a smaller round.`,
+        error: `This arm has ${items.length} items, and a judge run is capped at ${MAX_JUDGE_BATCH} so it finishes inside the request. Run the judge on a smaller round — ${MAX_JUDGE_BATCH} items is already more than the statistics need.`,
         code: 'batch_too_large',
         limit: MAX_JUDGE_BATCH,
       });

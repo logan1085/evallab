@@ -65,11 +65,19 @@ be the thing production runs on. Set `DATABASE_URL` to point at a real database.
 ### What is not on the queue yet
 
 A judge run grades a whole arm through an LLM, which is the one operation here
-that does not fit inside a request. It runs inline, capped at 40 items, and the
+that does not fit inside a request. It runs inline, capped at 16 items, and the
 API refuses a larger batch rather than starting one it cannot finish — a run
 that dies halfway would leave a partial set of verdicts that got scored as
-though it were the whole arm. Lifting the cap means a queue, and that is not
-built.
+though it were the whole arm.
+
+Sixteen is derived, not picked. Items grade four at a time, so N items is
+ceil(N/4) waves and a judge call takes roughly 5–12s: sixteen is four waves,
+about 48s at the pessimistic end, inside a 60s function. It is also more than
+the statistics need — five comparable items before alpha is reported at all,
+eight before an interval is — and more than a round can realistically hold,
+since the thirty-minute attention budget caps a round near 24 traces and a
+judge run scores one arm of one. Lifting the ceiling means a queue, and that is
+not built.
 
 ## An agent as the operator
 
@@ -317,7 +325,7 @@ Known limits of this version, stated rather than managed away:
 - The shared link is still the only tenancy. Every project in one deployment
   sits in one database, separated by an unguessable slug and token and nothing
   else. Accounts are meant to come from Clerk; see `ARCHITECTURE.md`.
-- Judge runs are capped at 40 items because they run inside the request. A
+- Judge runs are capped at 16 items because they run inside the request. A
   queue is the fix and is not built.
 - The deployment has been verified against PGlite — real Postgres, compiled to
   WASM — and through the serverless entry over HTTP, but not yet against a
