@@ -38,9 +38,9 @@ export function ProjectPage() {
         title={data.project.name}
         standfirst={[
           `${data.documentCount} document${data.documentCount === 1 ? '' : 's'}`,
-          `${data.traceCount} conversation${data.traceCount === 1 ? '' : 's'}`,
-          `rubric v${data.rubric?.version ?? 1}`,
-          `${data.rounds.length} round${data.rounds.length === 1 ? '' : 's'}`,
+          `${data.traceCount} scenario${data.traceCount === 1 ? '' : 's'}`,
+          `standards v${data.rubric?.version ?? 1}`,
+          `${data.rounds.length} poll${data.rounds.length === 1 ? '' : 's'}`,
         ].join(' · ')}
       />
 
@@ -67,7 +67,7 @@ export function ProjectPage() {
       <div className="tabs">
         {(['rounds', 'operations', 'traces', 'rubric'] as Tab[]).map((t) => (
           <button key={t} className={`tab ${tab === t ? 'on' : ''}`} onClick={() => setTab(t)}>
-            {t === 'rounds' ? 'Rounds' : t === 'operations' ? 'Operations' : t === 'traces' ? 'Traces' : 'Rubric'}
+            {t === 'rounds' ? 'Polls' : t === 'operations' ? 'Operations' : t === 'traces' ? 'Scenarios' : 'Standards'}
           </button>
         ))}
       </div>
@@ -175,7 +175,7 @@ function RoundsTab({
       });
       onChange();
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not start the round.');
+      onError(err instanceof Error ? err.message : 'Could not start the poll.');
     } finally {
       setBusy(false);
     }
@@ -187,15 +187,15 @@ function RoundsTab({
         <TrajectorySection slug={slug} token={token} rounds={view.rounds} />
 
         {view.rounds.length === 0 ? (
-          <div className="empty">No rounds yet. A round is one blind pass over a sample of traces.</div>
+          <div className="empty">No polls yet. A poll sends the same scenarios to everyone, and nobody sees anyone else’s answer until it closes.</div>
         ) : (
           <div className="scroll-x">
             <table>
-              <caption>Rounds, oldest first</caption>
+              <caption>Polls, oldest first</caption>
               <thead>
                 <tr>
-                  <th scope="col">Round</th>
-                  <th scope="col">Rubric</th>
+                  <th scope="col">Poll</th>
+                  <th scope="col">Standards</th>
                   <th scope="col">Items</th>
                   <th scope="col">Sampling</th>
                   <th scope="col">Status</th>
@@ -235,7 +235,7 @@ function RoundsTab({
         )}
 
         <div className="panel" style={{ marginTop: 22 }}>
-          <h3 style={{ marginTop: 0 }}>Start a round</h3>
+          <h3 style={{ marginTop: 0 }}>Start a poll</h3>
           <form onSubmit={create}>
             <div className="row">
               <div className="field">
@@ -382,8 +382,8 @@ function TrajectorySection({
           <caption>Every closed round</caption>
           <thead>
             <tr>
-              <th scope="col">Round</th>
-              <th scope="col">Rubric</th>
+              <th scope="col">Poll</th>
+              <th scope="col">Standards</th>
               <th scope="col">Held-out</th>
               <th scope="col">Calibration</th>
               <th scope="col">Splits</th>
@@ -564,6 +564,76 @@ function OperationsTab({ slug, token, onError }: { slug: string; token: string; 
   );
 }
 
+/* ---- Scenario writing ---------------------------------------------------- */
+
+/**
+ * The step that removes the blank page. Most teams do not have transcripts
+ * lying around; they have a description of what their AI does. This writes the
+ * situations the poll will ask about — clear cases, boundary cases, and the
+ * cases the written rules never imagined.
+ */
+function ScenarioWriter({
+  slug,
+  token,
+  onDone,
+  onError,
+}: {
+  slug: string;
+  token: string;
+  onDone: () => void;
+  onError: (m: string) => void;
+}) {
+  const [description, setDescription] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  async function write(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await api.generateScenarios(slug, token, { description });
+      setResult(
+        res.provider.real
+          ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below — edit or remove any before you poll.`
+          : `${res.scenarios.length} starter scenarios added. No ANTHROPIC_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
+      );
+      setDescription('');
+      onDone();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not write scenarios.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel">
+      <h3 style={{ marginTop: 0 }}>Write the scenarios for me</h3>
+      <p className="tiny" style={{ marginTop: 0 }}>
+        Describe what your AI is supposed to do. You get concrete situations for your team to vote on — the clear
+        cases, the boundary cases, and the ones your documents never imagined. None of them contain their own answer.
+      </p>
+      <form onSubmit={write}>
+        <div className="field">
+          <label htmlFor="scenario-desc">What is your AI supposed to do?</label>
+          <textarea
+            id="scenario-desc"
+            rows={3}
+            value={description}
+            placeholder="A support agent that answers billing questions and can issue refunds up to $50 without approval."
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
+        <button type="submit" disabled={busy || description.trim().length < 10}>
+          {busy ? 'Writing…' : 'Write scenarios'}
+        </button>
+        {result ? <span className="tiny" style={{ marginLeft: 12 }}>{result}</span> : null}
+      </form>
+    </div>
+  );
+}
+
 /* ---- Traces ------------------------------------------------------------- */
 
 function TracesTab({
@@ -608,6 +678,8 @@ function TracesTab({
   return (
     <section className="rail-grid">
       <div className="col">
+        <ScenarioWriter slug={slug} token={token} onDone={() => { reload(); onChange(); }} onError={onError} />
+
         {authored > 0 ? (
           <div className="warn">
             <span className="metric-k">Authored, not captured</span>

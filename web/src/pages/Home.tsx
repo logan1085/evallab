@@ -52,33 +52,33 @@ function useDarkPage() {
 const STEPS = [
   {
     n: '01',
-    title: 'Bring in conversations',
-    body: 'Paste them, upload a file, or drop in an export. Or start from the ones you already have.',
+    title: 'Describe what your AI does',
+    body: 'A sentence or two. Add whatever rules you already have written down — a policy, a checklist, the thread where someone settled a hard case.',
   },
   {
     n: '02',
-    title: 'Get a rubric to argue with',
-    body: 'Describe what your agent should do and it drafts a first one — including the questions your examples do not answer.',
+    title: 'It writes the scenarios',
+    body: 'Concrete situations for your team to judge: the clear cases, the boundary cases, and the ones your documents never imagined. None contain their own answer.',
   },
   {
     n: '03',
-    title: 'Everyone grades blind',
-    body: 'The same sample, independently. Nobody sees anyone else’s verdict until the round closes.',
+    title: 'Your team votes, blind',
+    body: 'Everyone answers the same scenarios independently. Nobody sees anyone else’s vote until the poll closes — that is what makes the result a measurement.',
   },
   {
     n: '04',
-    title: 'The disagreements come first',
-    body: 'Not the score. The specific conversations your team split on, grouped by the kind of split.',
+    title: 'Agreement becomes test cases',
+    body: 'Every scenario your team judged the same way exports as a test case, carrying their own words as the reason.',
   },
   {
     n: '05',
-    title: 'Each one becomes a sentence',
-    body: 'What would the rubric have to say for us to have landed in the same place? That answer is the rubric now.',
+    title: 'Disagreement becomes a decision',
+    body: 'Where careful people split, your team settles it once, on the record — instead of re-deciding it silently on every future run.',
   },
   {
     n: '06',
-    title: 'Then a judge, that you can trust',
-    body: 'Built from the calibrated rubric and scored against your team on cases it has not seen.',
+    title: 'Out comes an eval set',
+    body: 'A .jsonl your eval platform can run, plus a judge built from the standard your team actually agreed on — and scored against them to prove it.',
   },
 ];
 
@@ -125,15 +125,14 @@ export function Home() {
         <div className="l-wrap">
           <span className="l-eyebrow" data-reveal>
             <span className="l-dot" />
-            The Grading Room
+            Tacit
           </span>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Your eval score is measuring <span className="l-grad">who graded it</span>
+            Your company already knows <span className="l-grad">what good looks like</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            Hand the same twenty conversations to two people on your team and they will disagree on a meaningful share
-            of them. Almost nobody measures how large that share is. Until you do, your eval number is a fact about one
-            person’s afternoon.
+            It just lives in your people&rsquo;s heads. Tacit polls your team on concrete scenarios, measures where
+            they actually agree, and hands back an eval set your AI can be held to — extracted, not invented.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
             <button className="l-primary" onClick={openDemo} disabled={busy !== null}>
@@ -152,14 +151,15 @@ export function Home() {
       <section className="l-section">
         <div className="l-wrap">
           <p className="l-kicker" data-reveal>
-            The problem
+            Why polling
           </p>
           <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Three careful people. One conversation. Three answers.
+            Ask three people. Get three answers.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            This is a real trace from the demo project, and these are the three verdicts three graders gave it. Nobody
-            here is wrong. The rubric simply never said which reading was the right one.
+            A real scenario from the demo, and the three votes three teammates cast on it. Nobody here is wrong — the
+            company just never decided. Every eval written by one person in an afternoon quietly picks one of these
+            answers and calls it truth.
           </p>
 
           <div className="l-demo">
@@ -190,7 +190,7 @@ export function Home() {
           </div>
 
           <p className="l-punch" data-reveal style={{ ['--d' as string]: '160ms' }}>
-            Every number your evals produce is downstream of this, and none of them show it to you.
+            The standard your AI is graded against should be what your team believes — measured, not assumed.
           </p>
         </div>
       </section>
@@ -201,11 +201,11 @@ export function Home() {
             How it works
           </p>
           <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Measure the disagreement, then spend it.
+            From your team&rsquo;s heads to a .jsonl file.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            Each split is not a problem to average away. It is a sentence your rubric was missing, and you only find it
-            by having two people look at the same conversation without seeing each other.
+            Six steps, and the honest part is the middle: the poll is blind, so what comes out is what your people
+            actually believe — not what the loudest person in the room said first.
           </p>
 
           <div className="l-steps">
@@ -231,18 +231,18 @@ export function Home() {
             What you get
           </p>
           <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            A number that means something, and the receipts behind it.
+            Evals with receipts.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            Agreement is always shown next to coverage, because a rubric can buy agreement by saying less. When the
-            sample is too small to support a statistic, the statistic is withheld rather than estimated.
+            Every test case can answer &ldquo;why?&rdquo; with a person, a vote, and a sentence — not &ldquo;a model
+            decided&rdquo;. When the numbers are too thin to mean anything, they are withheld rather than estimated.
           </p>
 
           <div className="l-numbers">
             {[
-              { v: '58.3%', k: 'How often your team agreed before calibrating — measured, not guessed.' },
-              { v: '4', k: 'Conversations they split on, each one now a sentence in the rubric.' },
-              { v: 'held out', k: 'A set nobody discusses, so round two is measured on the same untouched cases.' },
+              { v: '.jsonl', k: 'An eval set your platform can run today — one case per line, with your team’s own words as the evidence.' },
+              { v: '2⁄2', k: 'A case exports only when the votes agree, or the disagreement was settled on the record. Nothing is averaged.' },
+              { v: 'held back', k: 'Some scenarios never export — they measure whether your team’s agreement is improving on untouched ground.' },
             ].map((n, i) => (
               <div key={n.k} className="l-num-card" data-reveal style={{ ['--d' as string]: `${i * 90}ms` }}>
                 <div className="l-num">{n.v}</div>
@@ -263,10 +263,10 @@ export function Home() {
           </h2>
           <div className="l-nots">
             {[
-              ['It does not run your evals.', 'It plugs into whatever you already run.'],
-              ['It does not store traces at scale.', 'That is an observability product. This is not one.'],
-              ['It does not label training data.', 'Different job, different tool.'],
-              ['It does not replace your eval platform.', 'It fixes the rubric that platform is executing.'],
+              ['It does not grade your employees.', 'It asks them. Their judgment is the raw material, never the subject.'],
+              ['It does not average disagreement away.', 'A 2–1 split is a decision your company has not made, not a data point.'],
+              ['It does not run your evals.', 'It writes them. The .jsonl drops into whatever you already run.'],
+              ['It does not let the AI vote.', 'A model can be scored against your team, never counted as one of them.'],
             ].map(([bold, rest], i) => (
               <div key={bold} className="l-not" data-reveal style={{ ['--d' as string]: `${i * 70}ms` }}>
                 <b>{bold}</b>
@@ -280,10 +280,10 @@ export function Home() {
       <section className="l-close" id="start">
         <div className="l-wrap">
           <h2 className="l-h2" data-reveal>
-            Find out what your team actually disagrees about.
+            Extract what your team knows.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
-            No sign-up. Creating a project gives you a link — anyone you send it to can grade.
+            No sign-up. Create a project, and you get a link — send it to the people whose judgment you trust.
           </p>
 
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '120ms' }}>
@@ -310,8 +310,8 @@ export function Home() {
 
       <div className="l-wrap">
         <div className="l-foot">
-          <span>The Grading Room</span>
-          <span>A calibration layer for teams whose ground truth comes from human judgment.</span>
+          <span>Tacit</span>
+          <span>Extract your company&rsquo;s experience into evals.</span>
         </div>
       </div>
     </main>

@@ -256,6 +256,55 @@ export function buildServer() {
   );
 
   server.registerTool(
+    'generate_scenarios',
+    {
+      title: 'Write the poll scenarios',
+      description:
+        'Generate concrete situations for the team to vote on, from the project description and its operating documents. Scenarios never contain their own answer. They are saved immediately and can be removed before polling.',
+      inputSchema: {
+        ...project,
+        description: z.string().min(10).max(2000).describe('What the AI under evaluation is supposed to do.'),
+        count: z.number().int().min(4).max(16).optional(),
+      },
+    },
+    async ({ slug, token, description, count }) => {
+      try {
+        const made = await call<Record<string, unknown>>(`/projects/${slug}/scenarios`, {
+          method: 'POST',
+          token,
+          body: { description, count },
+        });
+        return result({ ...made, next: 'Open a poll with create_round, then send the grade link to the team.' });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    'export_evalset',
+    {
+      title: 'Export the eval set',
+      description:
+        'Extract test cases from a closed poll. Unanimous votes and settled disagreements become cases; live disagreement is excluded rather than averaged; held-back scenarios never export. Format json includes the judge prompt; jsonl is one case per line for eval harnesses.',
+      inputSchema: {
+        ...project,
+        roundId: z.string().min(1),
+        format: z.enum(['json', 'jsonl']).default('json'),
+      },
+    },
+    async ({ token, roundId, format }) => {
+      try {
+        const out = await call<unknown>(`/rounds/${roundId}/evalset?format=${format}`, { token });
+        if (typeof out === 'string') return { content: [{ type: 'text' as const, text: out }] };
+        return result(out);
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     'create_round',
     {
       title: 'Open a grading round',

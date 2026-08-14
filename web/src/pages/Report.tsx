@@ -55,13 +55,13 @@ export function ReportPage() {
         crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `rubric v${data.rubric?.version ?? '—'}`]}
         title={
           data.splitCount === 0
-            ? 'No splits in this round'
-            : `${data.splitCount} split${data.splitCount === 1 ? '' : 's'} to turn into rubric sentences`
+            ? 'Your team agreed on everything'
+            : `${data.splitCount} decision${data.splitCount === 1 ? '' : 's'} your team needs to make once`
         }
         standfirst={
           data.splitCount === 0
-            ? 'Everyone landed in the same place on every trace. That is either a well-specified rubric or a sample that avoided the boundary.'
-            : 'Each of these is a sentence the rubric does not contain yet. Resolve them before looking at the aggregate.'
+            ? 'Every vote landed in the same place. Either the standard is genuinely settled, or this sample avoided the hard cases.'
+            : 'Careful people voted differently on these. Settle each one and the answer becomes a test case — made once, instead of re-made silently on every future run.'
         }
       />
 
@@ -76,7 +76,7 @@ export function ReportPage() {
       <section className="band rail-grid">
         <div className="rail">
           <span className="num">01</span>
-          <span className="rail-label">The splits</span>
+          <span className="rail-label">Where they disagreed</span>
           <span className="rail-note">Clustered by kind.</span>
         </div>
         <div className="col">
@@ -132,11 +132,13 @@ export function ReportPage() {
         onError={setError}
       />
 
+      <EvalSetSection roundId={roundId!} token={token} splitCount={data.splitCount} reloadKey={data.resolutions.length} />
+
       {/* ---- Aggregate --------------------------------------------------- */}
 
       <section className="band rail-grid">
         <div className="rail">
-          <span className="num">03</span>
+          <span className="num">04</span>
           <span className="rail-label">The number</span>
           <span className="rail-note">Second, not first.</span>
         </div>
@@ -215,7 +217,7 @@ export function ReportPage() {
 
       <section className="band rail-grid">
         <div className="rail">
-          <span className="num">04</span>
+          <span className="num">05</span>
           <span className="rail-label">Every trace</span>
           <span className="rail-note">Splits shaded.</span>
         </div>
@@ -625,7 +627,7 @@ function JudgeSection({
   return (
     <section className="band rail-grid">
       <div className="rail">
-        <span className="num">05</span>
+        <span className="num">06</span>
         <span className="rail-label">The judge</span>
         <span className="rail-note">Why this exists.</span>
       </div>
@@ -733,6 +735,88 @@ function JudgeSection({
         <p className="tiny" style={{ marginTop: 18 }}>
           <Link to={`/p/${slug}`}>Back to the project</Link> · {report.graders.length} graders in this round
         </p>
+      </div>
+    </section>
+  );
+}
+
+/* ---- The eval set -------------------------------------------------------- */
+
+/**
+ * The deliverable. Everything above this section is how the eval set gets
+ * earned; this is where it leaves the building. Re-fetched whenever a
+ * resolution lands, so settling a disagreement visibly grows the set.
+ */
+function EvalSetSection({
+  roundId,
+  token,
+  splitCount,
+  reloadKey,
+}: {
+  roundId: string;
+  token: string;
+  splitCount: number;
+  reloadKey: number;
+}) {
+  const { data } = useAsync(() => api.evalset(roundId, token), [roundId, token, reloadKey]);
+  if (!data) return null;
+
+  return (
+    <section className="band rail-grid">
+      <div className="rail">
+        <span className="num">03</span>
+        <span className="rail-label">Your eval set</span>
+        <span className="rail-note">The deliverable.</span>
+      </div>
+      <div className="col">
+        <h2>
+          {data.caseCount} test case{data.caseCount === 1 ? '' : 's'}, extracted from your team
+        </h2>
+        <p className="lede">
+          Every case is a scenario your team judged the same way — or disagreed on and then settled, once, on the
+          record. Nothing here is averaged{splitCount > 0 ? '; settle the disagreements above and the set grows' : ''}.
+        </p>
+
+        <div className="metrics">
+          <div className="metric">
+            <span className="metric-k">Test cases</span>
+            <span className="metric-big">{data.caseCount}</span>
+            <span className="metric-sub">
+              {data.cases.filter((c) => c.basis === 'unanimous').length} unanimous ·{' '}
+              {data.cases.filter((c) => c.basis === 'resolved').length} settled
+            </span>
+          </div>
+          <div className="metric">
+            <span className="metric-k">Not exported</span>
+            <span className="metric-big">{data.excluded.length}</span>
+            <span className="metric-sub">disagreements, thin votes, and held-back cases</span>
+          </div>
+        </div>
+
+        {data.caseCount > 0 ? (
+          <div className="row" style={{ alignItems: 'center' }}>
+            <div className="shrink">
+              <a className="btn" href={api.evalsetUrl(roundId, token)} download>
+                Download eval set (.jsonl)
+              </a>
+            </div>
+            <p className="tiny" style={{ margin: 0, flex: '1 1 auto' }}>
+              One case per line: the scenario, the verdict your team stands behind, and why. Drop it into whatever
+              runs your evals. The judge prompt travels in the JSON export.
+            </p>
+          </div>
+        ) : (
+          <div className="empty">
+            No cases yet. A case needs at least two matching votes, or a settled disagreement.
+          </div>
+        )}
+
+        {data.excluded.length > 0 ? (
+          <p className="tiny" style={{ marginTop: 14 }}>
+            Held-back cases stay out on purpose — they are how the next poll measures whether agreement is improving
+            on untouched ground. Exporting them with answers attached would be teaching to the test.
+          </p>
+        ) : null}
       </div>
     </section>
   );

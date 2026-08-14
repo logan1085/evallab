@@ -1,14 +1,20 @@
-# The Grading Room
+# Tacit
 
-A calibration layer for teams whose ground truth comes from human judgment.
+Extract your company's experience into evals.
 
-Every team building agents writes evals. The eval produces a number. The number
-depends on a rubric one person wrote in an afternoon. Hand the same twenty
-traces to two people on that team and they will disagree on a meaningful share,
-and almost nobody measures how large that share is.
+Your company already knows what good looks like — it lives in your people's
+heads. Tacit writes concrete scenarios from a description of your AI (and
+whatever rules you have written down), polls your team on them blind, and turns
+the result into an eval set: every scenario the team judged the same way becomes
+a test case carrying their own words, every disagreement becomes a decision the
+company makes once instead of re-making silently on every future run.
 
-This measures it, surfaces the specific cases, and turns each one into a
-sentence the rubric was missing.
+The output is a `.jsonl` your eval platform can run today, plus an LLM judge
+built from the standard your team actually agreed on — and scored against them
+to prove it.
+
+Nothing is averaged. A 2–1 split is not a test case with the majority answer;
+it is a decision the company has not made yet, and the product hands it back.
 
 ```
 npm install

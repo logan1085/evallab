@@ -18,14 +18,17 @@ import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
 import { JudgeError, mapLimit, resolveProvider } from './judge.js';
 import { DrafterError, resolveDrafter } from './drafter.js';
+import { resolveScenarist } from './scenarist.js';
 import {
   ABSTAIN,
   DEFAULT_SCALE,
   agreementStats,
   attentionEstimate,
   buildJudgeSystemPrompt,
+  buildEvalSet,
   buildSplitReport,
   clusterSplits,
+  evalSetToJsonl,
   coverageStats,
   type ItemContext,
   type ItemVerdicts,
@@ -282,6 +285,67 @@ export function createApp(db: DB) {
 
     const traces = await store.addTraces(db, (req as ProjectRequest).project.id, body.data.traces);
     res.status(201).json({ traces });
+  });
+
+  /**
+   * The system writes the poll's questions. Saved immediately — a scenario is
+   * a question, not a standard, so the accept-before-save ceremony the rubric
+   * gets would be friction with nothing to protect.
+   */
+  api.post('/projects/:slug/scenarios', requireProject, async (req, res) => {
+    const body = z
+      .object({
+        description: z.string().min(10).max(2000),
+        count: z.number().int().min(1).max(32).optional(),
+        documentIds: z.array(z.string().min(1)).optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: 'Describe what your AI is supposed to do, in a sentence or two.' });
+    }
+
+    const { project } = req as ProjectRequest;
+    const allDocs = await store.listDocuments(db, project.id);
+    const chosen = body.data.documentIds
+      ? allDocs.filter((d) => body.data.documentIds!.includes(d.id))
+      : allDocs;
+    if (body.data.documentIds && chosen.length !== body.data.documentIds.length) {
+      return res.status(404).json({ error: 'One of those documents is not in this project.' });
+    }
+
+    const scenarist = resolveScenarist();
+    try {
+      const prepared = prepareDocuments(chosen.map((d) => ({ title: d.title, kind: d.kind, content: d.content })));
+      const scenarios = await scenarist.write({
+        description: body.data.description,
+        documents: prepared.documents,
+        count: body.data.count,
+      });
+      if (scenarios.length === 0) {
+        return res.status(502).json({ error: 'No usable scenarios came back. Try a more specific description.' });
+      }
+      const saved = await store.addTraces(
+        db,
+        project.id,
+        scenarios.map((s) => ({
+          title: s.title,
+          content: s.content,
+          source: 'scenario',
+          // The probe never reaches a voter: the grading queue omits meta by
+          // showing it collapsed, but scenarios carry it for the owner's view.
+          meta: { probe: s.probe, generated: true, real: scenarist.real },
+        })),
+      );
+      res.status(201).json({
+        scenarios: saved.map((t, i) => ({ id: t.id, title: t.title, content: t.content, probe: scenarios[i]!.probe })),
+        provider: { id: scenarist.id, model: scenarist.model, real: scenarist.real },
+      });
+    } catch (error) {
+      if (error instanceof DrafterError) {
+        return res.status(error.code === 'auth' ? 401 : 502).json({ error: error.message, code: error.code });
+      }
+      throw error;
+    }
   });
 
   /* ---- Operating documents ---------------------------------------------- */
@@ -811,6 +875,47 @@ export function createApp(db: DB) {
   });
 
   /* ---- Resolutions and shipping ----------------------------------------- */
+
+  /**
+   * The deliverable: a closed poll as an eval set. Unanimity and explicit
+   * resolutions become test cases; live disagreement is excluded rather than
+   * averaged, because an eval exported over a split would hold the AI to a
+   * standard the team itself has not met.
+   */
+  api.get('/rounds/:roundId/evalset', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') {
+      return res.status(409).json({ error: 'Close the poll first. An eval set is extracted from finished votes.' });
+    }
+
+    const items = await store.listItems(db, round.id);
+    const traceList = await Promise.all(items.map((i) => store.getTrace(db, i.traceId)));
+    const traces = new Map(traceList.filter((t): t is NonNullable<typeof t> => t !== null).map((t) => [t.id, t]));
+    const set = buildEvalSet({
+      items,
+      traces,
+      verdicts: await store.verdictsForRound(db, round.id),
+      resolutions: await store.resolutionsForRound(db, round.id),
+      grades: await store.allGradesForRound(db, round.id),
+      embargoed: await traceIdsInOpenRounds(db, round.projectId, round.id),
+    });
+
+    const rubric = await store.getRubric(db, round.rubricVersionId);
+    const format = String(req.query.format ?? 'json');
+    if (format === 'jsonl') {
+      res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="evalset-${round.id}.jsonl"`);
+      return res.send(evalSetToJsonl(set));
+    }
+    res.json({
+      round: { id: round.id, name: round.name },
+      rubricVersion: rubric?.version ?? null,
+      judgeSystemPrompt: rubric ? buildJudgeSystemPrompt(rubric) : null,
+      caseCount: set.cases.length,
+      cases: set.cases,
+      excluded: set.excluded,
+    });
+  });
 
   api.post('/rounds/:roundId/items/:itemId/resolve', requireRound, async (req, res) => {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;

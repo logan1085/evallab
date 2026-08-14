@@ -89,7 +89,7 @@ export function GradePage() {
     <main className="sheet sheet--wide">
       <Masthead
         crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `grading as ${grader.name}`]}
-        title={`Trace ${index + 1} of ${items.length}`}
+        title={`Scenario ${index + 1} of ${items.length}`}
         standfirst={item.title}
       />
 
@@ -172,7 +172,7 @@ export function GradePage() {
             </div>
 
             <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
-              <label htmlFor="note">Note (optional, shown in the split report)</label>
+              <label htmlFor="note">Why? (optional — your words become the evidence on exported test cases)</label>
               <textarea
                 id="note"
                 rows={3}

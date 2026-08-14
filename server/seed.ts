@@ -372,7 +372,7 @@ export interface SeedResult {
  * has something in it the moment someone opens the link. The round is closed,
  * which is also what makes the report legal to look at.
  */
-export async function seedDemoProject(db: DB, name = 'The Grading Room — demo'): Promise<SeedResult> {
+export async function seedDemoProject(db: DB, name = 'Tacit — demo'): Promise<SeedResult> {
   const project = await store.createProject(db, { slug: newSlug('grading-room-demo'), token: newToken(), name });
 
   const rubric = await store.createRubricVersion(db, {

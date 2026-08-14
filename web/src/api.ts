@@ -105,6 +105,15 @@ export interface DraftResponse {
   usedTraceIds: string[];
 }
 
+export interface EvalSetView {
+  round: { id: string; name: string };
+  rubricVersion: number | null;
+  judgeSystemPrompt: string | null;
+  caseCount: number;
+  cases: { id: string; title: string; input: string; expected: string; basis: 'unanimous' | 'resolved'; evidence: string[] }[];
+  excluded: { title: string; reason: string }[];
+}
+
 export interface Attention {
   minutes: number;
   overBudget: boolean;
@@ -269,6 +278,18 @@ export const api = {
 
   deleteDocument: (slug: string, token: string, id: string) =>
     call<void>(`/projects/${slug}/documents/${id}`, { method: 'DELETE', token }),
+
+  evalset: (roundId: string, token: string) =>
+    call<EvalSetView>(`/rounds/${roundId}/evalset`, { token }),
+
+  evalsetUrl: (roundId: string, token: string) =>
+    `/api/rounds/${roundId}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
+
+  generateScenarios: (slug: string, token: string, body: { description: string; count?: number }) =>
+    call<{
+      scenarios: { id: string; title: string; content: string; probe: string }[];
+      provider: { id: string; model: string; real: boolean };
+    }>(`/projects/${slug}/scenarios`, { method: 'POST', token, body: json(body) }),
 
   exportUrl: (rubricId: string, token: string, format: 'md' | 'json' | 'judge') =>
     `/api/rubrics/${rubricId}/export?format=${format}&k=${encodeURIComponent(token)}`,
