@@ -218,7 +218,7 @@ export function ReportPage() {
       <section className="band rail-grid">
         <div className="rail">
           <span className="num">05</span>
-          <span className="rail-label">Every trace</span>
+          <span className="rail-label">Every scenario</span>
           <span className="rail-note">Splits shaded.</span>
         </div>
         <div className="col">
@@ -463,7 +463,7 @@ function SplitRow({
         </form>
       ) : (
         <button className="ghost tiny-btn" onClick={() => setOpen(true)}>
-          Resolve this split
+          Settle this disagreement
         </button>
       )}
     </div>
@@ -494,15 +494,15 @@ function ShipSection({
     <section className="band rail-grid">
       <div className="rail">
         <span className="num">02</span>
-        <span className="rail-label">Ship it</span>
-        <span className="rail-note">Resolutions become clauses.</span>
+        <span className="rail-label">Update the standards</span>
+        <span className="rail-note">Settled once, kept forever.</span>
       </div>
       <div className="col">
-        <h2>Turn the resolutions into the next rubric version</h2>
+        <h2>Write what you settled into your standards</h2>
         <p className="lede">
           {report.resolutions.length === 0
-            ? 'Nothing resolved yet. Each resolution becomes one clause on a new rubric version, carrying the trace it came from so you can always answer "why does the rubric say this?".'
-            : `${report.resolutions.length} resolution${report.resolutions.length === 1 ? '' : 's'} ready to ship${unresolved > 0 ? `, with ${unresolved} split${unresolved === 1 ? '' : 's'} still unresolved` : ''}.`}
+            ? 'Nothing settled yet. Each settled disagreement becomes one sentence in your standards, carrying the scenario it came from — so "why does the standard say this?" always has an answer.'
+            : `${report.resolutions.length} settled decision${report.resolutions.length === 1 ? '' : 's'} ready to write in${unresolved > 0 ? `, with ${unresolved} disagreement${unresolved === 1 ? '' : 's'} still open` : ''}.`}
         </p>
 
         {shipped ? (
@@ -515,7 +515,7 @@ function ShipSection({
             </p>
             <NextRound report={report} roundId={roundId} token={token} onError={onError} />{' '}
             <a className="btn ghost" href={api.exportUrl(shipped.id, token, 'md')} target="_blank" rel="noreferrer">
-              Export the revised rubric
+              Export the updated standards
             </a>
           </div>
         ) : (
@@ -534,7 +534,7 @@ function ShipSection({
               }
             }}
           >
-            {busy ? 'Shipping…' : `Ship rubric v${(report.rubric?.version ?? 1) + 1}`}
+            {busy ? 'Saving…' : `Save standards v${(report.rubric?.version ?? 1) + 1}`}
           </button>
         )}
       </div>

@@ -44,9 +44,9 @@ export function GradePage() {
   if (!grader) {
     return (
       <main className="sheet">
-        <Masthead crumbs={[{ label: 'Project', to: `/p/${slug}` }]} title="Join before you grade" />
+        <Masthead crumbs={[{ label: 'Project', to: `/p/${slug}` }]} title="Join before you vote" />
         <p className="lede">
-          Your grades need a name attached so agreement can be computed between people. Set one on the project page.
+          Your votes need a name attached so agreement can be measured between people. Set one on the project page.
         </p>
         <Link className="btn" to={`/p/${slug}`}>
           Back to the project
@@ -55,9 +55,9 @@ export function GradePage() {
     );
   }
 
-  if (loading && !data) return <main className="sheet"><Loading what="round" /></main>;
+  if (loading && !data) return <main className="sheet"><Loading what="poll" /></main>;
   if (error) return <main className="sheet"><ErrorBanner message={error} /></main>;
-  if (!data || !item) return <main className="sheet"><div className="empty">This round has no items.</div></main>;
+  if (!data || !item) return <main className="sheet"><div className="empty">This poll has no scenarios.</div></main>;
 
   async function grade(verdict: string) {
     const current = items[index];
@@ -79,7 +79,7 @@ export function GradePage() {
       if (nextUngraded >= 0) setIndex(nextUngraded);
       else if (index < items.length - 1) setIndex(index + 1);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Could not save that grade.');
+      setSaveError(err instanceof Error ? err.message : 'Could not save that vote.');
     }
   }
 
@@ -88,7 +88,7 @@ export function GradePage() {
   return (
     <main className="sheet sheet--wide">
       <Masthead
-        crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `grading as ${grader.name}`]}
+        crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `voting as ${grader.name}`]}
         title={`Scenario ${index + 1} of ${items.length}`}
         standfirst={item.title}
       />
@@ -97,8 +97,8 @@ export function GradePage() {
         <div className="progress-fill" style={{ width: `${(done / items.length) * 100}%` }} />
       </div>
       <p className="tiny" style={{ marginBottom: 20 }}>
-        {done} of {items.length} graded · budget about {minutes(data.attention.minutes * 60000)} for the round · nobody
-        else&rsquo;s verdicts are visible until the round closes
+        {done} of {items.length} answered · about {minutes(data.attention.minutes * 60000)} for the whole poll · nobody
+        else&rsquo;s votes are visible until it closes
       </p>
 
       <ErrorBanner message={saveError} onDismiss={() => setSaveError(null)} />
@@ -145,7 +145,7 @@ export function GradePage() {
 
         <div className="col">
           <div className="panel">
-            <span className="metric-k">Your verdict</span>
+            <span className="metric-k">What should happen here?</span>
             <div className="verdict-picker" style={{ marginTop: 10 }}>
               {scale.map((level) => (
                 <button
@@ -167,7 +167,7 @@ export function GradePage() {
                 className={`abstain ${item.myVerdict === ABSTAIN ? 'selected' : ''}`}
                 onClick={() => grade(ABSTAIN)}
               >
-                Can&rsquo;t tell from this trace
+                Can&rsquo;t tell from this scenario
               </button>
             </div>
 
@@ -178,14 +178,14 @@ export function GradePage() {
                 rows={3}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="Why this verdict, in a sentence."
+                placeholder="Why, in a sentence."
               />
             </div>
           </div>
 
           {data.rubric ? (
             <div className="panel">
-              <span className="metric-k">Rubric v{data.rubric.version}</span>
+              <span className="metric-k">Your standards · v{data.rubric.version}</span>
               <h3 style={{ marginTop: 6 }}>{data.rubric.name}</h3>
               {data.rubric.preamble ? <p className="note">{data.rubric.preamble}</p> : null}
               {data.rubric.criteria.map((criterion) => (

@@ -1,5 +1,14 @@
 # Where this is going
 
+**The pivot, recorded.** This began as The Grading Room — bring your own
+transcripts, calibrate a rubric. It is now Tacit: a company arrives, explains
+what it is and what its AI handles, scenarios are written for it on the spot,
+its team votes blind, and the deliverable is an eval set — unanimity and
+settled disagreements as test cases, live splits handed back rather than
+averaged. The calibration machinery underneath did not change; the product
+now leads with what it produces instead of how it works.
+
+
 This started single-tenant and self-hosted: one team, one SQLite file, a shared
 link as the only credential. That was the right shape for an eval lead who can
 run a container, and the wrong one for the teams we are aiming at — who have no

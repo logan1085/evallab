@@ -1,5 +1,5 @@
 /**
- * The Grading Room as a tool an agent can operate.
+ * Tacit as a tool an agent can operate.
  *
  * An agent is a real user of this product. It can read a company's policies,
  * pull transcripts, draft a rubric, open a round and read the report — all of
@@ -91,20 +91,31 @@ export function buildServer() {
     {
       title: 'Create a project',
       description:
-        'Start a calibration project. Returns a slug and token — the token is the only credential, so keep it and pass it to every other tool.',
-      inputSchema: { name: z.string().min(1).max(120).describe('What is being evaluated, e.g. "Refund agent".') },
+        'Start an eval project for a company. Pass a description of what the company does and what its AI handles — scenarios for the team poll are written from it automatically. Returns a slug and token; the token is the only credential.',
+      inputSchema: {
+        name: z.string().min(1).max(120).describe('The company or team, e.g. "Acme support".'),
+        description: z
+          .string()
+          .max(2000)
+          .default('')
+          .describe('What the company does and what its AI is supposed to handle. Ten or more characters triggers automatic scenario writing.'),
+      },
     },
-    async ({ name }) => {
+    async ({ name, description }) => {
       try {
-        const made = await call<{ project: { slug: string; token: string; name: string } }>('/projects', {
-          method: 'POST',
-          body: { name },
-        });
+        const made = await call<{
+          project: { slug: string; token: string; name: string };
+          scenarioCount: number;
+        }>('/projects', { method: 'POST', body: { name, description } });
         return result({
           slug: made.project.slug,
           token: made.project.token,
           shareLink: `${BASE}/p/${made.project.slug}?k=${made.project.token}`,
-          next: 'Add the written rules with add_operating_documents, then call draft_rubric.',
+          scenariosWritten: made.scenarioCount,
+          next:
+            made.scenarioCount > 0
+              ? 'Scenarios are ready. Open a poll with create_round and send the grade link to the team.'
+              : 'Add operating documents, then generate_scenarios, then open a poll with create_round.',
         });
       } catch (error) {
         return failure(error);

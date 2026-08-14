@@ -233,6 +233,8 @@ export interface Project {
   /** The only credential in v1. Shared link is the auth model, by design. */
   token: string;
   name: string;
+  /** What the company is and what its AI is supposed to do — the seed everything grows from. */
+  description: string;
   createdAt: string;
 }
 

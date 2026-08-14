@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS projects (
   slug        TEXT NOT NULL UNIQUE,
   token       TEXT NOT NULL,
   name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL
 );
 
@@ -180,6 +181,7 @@ const MIGRATIONS = `
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE projects        ADD COLUMN IF NOT EXISTS description    TEXT NOT NULL DEFAULT '';
 `;
 
 /** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */

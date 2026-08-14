@@ -179,7 +179,7 @@ describe('blind grading', () => {
       .expect(200);
 
     const res = await auth(request(app).post(`/api/rounds/${round.id}/close`)).expect(400);
-    expect(res.body.error).toMatch(/two graders/i);
+    expect(res.body.error).toMatch(/at least two people/i);
   });
 });
 
@@ -197,8 +197,8 @@ describe('rounds and sampling', () => {
     const res = await auth(request(app).post(`/api/projects/${project.slug}/rounds`))
       .send({ calibrationSize: 4, heldoutSize: 2 })
       .expect(201);
-    expect(res.body.samplingNote).toMatch(/uniformly at random/);
-    expect(res.body.samplingNote).toMatch(/held-out/);
+    expect(res.body.samplingNote).toMatch(/drawn at random for discussion/);
+    expect(res.body.samplingNote).toMatch(/held back/);
   });
 
   it('reports the attention budget for the sample size', async () => {

@@ -127,24 +127,24 @@ export function explain(
   const parts: string[] = [];
   if (strategy === 'random') {
     parts.push(
-      `${calibrationCount} calibration traces drawn uniformly at random. There is no boundary-seeking logic here — the sampler does not know where the rubric's edge is until people have graded.`,
+      `${calibrationCount} scenarios drawn at random for discussion. There is no cleverness here — the sampler cannot know where your standard's edge is until people have voted.`,
     );
   } else if (fromPriorSplits === 0) {
     parts.push(
-      `The previous round produced no splits to carry, so all ${calibrationCount} calibration traces were drawn at random.`,
+      `The previous poll produced no disagreements to carry, so all ${calibrationCount} discussion scenarios were drawn at random.`,
     );
   } else if (fromPriorSplits < calibrationCount) {
     parts.push(
-      `${fromPriorSplits} calibration traces carried over from the previous round's splits; the remaining ${calibrationCount - fromPriorSplits} drawn at random to fill.`,
+      `${fromPriorSplits} scenarios carried over from the previous poll's disagreements; the remaining ${calibrationCount - fromPriorSplits} drawn at random to fill.`,
     );
   } else {
-    parts.push(`All ${calibrationCount} calibration traces carried over from the previous round's splits.`);
+    parts.push(`All ${calibrationCount} discussion scenarios carried over from the previous poll's disagreements.`);
   }
   if (heldoutCount > 0) {
     parts.push(
       reusedHeldout
-        ? `${heldoutCount} held-out traces reused from the previous round, so before-and-after agreement is measured on the same cases.`
-        : `${heldoutCount} held-out traces reserved. They are graded but never discussed, and they are what the primary metric is measured on.`,
+        ? `${heldoutCount} held-back scenarios reused from the previous poll, so before-and-after agreement is measured on the same cases.`
+        : `${heldoutCount} scenarios held back. Everyone votes on them but they are never discussed — they are how the next poll measures whether agreement is actually improving.`,
     );
   }
   return parts.join(' ');

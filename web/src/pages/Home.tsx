@@ -85,6 +85,7 @@ const STEPS = [
 export function Home() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [busy, setBusy] = useState<'new' | 'demo' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,7 +98,7 @@ export function Home() {
     setBusy('new');
     setError(null);
     try {
-      const { project } = await api.createProject(name.trim());
+      const { project } = await api.createProject(name.trim(), description.trim());
       rememberKey(project.slug, project.token);
       navigate(`/p/${project.slug}?k=${encodeURIComponent(project.token)}`);
     } catch (err) {
@@ -292,15 +293,22 @@ export function Home() {
             </button>
           </div>
 
-          <form className="l-start" onSubmit={createProject} data-reveal style={{ ['--d' as string]: '170ms' }}>
+          <form className="l-start l-start--tall" onSubmit={createProject} data-reveal style={{ ['--d' as string]: '170ms' }}>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Name your project"
-              aria-label="Project name"
+              placeholder="Your company or team"
+              aria-label="Company or team name"
+            />
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="What do you do, and what is your AI supposed to handle? e.g. We sell outdoor gear online; our AI answers billing questions and can refund up to $50 without approval."
+              aria-label="What your company does and what your AI handles"
             />
             <button type="submit" className="l-primary" disabled={busy !== null || !name.trim()}>
-              {busy === 'new' ? 'Creating…' : 'Create'}
+              {busy === 'new' ? 'Writing your scenarios…' : 'Create my eval poll'}
             </button>
           </form>
 

@@ -383,6 +383,20 @@ html[data-page="landing"] body {
   display: flex;
   gap: 10px;
 }
+.l-start--tall { flex-direction: column; max-width: 560px; }
+.l-start--tall button { align-self: center; }
+.landing .l-start textarea {
+  background: var(--l-raised);
+  border: 1px solid var(--l-line);
+  color: var(--l-text);
+  border-radius: 16px;
+  padding: 13px 20px;
+  font-size: 15px;
+  font-family: var(--ui);
+  resize: vertical;
+}
+.landing .l-start textarea::placeholder { color: var(--l-text-3); }
+.landing .l-start textarea:focus { outline: none; border-color: #3f3f4b; }
 .landing .l-start input {
   flex: 1 1 auto;
   background: var(--l-raised);

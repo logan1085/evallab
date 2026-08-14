@@ -99,7 +99,7 @@ export function createApp(db: DB) {
   /** Round routes are reached by round id, so the project is resolved from the round. */
   async function requireRound(req: Request, res: Response, next: NextFunction) {
     const round = await store.getRound(db, req.params.roundId!);
-    if (!round) return res.status(404).json({ error: 'No such round.' });
+    if (!round) return res.status(404).json({ error: 'No such poll.' });
     const project = await store.getProjectBySlug(db, await store.getProjectSlug(db, round.projectId) ?? '');
     if (!project) return res.status(404).json({ error: 'No such project.' });
 
@@ -113,23 +113,61 @@ export function createApp(db: DB) {
 
   /* ---- Projects --------------------------------------------------------- */
 
+  /**
+   * The arrival moment. A company explains what it is and what its AI does, and
+   * leaves this call holding a poll's worth of scenarios — the description is
+   * enough to write them, so nothing asks for transcripts a new team does not
+   * have. Scenario writing is best-effort on purpose: if the model is down, the
+   * company still gets its project and writes scenarios from the tab instead of
+   * losing the sign-up to a provider error.
+   */
   api.post('/projects', async (req, res) => {
-    const body = z.object({ name: z.string().min(1).max(120) }).safeParse(req.body);
+    const body = z
+      .object({
+        name: z.string().min(1).max(120),
+        description: z.string().max(2000).default(''),
+      })
+      .safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'A project name is required.' });
 
     const project = await store.createProject(db, {
       slug: newSlug(body.data.name),
       token: newToken(),
       name: body.data.name,
+      description: body.data.description.trim(),
     });
     const rubric = await store.createRubricVersion(db, {
       projectId: project.id,
-      name: 'Untitled rubric',
-      preamble: '',
+      name: 'Your standards',
+      preamble: body.data.description.trim(),
       scale: DEFAULT_SCALE,
       criteria: [],
     });
-    res.status(201).json({ project, rubric });
+
+    let scenarioCount = 0;
+    let scenariosReal = false;
+    if (project.description.length >= 10) {
+      try {
+        const scenarist = resolveScenarist();
+        const scenarios = await scenarist.write({ description: project.description });
+        await store.addTraces(
+          db,
+          project.id,
+          scenarios.map((s) => ({
+            title: s.title,
+            content: s.content,
+            source: 'scenario',
+            meta: { probe: s.probe, generated: true, real: scenarist.real },
+          })),
+        );
+        scenarioCount = scenarios.length;
+        scenariosReal = scenarist.real;
+      } catch {
+        // The project stands; scenarios can be written from the Scenarios tab.
+      }
+    }
+
+    res.status(201).json({ project, rubric, scenarioCount, scenariosReal });
   });
 
   api.post('/projects/demo', async (req, res) => {
@@ -281,7 +319,7 @@ export function createApp(db: DB) {
           .min(1),
       })
       .safeParse(req.body);
-    if (!body.success) return res.status(400).json({ error: 'Each trace needs content.' });
+    if (!body.success) return res.status(400).json({ error: 'Each scenario needs content.' });
 
     const traces = await store.addTraces(db, (req as ProjectRequest).project.id, body.data.traces);
     res.status(201).json({ traces });
@@ -392,7 +430,7 @@ export function createApp(db: DB) {
     const parsed = parseImport(body.data.format, body.data.body);
     if (parsed.traces.length === 0) {
       return res.status(422).json({
-        error: 'Nothing in that input looked like a trace.',
+        error: 'Nothing in that input looked like a conversation.',
         skipped: parsed.skipped,
       });
     }
@@ -554,11 +592,11 @@ export function createApp(db: DB) {
           .optional(),
       })
       .safeParse(req.body);
-    if (!body.success) return res.status(400).json({ error: 'A rubric needs a name and at least two verdict levels.' });
+    if (!body.success) return res.status(400).json({ error: 'Your standards need a name and at least two verdict levels.' });
 
     const { project } = req as ProjectRequest;
     const current = await store.currentRubric(db, project.id);
-    if (!current) return res.status(404).json({ error: 'This project has no rubric yet.' });
+    if (!current) return res.status(404).json({ error: 'This project has no standards yet.' });
 
     // A version a round has already pinned is immutable — otherwise a closed
     // round's numbers would silently start referring to a rubric nobody graded
@@ -589,7 +627,7 @@ export function createApp(db: DB) {
 
   api.get('/rubrics/:rubricId/export', async (req, res) => {
     const rubric = await store.getRubric(db, req.params.rubricId!);
-    if (!rubric) return res.status(404).json({ error: 'No such rubric version.' });
+    if (!rubric) return res.status(404).json({ error: 'No such version of the standards.' });
     const project = await store.getProjectById(db, rubric.projectId);
     const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
     if (!project || token !== project.token) return res.status(403).json({ error: 'Wrong or missing key.' });
@@ -613,7 +651,7 @@ export function createApp(db: DB) {
 
   api.post('/projects/:slug/graders', requireProject, async (req, res) => {
     const body = z.object({ name: z.string().min(1).max(60) }).safeParse(req.body);
-    if (!body.success) return res.status(400).json({ error: 'Enter a name so your grades can be told apart.' });
+    if (!body.success) return res.status(400).json({ error: 'Enter a name so your votes can be told apart.' });
     res.status(201).json({ grader: await store.upsertGrader(db, (req as ProjectRequest).project.id, body.data.name) });
   });
 
@@ -631,14 +669,14 @@ export function createApp(db: DB) {
         seed: z.string().optional(),
       })
       .safeParse(req.body);
-    if (!body.success) return res.status(400).json({ error: 'A round needs a calibration size.' });
+    if (!body.success) return res.status(400).json({ error: 'A poll needs at least one scenario to discuss.' });
 
     const { project } = req as ProjectRequest;
     const rubric = await store.currentRubric(db, project.id);
-    if (!rubric) return res.status(400).json({ error: 'Write a rubric before running a round.' });
+    if (!rubric) return res.status(400).json({ error: 'Set up your standards before opening a poll.' });
 
     const traces = await store.listTraces(db, project.id);
-    if (traces.length === 0) return res.status(400).json({ error: 'Add some traces before running a round.' });
+    if (traces.length === 0) return res.status(400).json({ error: 'Add or write some scenarios before opening a poll.' });
 
     const wanted = body.data.calibrationSize + body.data.heldoutSize;
     if (traces.length < wanted) {
@@ -653,10 +691,10 @@ export function createApp(db: DB) {
     if (body.data.strategy === 'from_splits') {
       const source = body.data.sourceRoundId ? await store.getRound(db, body.data.sourceRoundId) : null;
       if (!source || source.projectId !== project.id) {
-        return res.status(400).json({ error: 'Pick a previous round to draw splits from.' });
+        return res.status(400).json({ error: 'Pick a previous poll to draw disagreements from.' });
       }
       if (source.status !== 'closed') {
-        return res.status(400).json({ error: 'The source round is still open, so its splits are not final.' });
+        return res.status(400).json({ error: 'That poll is still open, so its disagreements are not final.' });
       }
       const report = await reportRows(db, source.id, rubric.scale);
       priorSplitTraceIds = splitsOf(report).map((r) => r.traceId);
@@ -730,7 +768,7 @@ export function createApp(db: DB) {
     const graderId = String(req.query.graderId ?? '');
     const grader = await store.getGrader(db, graderId);
     if (!grader || grader.projectId !== round.projectId) {
-      return res.status(400).json({ error: 'Join the round with a name first.' });
+      return res.status(400).json({ error: 'Join with your name first, so your votes can be counted.' });
     }
 
     const mine = new Map((await store.gradesForGrader(db, round.id, graderId)).map((g) => [g.itemId, g]));
@@ -765,7 +803,7 @@ export function createApp(db: DB) {
   api.post('/rounds/:roundId/grades', requireRound, async (req, res) => {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status === 'closed') {
-      return res.status(409).json({ error: 'This round is closed. Its report is visible, so it cannot take new grades.' });
+      return res.status(409).json({ error: 'This poll has closed. Its results are visible, so it cannot take new votes.' });
     }
 
     const body = z
@@ -801,7 +839,7 @@ export function createApp(db: DB) {
     const participants = await store.participantsOf(db, round.id);
     if (participants.length < 2) {
       return res.status(400).json({
-        error: 'A round needs at least two graders before it can be closed — agreement is not defined for one.',
+        error: 'A poll needs votes from at least two people before it can close — agreement is not defined for one.',
       });
     }
     res.json({ round: await store.closeRound(db, round.id) });
@@ -812,7 +850,7 @@ export function createApp(db: DB) {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') {
       return res.status(409).json({
-        error: 'This round is still open. Verdicts stay hidden until it closes — that is what makes the number mean anything.',
+        error: 'This poll is still open. Votes stay hidden until it closes — that is what makes the result mean anything.',
       });
     }
 
@@ -947,7 +985,7 @@ export function createApp(db: DB) {
     if (item.arm === 'heldout') {
       return res.status(400).json({
         error:
-          'This trace is in the held-out arm. Held-out cases are what the primary metric is measured on, so resolving one would be writing the rubric against your own test set.',
+          'This scenario is held back. Held-back cases are how the next poll measures improvement, so settling one here would be writing your standards against your own test set.',
       });
     }
 
@@ -1009,7 +1047,7 @@ export function createApp(db: DB) {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     const { project } = req as ProjectRequest;
     if (round.status !== 'closed') {
-      return res.status(409).json({ error: 'Run the judge against a closed round, so there are human verdicts to compare with.' });
+      return res.status(409).json({ error: 'Run the judge against a closed poll, so there are human votes to compare with.' });
     }
 
     const body = z
@@ -1021,7 +1059,7 @@ export function createApp(db: DB) {
     if (!body.success) return res.status(400).json({ error: 'Pick a rubric version to build the judge from.' });
 
     const rubric = await store.getRubric(db, body.data.rubricVersionId);
-    if (!rubric || rubric.projectId !== project.id) return res.status(404).json({ error: 'No such rubric version.' });
+    if (!rubric || rubric.projectId !== project.id) return res.status(404).json({ error: 'No such version of the standards.' });
 
     const items = (await store.listItems(db, round.id)).filter((i) => i.arm === body.data.arm);
     if (items.length === 0) return res.status(400).json({ error: `This round has no ${body.data.arm} items.` });

@@ -128,7 +128,7 @@ describe('planSample', () => {
     expect(plan.fromPriorSplits).toBe(3);
     expect(plan.calibration).toHaveLength(6);
     for (const id of ['t1', 't2', 't3']) expect(plan.calibration).toContain(id);
-    expect(plan.explanation).toMatch(/3 calibration traces carried over/);
+    expect(plan.explanation).toMatch(/3 scenarios carried over/);
   });
 
   it('reuses the held-out set so before and after are measured on the same cases', () => {
@@ -143,12 +143,12 @@ describe('planSample', () => {
       seed: 'r2',
     });
     expect(second.heldout).toEqual(first.heldout);
-    expect(second.explanation).toMatch(/reused from the previous round/);
+    expect(second.explanation).toMatch(/reused from the previous poll/);
   });
 
   it('says plainly that round-one sampling is not clever', () => {
     const plan = planSample({ pool, strategy: 'random', calibrationSize: 5, heldoutSize: 0, seed: 's' });
-    expect(plan.explanation).toMatch(/no boundary-seeking logic/);
+    expect(plan.explanation).toMatch(/no cleverness here/);
   });
 
   it('degrades to the available pool rather than inventing traces', () => {

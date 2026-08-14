@@ -213,8 +213,11 @@ export interface JudgeRunView {
 /* ---- Endpoints ---------------------------------------------------------- */
 
 export const api = {
-  createProject: (name: string) =>
-    call<{ project: Project; rubric: RubricVersion }>('/projects', { method: 'POST', body: json({ name }) }),
+  createProject: (name: string, description = '') =>
+    call<{ project: Project; rubric: RubricVersion; scenarioCount: number; scenariosReal: boolean }>('/projects', {
+      method: 'POST',
+      body: json({ name, description }),
+    }),
 
   createDemo: () =>
     call<{ slug: string; token: string; projectId: string; roundId: string }>('/projects/demo', {

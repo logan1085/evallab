@@ -47,19 +47,27 @@ function parseJson<T>(v: unknown, fallback: T): T {
 
 /* ---- Projects ----------------------------------------------------------- */
 
-export async function createProject(db: DB, args: { id?: string; slug: string; token: string; name: string }): Promise<Project> {
+export async function createProject(
+  db: DB,
+  args: { id?: string; slug: string; token: string; name: string; description?: string },
+): Promise<Project> {
   const project: Project = {
     id: args.id ?? newId(),
     slug: args.slug,
     token: args.token,
     name: args.name,
+    description: args.description ?? '',
     createdAt: now(),
   };
-  await db.run('INSERT INTO projects (id, slug, token, name, created_at) VALUES (?, ?, ?, ?, ?)', project.id,
+  await db.run(
+    'INSERT INTO projects (id, slug, token, name, description, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    project.id,
     project.slug,
     project.token,
     project.name,
-    project.createdAt,);
+    project.description,
+    project.createdAt,
+  );
   return project;
 }
 
@@ -84,6 +92,7 @@ function toProject(row: Row): Project {
     slug: str(row.slug),
     token: str(row.token),
     name: str(row.name),
+    description: str(row.description),
     createdAt: str(row.created_at),
   };
 }

@@ -66,7 +66,7 @@ describe('the held-out arm is not writable', () => {
     const res = await auth(request(app).post(`/api/rounds/${round.id}/items/${heldout[0].itemId}/resolve`))
       .send({ agreedVerdict: 'fail', clauseText: 'A clause aimed squarely at the measurement set.' })
       .expect(400);
-    expect(res.body.error).toMatch(/held-out/i);
+    expect(res.body.error).toMatch(/held.back/i);
   });
 
   it('never offers a held-out split for resolution in the clusters', async () => {

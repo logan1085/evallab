@@ -52,7 +52,7 @@ export function ProjectPage() {
             <span className="metric-k">Shared link — this is the only credential</span>
             <div className="link-box">{link}</div>
             <p className="tiny" style={{ margin: 0 }}>
-              Anyone with this link can grade and read the report. That is v1&rsquo;s scope, not an oversight.
+              Anyone with this link can vote and see the results. That is v1&rsquo;s scope, not an oversight.
             </p>
           </div>
           <div className="shrink stack">
@@ -77,6 +77,58 @@ export function ProjectPage() {
       {tab === 'traces' ? <TracesTab slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
       {tab === 'rubric' ? <RubricTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
     </main>
+  );
+}
+
+/**
+ * The guided journey: a company arrives, explains itself, and this card always
+ * says the one next thing between them and a finished eval set. It reads state
+ * rather than remembering steps, so it survives any order of operations.
+ */
+function NextStep({ view, slug }: { view: ProjectView; slug: string }) {
+  const open = view.rounds.find((r) => r.status === 'open');
+  const closed = view.rounds.filter((r) => r.status === 'closed');
+
+  let step: { k: string; title: string; body: string; cta?: { label: string; to: string } };
+  if (view.traceCount === 0) {
+    step = {
+      k: 'Step 1 of 3',
+      title: 'Get your scenarios',
+      body: 'Describe what your AI does on the Scenarios tab and they will be written for you — or paste real conversations if you have them.',
+    };
+  } else if (view.rounds.length === 0) {
+    step = {
+      k: 'Step 2 of 3',
+      title: 'Send the poll to your team',
+      body: 'Start a poll below, then send the shared link above to the people whose judgment you trust — at least two. Everyone votes blind.',
+    };
+  } else if (open) {
+    step = {
+      k: 'Step 2 of 3 — poll open',
+      title: 'Your team is voting',
+      body: 'Send the link to anyone still missing, and close the poll once everyone has finished. Votes stay hidden from each other until then.',
+    };
+  } else {
+    const latest = closed[closed.length - 1]!;
+    step = {
+      k: 'Step 3 of 3',
+      title: 'Your eval set is ready',
+      body: 'Open the results: settle any disagreements your team had — each one grows the set — and download the finished eval set.',
+      cta: { label: 'Open the results', to: `/p/${slug}/round/${latest.id}` },
+    };
+  }
+
+  return (
+    <div className="panel">
+      <span className="metric-k">{step.k}</span>
+      <h3 style={{ marginTop: 6 }}>{step.title}</h3>
+      <p className="note">{step.body}</p>
+      {step.cta ? (
+        <Link className="btn" to={step.cta.to}>
+          {step.cta.label}
+        </Link>
+      ) : null}
+    </div>
   );
 }
 
@@ -152,8 +204,13 @@ function RoundsTab({
   onError: (m: string) => void;
 }) {
   const closedRounds = view.rounds.filter((r) => r.status === 'closed');
-  const [calibrationSize, setCalibrationSize] = useState(8);
-  const [heldoutSize, setHeldoutSize] = useState(4);
+  // Sized to the project: two thirds discussed, a third held back, never more
+  // than exists. A brand-new project with six scenarios gets 4 + 2, not a
+  // default of 8 + 4 that the server would refuse.
+  const defaultDiscuss = Math.min(8, Math.max(1, Math.ceil((view.traceCount * 2) / 3)));
+  const defaultHold = Math.min(4, Math.max(0, view.traceCount - defaultDiscuss));
+  const [calibrationSize, setCalibrationSize] = useState(defaultDiscuss);
+  const [heldoutSize, setHeldoutSize] = useState(defaultHold);
   const [strategy, setStrategy] = useState<'random' | 'from_splits'>(closedRounds.length ? 'from_splits' : 'random');
   const [sourceRoundId, setSourceRoundId] = useState(closedRounds[closedRounds.length - 1]?.id ?? '');
   const [reuseHeldout, setReuseHeldout] = useState(true);
@@ -184,6 +241,7 @@ function RoundsTab({
   return (
     <section className="rail-grid">
       <div className="col">
+        <NextStep view={view} slug={slug} />
         <TrajectorySection slug={slug} token={token} rounds={view.rounds} />
 
         {view.rounds.length === 0 ? (
@@ -197,7 +255,7 @@ function RoundsTab({
                   <th scope="col">Poll</th>
                   <th scope="col">Standards</th>
                   <th scope="col">Items</th>
-                  <th scope="col">Sampling</th>
+                  <th scope="col">Drawn</th>
                   <th scope="col">Status</th>
                   <th scope="col" />
                 </tr>
@@ -208,7 +266,7 @@ function RoundsTab({
                     <td className="case">{round.name}</td>
                     <td>v{round.rubricVersion ?? '—'}</td>
                     <td>{round.items}</td>
-                    <td>{round.strategy === 'from_splits' ? 'from prior splits' : 'random'}</td>
+                    <td>{round.strategy === 'from_splits' ? 'from disagreements' : 'at random'}</td>
                     <td>
                       <span className={`verdict ${round.status === 'closed' ? 'v-mid' : 'v-pass'}`}>{round.status}</span>
                     </td>
@@ -216,14 +274,14 @@ function RoundsTab({
                       {round.status === 'open' ? (
                         grader ? (
                           <Link className="btn ghost tiny-btn" to={`/p/${slug}/grade/${round.id}`}>
-                            Grade
+                            Vote
                           </Link>
                         ) : (
                           <span className="tiny">join first</span>
                         )
                       ) : (
                         <Link className="btn ghost tiny-btn" to={`/p/${slug}/round/${round.id}`}>
-                          Report
+                          Results
                         </Link>
                       )}
                     </td>
@@ -239,7 +297,7 @@ function RoundsTab({
           <form onSubmit={create}>
             <div className="row">
               <div className="field">
-                <label htmlFor="cal">Calibration items</label>
+                <label htmlFor="cal">Scenarios to discuss</label>
                 <input
                   id="cal"
                   type="number"
@@ -249,7 +307,7 @@ function RoundsTab({
                 />
               </div>
               <div className="field">
-                <label htmlFor="held">Held-out items</label>
+                <label htmlFor="held">Scenarios to hold back</label>
                 <input
                   id="held"
                   type="number"
@@ -263,7 +321,7 @@ function RoundsTab({
                 <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as 'random')}>
                   <option value="random">Random</option>
                   <option value="from_splits" disabled={closedRounds.length === 0}>
-                    From a previous round&rsquo;s splits
+                    From the last poll&rsquo;s disagreements
                   </option>
                 </select>
               </div>
@@ -288,19 +346,19 @@ function RoundsTab({
                   checked={reuseHeldout}
                   onChange={(e) => setReuseHeldout(e.target.checked)}
                 />
-                Reuse the previous round&rsquo;s held-out traces, so before and after are measured on the same cases
+                Reuse the previous poll&rsquo;s held-back scenarios, so before and after are measured on the same cases
               </label>
             ) : null}
 
             <p className={attention.overBudget ? 'warn' : 'note'} style={{ marginTop: 14 }}>
-              {calibrationSize + heldoutSize} items ≈ <strong>{minutes(attention.minutes * 60000)}</strong> per grader.{' '}
+              {calibrationSize + heldoutSize} scenarios ≈ <strong>{minutes(attention.minutes * 60000)}</strong> per person.{' '}
               {attention.overBudget
-                ? `Past roughly ${ATTENTION_BUDGET_MINUTES} minutes a second round tends not to happen. ${attention.maxItems} items fits the budget.`
-                : 'Within the thirty-minute budget that makes a second round likely.'}
+                ? `Past roughly ${ATTENTION_BUDGET_MINUTES} minutes a second poll tends not to happen. ${attention.maxItems} scenarios fits the budget.`
+                : 'Within the thirty-minute budget that makes a second poll likely.'}
             </p>
 
             <button type="submit" disabled={busy}>
-              {busy ? 'Sampling…' : 'Start round'}
+              {busy ? 'Drawing scenarios…' : 'Start poll'}
             </button>
           </form>
         </div>
@@ -335,24 +393,24 @@ function TrajectorySection({
     const held = only.heldout.agreement;
     return (
       <div className="panel">
-        <span className="metric-k">One round in</span>
+        <span className="metric-k">One poll in</span>
         <h3 style={{ marginTop: 6 }}>
           {held.units > 0
-            ? `Held-out agreement is ${pct(held.observed, 1)}. There is nothing to compare it against yet.`
-            : 'This round reserved no held-out traces, so there is no baseline to improve on yet.'}
+            ? `Your team agreed ${pct(held.observed, 1)} of the time on the held-back scenarios. Nothing to compare it against yet.`
+            : 'This poll held nothing back, so there is no baseline to improve on yet.'}
         </h3>
         <p className="note">
-          One round tells you where you are. The second one is what tells you whether resolving the splits changed
-          anything — run it against the same held-out traces, with the same people, and the difference is attributable
-          to the rubric.
+          One poll tells you where you stand. The second is what tells you whether settling the disagreements
+          changed anything — run it on the same held-back scenarios, with the same people, and the difference is
+          attributable to your standards.
         </p>
         {only.resolvedCount === 0 && only.splitCount > 0 ? (
           <Link className="btn ghost" to={`/p/${slug}/round/${only.roundId}`}>
-            Resolve {only.splitCount} split{only.splitCount === 1 ? '' : 's'} first
+            Settle {only.splitCount} disagreement{only.splitCount === 1 ? '' : 's'} first
           </Link>
         ) : (
           <Link className="btn ghost" to={`/p/${slug}/round/${only.roundId}`}>
-            Open the report to start round two
+            Open the results to start poll two
           </Link>
         )}
       </div>
@@ -368,10 +426,10 @@ function TrajectorySection({
         {latest.heldoutDelta !== null ? (
           <span className={`tiny ${latest.heldoutDelta >= 0 ? 'delta-up' : 'delta-down'}`}>
             {latest.heldoutDelta >= 0 ? '+' : ''}
-            {(latest.heldoutDelta * 100).toFixed(1)} PTS ON THE SAME HELD-OUT TRACES
+            {(latest.heldoutDelta * 100).toFixed(1)} PTS ON THE SAME HELD-BACK SCENARIOS
           </span>
         ) : (
-          <span className="tiny">LATEST ROUND NOT COMPARABLE TO THE ONE BEFORE IT</span>
+          <span className="tiny">LATEST POLL NOT COMPARABLE TO THE ONE BEFORE IT</span>
         )}
       </div>
 
@@ -379,16 +437,16 @@ function TrajectorySection({
 
       <div className="scroll-x">
         <table>
-          <caption>Every closed round</caption>
+          <caption>Every closed poll</caption>
           <thead>
             <tr>
               <th scope="col">Poll</th>
               <th scope="col">Standards</th>
-              <th scope="col">Held-out</th>
-              <th scope="col">Calibration</th>
-              <th scope="col">Splits</th>
-              <th scope="col">Resolved</th>
-              <th scope="col">Graders</th>
+              <th scope="col">Held back</th>
+              <th scope="col">Discussed</th>
+              <th scope="col">Disagreed</th>
+              <th scope="col">Settled</th>
+              <th scope="col">Voters</th>
             </tr>
           </thead>
           <tbody>
@@ -471,7 +529,7 @@ function OperationsTab({ slug, token, onError }: { slug: string; token: string; 
           <h3 style={{ marginTop: 0 }}>What you already have written down</h3>
           <p className="tiny" style={{ marginTop: 0 }}>
             Your refund policy, your escalation rules, the thread where someone settled a hard case. These become the
-            rubric — each criterion quotes the sentence it came from, and anything that contradicts itself or cannot be
+            standards — each criterion quotes the sentence it came from, and anything that contradicts itself or cannot be
             checked from a conversation gets handed back rather than quietly tidied up.
           </p>
 
@@ -854,7 +912,7 @@ function DraftPanel({
         }),
       );
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not draft a rubric.');
+      onError(err instanceof Error ? err.message : 'Could not draft your standards.');
     } finally {
       setBusy(false);
     }
@@ -865,9 +923,9 @@ function DraftPanel({
       <div className="panel">
         <div className="between">
           <div>
-            <h3 style={{ margin: 0 }}>Draft a rubric from your conversations</h3>
+            <h3 style={{ margin: 0 }}>Draft your standards from what you have</h3>
             <p className="tiny" style={{ margin: '4px 0 0' }}>
-              Useful when you are starting over, or when the rubric no longer matches what the agent does.
+              Useful when you are starting over, or when the standards no longer match what your AI does.
             </p>
           </div>
           <div className="shrink">
@@ -882,12 +940,12 @@ function DraftPanel({
 
   return (
     <div className="panel">
-      <h3 style={{ marginTop: 0 }}>Draft a rubric from your conversations</h3>
+      <h3 style={{ marginTop: 0 }}>Draft your standards from what you have</h3>
 
       {traceCount === 0 && availableDocs.length === 0 ? (
         <div className="empty">
-          Add what you have already written down on the Operations tab, or some conversations on Traces. A rubric
-          drafted from nothing is just a guess with formatting.
+          Add what you have already written down on the Operations tab, or some scenarios first. Standards
+          drafted from nothing are just a guess with formatting.
         </div>
       ) : (
         <form onSubmit={requestDraft}>
@@ -980,9 +1038,9 @@ function DraftPanel({
             <div className="warn">
               <span className="metric-k">No model configured</span>
               <p style={{ margin: '6px 0 0' }}>
-                Nothing read your conversations, so there are no criteria below — inventing some would give you a rubric
-                that looks drafted from your data and is not. What you get instead is a blank three-point scale and the
-                questions teams argue about first. Set ANTHROPIC_API_KEY to draft properly.
+                Nothing read your conversations, so there are no criteria below — inventing some would give you standards
+                that look drafted from your data and are not. What you get instead is a blank three-point scale and the
+                questions teams argue about first. Set ANTHROPIC_API_KEY to draft from your own material.
               </p>
             </div>
           ) : null}
@@ -1020,7 +1078,7 @@ function DraftPanel({
             <>
               <h4>What could not become a rule</h4>
               <p className="tiny" style={{ marginTop: 0 }}>
-                These are left exactly as found. Reconciling them here would hand you a tidy rubric built on a decision
+                These are left exactly as found. Reconciling them here would hand you tidy standards built on a decision
                 nobody in your team actually made.
               </p>
               <ul className="plain">
@@ -1075,7 +1133,7 @@ function DraftPanel({
             Discard
           </button>
           <p className="tiny" style={{ marginBottom: 0 }}>
-            Using it fills the form below. Nothing is saved until you press Save rubric.
+            Using it fills the form below. Nothing is saved until you press Save standards.
           </p>
         </div>
       ) : null}
@@ -1109,7 +1167,7 @@ function RubricTab({
 
   const history = useAsync(() => api.rubrics(slug, token), [slug, token, rubric?.id]);
 
-  if (!rubric) return <div className="empty">This project has no rubric yet.</div>;
+  if (!rubric) return <div className="empty">This project has no standards yet.</div>;
 
   /** Accepting a draft only fills the form. Nothing is stored until Save. */
   function applyDraft(draft: DraftResponse) {
@@ -1354,7 +1412,7 @@ function RubricTab({
             ) : null}
 
             <button type="submit" disabled={busy}>
-              {busy ? 'Saving…' : 'Save rubric'}
+              {busy ? 'Saving…' : 'Save standards'}
             </button>
             {saved ? <span className="tiny" style={{ marginLeft: 12 }}>{saved}</span> : null}
           </form>
