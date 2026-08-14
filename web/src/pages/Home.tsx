@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, rememberKey } from '../api';
 import { ErrorBanner } from '../ui';
@@ -47,6 +47,119 @@ function useDarkPage() {
     document.documentElement.setAttribute('data-page', 'landing');
     return () => document.documentElement.removeAttribute('data-page');
   }, []);
+}
+
+const VOTES = [
+  { who: 'Ana', chip: 'partial', said: 'It stopped short. That is partial by definition.' },
+  { who: 'Ben', chip: 'fail', said: 'The task was twelve. It did nine.' },
+  { who: 'Cass', chip: 'pass', said: 'It named exactly what it did not do. That is the behaviour I want.' },
+] as const;
+
+/** Beats of the pinned sequence: one per vote, then the punchline. */
+const BEATS = VOTES.length + 1;
+
+const CAPTIONS = [
+  'Scroll — the poll is blind, so each vote lands without seeing the others.',
+  'One vote in. Nobody can see it but Ana.',
+  'Two votes, and already a disagreement.',
+  <>Three careful people. <b>Three different answers.</b></>,
+  <>Three careful people. <b>Three different answers.</b></>,
+] as const;
+
+/**
+ * The scenario holds still while the three votes land, driven by scroll: a
+ * tall scroller with a sticky stage inside it, scroll distance mapped to poll
+ * progress. Ported from the direction-two prototype, which exists to get this
+ * technique right. Under reduced motion, or wherever the stage cannot pin
+ * (small screens, no travel), the finished poll is shown at once instead.
+ */
+function PinnedPoll() {
+  const ref = useRef<HTMLElement>(null);
+  const [beat, setBeat] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setBeat(BEATS);
+      return;
+    }
+    let ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const box = el!.getBoundingClientRect();
+        const travel = box.height - window.innerHeight;
+        if (travel <= 0) {
+          setBeat(BEATS);
+          return;
+        }
+        // 0 as the stage pins, 1 as it releases; the last stretch holds the
+        // finished poll so it is readable before the page moves on.
+        const p = Math.min(Math.max(-box.top / travel, 0), 1);
+        setBeat(Math.round(Math.min(p / 0.82, 1) * BEATS));
+      });
+    }
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
+
+  const votesIn = Math.min(beat, VOTES.length);
+  const tally = { pass: 0, partial: 0, fail: 0 };
+  VOTES.slice(0, votesIn).forEach((v) => { tally[v.chip] += 1; });
+
+  return (
+    <section className="l-scroller" ref={ref}>
+      <div className="l-stage">
+        <div className="l-wrap">
+          <div className="l-stage-head">
+            <span className="l-stage-title">One scenario, three teammates</span>
+            <div className="l-tally" aria-hidden="true">
+              <span className="n-pass"><b>{tally.pass}</b> pass</span>
+              <span className="n-partial"><b>{tally.partial}</b> partial</span>
+              <span className="n-fail"><b>{tally.fail}</b> fail</span>
+            </div>
+          </div>
+
+          <div className="l-demo l-demo--stage">
+            <div className="l-card">
+              <div className="l-trace-label">Nine of twelve done, gaps named</div>
+              <p className="l-trace">
+                <b>USER:</b> Migrate the remaining twelve call sites to the new API.{'\n\n'}
+                <b>ASSISTANT:</b> Migrated nine of twelve. The remaining three depend on a helper that has no
+                equivalent in the new API yet — I have listed them below rather than guessing at a translation.
+              </p>
+            </div>
+
+            <div className="l-verdicts">
+              {VOTES.map((v, i) => (
+                <div key={v.who} className="l-verdict" data-on={i < votesIn ? '' : undefined}>
+                  <div>
+                    <div className="l-who">{v.who}</div>
+                    <div className="l-said">{v.said}</div>
+                  </div>
+                  <span className={`l-chip ${v.chip}`}>{v.chip}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <p className="l-stage-foot">{CAPTIONS[beat]}</p>
+          <p className="l-stage-punch" data-on={beat >= BEATS ? '' : undefined}>
+            Nobody here is wrong. The company just never decided — and an eval written by one person in an
+            afternoon quietly decides it for everyone.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 const STEPS = [
@@ -149,7 +262,7 @@ export function Home() {
         </div>
       </section>
 
-      <section className="l-section">
+      <section className="l-section l-section--intro">
         <div className="l-wrap">
           <p className="l-kicker" data-reveal>
             Why polling
@@ -158,43 +271,13 @@ export function Home() {
             Ask three people. Get three answers.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            A real scenario from the demo, and the three votes three teammates cast on it. Nobody here is wrong — the
-            company just never decided. Every eval written by one person in an afternoon quietly picks one of these
-            answers and calls it truth.
-          </p>
-
-          <div className="l-demo">
-            <div className="l-card" data-reveal style={{ ['--d' as string]: '60ms' }}>
-              <div className="l-trace-label">Nine of twelve done, gaps named</div>
-              <p className="l-trace">
-                <b>USER:</b> Migrate the remaining twelve call sites to the new API.{'\n\n'}
-                <b>ASSISTANT:</b> Migrated nine of twelve. The remaining three depend on a helper that has no equivalent
-                in the new API yet — I have listed them below rather than guessing at a translation.
-              </p>
-            </div>
-
-            <div className="l-verdicts">
-              {[
-                { who: 'Ana', chip: 'partial', said: 'It stopped short. That is partial by definition.' },
-                { who: 'Ben', chip: 'fail', said: 'The task was twelve. It did nine.' },
-                { who: 'Cass', chip: 'pass', said: 'It named exactly what it did not do. That is the behaviour I want.' },
-              ].map((v, i) => (
-                <div key={v.who} className="l-verdict" data-reveal style={{ ['--d' as string]: `${140 + i * 110}ms` }}>
-                  <div>
-                    <div className="l-who">{v.who}</div>
-                    <div className="l-said">{v.said}</div>
-                  </div>
-                  <span className={`l-chip ${v.chip}`}>{v.chip}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <p className="l-punch" data-reveal style={{ ['--d' as string]: '160ms' }}>
-            The standard your AI is graded against should be what your team believes — measured, not assumed.
+            A real scenario from the demo project, and the real votes three teammates cast on it — not an invented
+            disagreement. Keep scrolling and watch the poll come in the way it actually happens: blind.
           </p>
         </div>
       </section>
+
+      <PinnedPoll />
 
       <section className="l-section">
         <div className="l-wrap">

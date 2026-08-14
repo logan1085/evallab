@@ -101,6 +101,40 @@ describe('the prototype says what it is', () => {
   });
 });
 
+describe('the landing page pinned poll can actually pin', () => {
+  // The landing page now carries the same scroll-pinned technique as the
+  // prototype, so it inherits the same trap — and the same guards.
+  it('never hides overflow on the landing root', () => {
+    const rootBlock = withoutComments(
+      landing.slice(landing.indexOf('.landing {'), landing.indexOf('.landing ::selection')),
+    );
+    expect(rootBlock).not.toMatch(/overflow(-x)?\s*:\s*hidden/);
+  });
+
+  it('clips the hero bloom at the hero instead', () => {
+    const hero = withoutComments(landing.slice(landing.indexOf('.l-hero {'), landing.indexOf('.l-hero::before')));
+    expect(hero).toMatch(/overflow:\s*hidden/);
+  });
+
+  it('keeps the stage sticky and the scroller tall enough to travel through', () => {
+    const css = withoutComments(landing);
+    expect(css).toMatch(/\.l-scroller\s*\{[^}]*height:\s*\d+vh/);
+    expect(css).toMatch(/\.l-stage\s*\{[^}]*position:\s*sticky/);
+  });
+
+  it('unpins under reduced motion and hides votes only when motion is welcome', () => {
+    const reduce = landing.slice(landing.indexOf('prefers-reduced-motion: reduce'));
+    expect(reduce).toMatch(/\.l-scroller\s*\{\s*height:\s*auto/);
+    expect(reduce).toMatch(/\.l-stage\s*\{\s*position:\s*static/);
+    // The dimmed not-yet-voted state must live inside the no-preference guard,
+    // so a reduced-motion reader sees the finished poll from CSS alone.
+    const noPref = landing.indexOf('prefers-reduced-motion: no-preference', landing.indexOf('.l-scroller'));
+    const dimmed = landing.indexOf('.l-demo--stage .l-verdict {');
+    expect(noPref).toBeGreaterThan(-1);
+    expect(dimmed).toBeGreaterThan(noPref);
+  });
+});
+
 describe('the pinned sequence can actually pin', () => {
   it('never puts overflow-x on html or body', () => {
     // `overflow-x: hidden` on html or body makes the body a scroll container,

@@ -18,6 +18,15 @@ import { ErrorBanner, Loading, Masthead, minutes, pct, useAsync } from '../ui';
 
 type Tab = 'rounds' | 'operations' | 'traces' | 'rubric';
 
+/** The stored source values are import formats; the owner reads provenance. */
+function sourceLabel(source: string): string {
+  if (source === 'scenario') return 'written for you';
+  if (source === 'paste') return 'pasted in';
+  if (source === 'seed') return 'demo';
+  if (source === 'jsonl' || source === 'csv') return `imported (${source})`;
+  return source;
+}
+
 export function ProjectPage() {
   const { slug } = useParams<{ slug: string }>();
   const token = recallKey(slug!) ?? '';
@@ -721,13 +730,13 @@ function TracesTab({
     try {
       const res = await api.importTraces(slug, token, format, body);
       setResult(
-        `Added ${res.traces.length} trace${res.traces.length === 1 ? '' : 's'}${res.skipped ? `, skipped ${res.skipped} that did not parse` : ''}.`,
+        `Added ${res.traces.length} scenario${res.traces.length === 1 ? '' : 's'}${res.skipped ? `, skipped ${res.skipped} that did not parse` : ''}.`,
       );
       setBody('');
       reload();
       onChange();
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not import those traces.');
+      onError(err instanceof Error ? err.message : 'Could not import those conversations.');
     } finally {
       setBusy(false);
     }
@@ -744,13 +753,17 @@ function TracesTab({
             <p style={{ margin: '6px 0 0' }}>
               {authored} of these transcripts were written for the demo rather than captured from real runs. Anything
               you conclude from them is about the workflow, not about a production agent. Replacing them with real
-              traces is the first thing to do with your own project.
+              conversations is the first thing to do with your own project.
             </p>
           </div>
         ) : null}
 
         <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Bring in traces</h3>
+          <h3 style={{ marginTop: 0 }}>Bring in real conversations</h3>
+          <p className="tiny" style={{ marginTop: 4 }}>
+            Already have transcripts of your AI at work? They make scenarios too — your team votes on what actually
+            happened instead of a written situation.
+          </p>
           <form onSubmit={importTraces}>
             <div className="pill-row">
               {(['paste', 'jsonl', 'csv'] as const).map((f) => (
@@ -762,7 +775,7 @@ function TracesTab({
             <div className="field">
               <label htmlFor="import-body">
                 {format === 'paste'
-                  ? 'One trace per block, separated by a line of three dashes'
+                  ? 'One conversation per block, separated by a line of three dashes'
                   : format === 'jsonl'
                     ? 'One JSON object per line, or a JSON array'
                     : 'CSV with a header row'}
@@ -774,7 +787,7 @@ function TracesTab({
                 onChange={(e) => setBody(e.target.value)}
                 placeholder={
                   format === 'paste'
-                    ? 'Refund outside policy window\nUSER: …\nASSISTANT: …\n---\nNext trace title\n…'
+                    ? 'Refund outside policy window\nUSER: …\nASSISTANT: …\n---\nNext conversation\n…'
                     : format === 'jsonl'
                       ? '{"name": "Refund case", "output": "ASSISTANT: …"}'
                       : 'name,output\nRefund case,"ASSISTANT: …"'
@@ -793,17 +806,17 @@ function TracesTab({
         </div>
 
         {loading && !data ? (
-          <Loading what="traces" />
+          <Loading what="scenarios" />
         ) : (data?.traces.length ?? 0) === 0 ? (
-          <div className="empty">No traces yet.</div>
+          <div className="empty">No scenarios yet.</div>
         ) : (
           <div className="scroll-x">
             <table>
-              <caption>{data!.traces.length} traces</caption>
+              <caption>{data!.traces.length} scenarios</caption>
               <thead>
                 <tr>
-                  <th scope="col">Trace</th>
-                  <th scope="col">Source</th>
+                  <th scope="col">Scenario</th>
+                  <th scope="col">Where it came from</th>
                   <th scope="col">Length</th>
                   <th scope="col" />
                 </tr>
@@ -811,8 +824,17 @@ function TracesTab({
               <tbody>
                 {data!.traces.map((trace) => (
                   <tr key={trace.id}>
-                    <td className="case">{trace.title}</td>
-                    <td>{trace.source}</td>
+                    <td className="case">
+                      {trace.title}
+                      {typeof trace.meta?.probe === 'string' && trace.meta.probe ? (
+                        // The probe is for the person running the poll — what
+                        // this scenario is testing. Voters never see it.
+                        <div className="tiny" style={{ fontWeight: 400, marginTop: 4 }}>
+                          Probes: {trace.meta.probe}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>{sourceLabel(trace.source)}</td>
                     <td>{trace.content.length.toLocaleString()} ch</td>
                     <td>
                       <button
@@ -823,7 +845,7 @@ function TracesTab({
                             reload();
                             onChange();
                           } catch (err) {
-                            onError(err instanceof Error ? err.message : 'Could not remove that trace.');
+                            onError(err instanceof Error ? err.message : 'Could not remove that scenario.');
                           }
                         }}
                       >
@@ -1405,8 +1427,8 @@ function RubricTab({
                   ))}
                 </ul>
                 <p className="tiny" style={{ margin: 0 }}>
-                  These are written during split resolution, not here — each one exists because two graders landed in
-                  different places on a real trace.
+                  These are written when a disagreement is settled, not here — each one exists because two people
+                  voted differently on a real scenario.
                 </p>
               </div>
             ) : null}

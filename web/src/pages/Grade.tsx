@@ -134,7 +134,7 @@ export function GradePage() {
                 key={i.itemId}
                 className={`pill ${j === index ? 'on' : ''}`}
                 onClick={() => setIndex(j)}
-                title={i.myVerdict ? 'graded' : 'not graded'}
+                title={i.myVerdict ? 'voted' : 'not voted yet'}
                 style={{ color: i.myVerdict ? 'var(--agree)' : undefined }}
               >
                 {j + 1}
@@ -211,10 +211,10 @@ export function GradePage() {
 
           {allDone ? (
             <div className="panel">
-              <h3 style={{ marginTop: 0 }}>You&rsquo;re done</h3>
+              <h3 style={{ marginTop: 0 }}>Your votes are in</h3>
               <p className="note">
-                Closing the round reveals every verdict and stops accepting new grades. Do it once everyone has
-                finished — there is no reopening, because a round you can grade after reading is not blind.
+                Closing the poll reveals every vote and stops accepting new ones. Do it once the whole team has
+                voted — there is no reopening, because a poll you can answer after seeing the votes is not blind.
               </p>
               <button
                 onClick={async () => {
@@ -223,16 +223,16 @@ export function GradePage() {
                     await api.closeRound(roundId!, token);
                     navigate(`/p/${slug}/round/${roundId}`);
                   } catch (err) {
-                    setSaveError(err instanceof Error ? err.message : 'Could not close the round.');
+                    setSaveError(err instanceof Error ? err.message : 'Could not close the poll.');
                     setClosing(false);
                   }
                 }}
                 disabled={closing}
               >
-                {closing ? 'Closing…' : 'Close the round and open the report'}
+                {closing ? 'Closing…' : 'Close the poll and see where you agree'}
               </button>
               <p className="tiny" style={{ marginTop: 10 }}>
-                Or leave it open and send the link to whoever has not graded yet.
+                Or leave it open and send the link to whoever has not voted yet.
               </p>
             </div>
           ) : null}
