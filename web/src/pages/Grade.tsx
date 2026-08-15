@@ -172,7 +172,7 @@ export function GradePage() {
             </div>
 
             <div className="field" style={{ marginTop: 16, marginBottom: 0 }}>
-              <label htmlFor="note">Why? (optional — your words become the evidence on exported test cases)</label>
+              <label htmlFor="note">Why? Optional: your words become the evidence on exported test cases.</label>
               <textarea
                 id="note"
                 rows={3}
@@ -214,7 +214,7 @@ export function GradePage() {
               <h3 style={{ marginTop: 0 }}>Your votes are in</h3>
               <p className="note">
                 Closing the poll reveals every vote and stops accepting new ones. Do it once the whole team has
-                voted — there is no reopening, because a poll you can answer after seeing the votes is not blind.
+                voted. There is no reopening, because a poll you can answer after seeing the votes is not blind.
               </p>
               <button
                 onClick={async () => {

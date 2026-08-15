@@ -113,7 +113,7 @@ const COMMON_QUESTIONS: { question: string; why: string }[] = [
     why: 'Partial work is where most teams split first, and having a middle level on the scale does not by itself say when to reach for it.',
   },
   {
-    question: 'Does a correct outcome delivered badly — wrong tone, no explanation, six steps where one would do — change the verdict?',
+    question: 'Does a correct outcome delivered badly (wrong tone, no explanation, six steps where one would do) change the verdict?',
     why: 'Teams usually assume they agree on this and find out during a round that they do not.',
   },
   {

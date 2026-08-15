@@ -5,10 +5,10 @@ import { ABSTAIN, type AgreementStats, type CoverageStats, type VerdictLevel } f
 /* ---- Formatting --------------------------------------------------------- */
 
 export const pct = (n: number | null | undefined, digits = 0): string =>
-  n === null || n === undefined || Number.isNaN(n) ? '—' : `${(n * 100).toFixed(digits)}%`;
+  n === null || n === undefined || Number.isNaN(n) ? '–' : `${(n * 100).toFixed(digits)}%`;
 
 export const num = (n: number | null | undefined, digits = 2): string =>
-  n === null || n === undefined || Number.isNaN(n) ? '—' : n.toFixed(digits);
+  n === null || n === undefined || Number.isNaN(n) ? '–' : n.toFixed(digits);
 
 export const minutes = (ms: number): string => `${Math.round(ms / 60000)} min`;
 
@@ -118,7 +118,7 @@ export function verdictClass(verdict: string, scale: VerdictLevel[]): string {
 }
 
 export function Verdict({ verdict, scale }: { verdict: string | null | undefined; scale: VerdictLevel[] }) {
-  if (!verdict) return <span className="verdict v-abstain">—</span>;
+  if (!verdict) return <span className="verdict v-abstain">–</span>;
   const label = verdict === ABSTAIN ? 'abstain' : (scale.find((s) => s.id === verdict)?.label ?? verdict);
   return <span className={`verdict ${verdictClass(verdict, scale)}`}>{label}</span>;
 }

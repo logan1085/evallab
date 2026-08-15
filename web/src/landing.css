@@ -81,17 +81,65 @@ html[data-page="landing"] body {
   }
 }
 
+/* Local nav ---------------------------------------------------------------- */
+
+/*
+ * The thin product-page bar: wordmark on the left, one action on the right,
+ * frosted glass over whatever scrolls beneath it. It is fixed, not sticky, so
+ * it cannot interfere with the pinned stage further down.
+ */
+.l-nav {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.72);
+  -webkit-backdrop-filter: saturate(1.8) blur(20px);
+  backdrop-filter: saturate(1.8) blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.l-nav .l-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+}
+.l-nav-mark {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--l-text);
+}
+.landing button.l-nav-cta {
+  font-family: var(--ui);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: none;
+  background: var(--l-text);
+  color: #000;
+  cursor: pointer;
+}
+.landing button.l-nav-cta:hover { background: #fff; }
+
 /* Hero -------------------------------------------------------------------- */
 
+/* Centred, the way a product introduces itself. */
 .l-hero {
   position: relative;
   min-height: 92vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 120px 0 80px;
+  padding: 130px 0 80px;
   isolation: isolate;
   overflow: hidden;
+}
+.l-hero .l-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
 }
 
 /* A single wide, very soft bloom. One light source, not a glow on everything. */
@@ -131,13 +179,13 @@ html[data-page="landing"] body {
 
 .landing h1.l-title {
   font-family: var(--display);
-  font-size: clamp(42px, 7.4vw, 92px);
-  font-weight: 680;
-  letter-spacing: -0.042em;
-  line-height: 0.98;
+  font-size: clamp(44px, 7.8vw, 104px);
+  font-weight: 700;
+  letter-spacing: -0.045em;
+  line-height: 1.02;
   color: var(--l-text);
-  margin: 0 0 26px;
-  max-width: 15ch;
+  margin: 0 0 24px;
+  max-width: 14ch;
   text-wrap: balance;
 }
 
@@ -149,11 +197,13 @@ html[data-page="landing"] body {
 }
 
 .l-sub {
-  font-size: clamp(17px, 2vw, 21px);
-  line-height: 1.5;
+  font-size: clamp(18px, 2.1vw, 24px);
+  line-height: 1.45;
+  font-weight: 500;
   color: var(--l-text-2);
-  max-width: 52ch;
-  margin: 0 0 38px;
+  max-width: 42ch;
+  margin: 0 0 36px;
+  text-wrap: balance;
 }
 
 .l-cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -311,8 +361,10 @@ html[data-page="landing"] body {
   max-width: 44ch;
 }
 
-/* The intro that hands off into the pinned stage keeps its heading close. */
-.l-section--intro { padding-bottom: 24px; }
+/* The intro that hands off into the pinned stage: a centred chapter head. */
+.l-section--intro { padding-bottom: 24px; text-align: center; }
+.landing .l-section--intro h2.l-h2 { margin-left: auto; margin-right: auto; }
+.l-section--intro .l-lede { margin-left: auto; margin-right: auto; }
 
 .l-demo {
   display: grid;
@@ -325,8 +377,8 @@ html[data-page="landing"] body {
 .l-card {
   background: var(--l-raised);
   border: 1px solid var(--l-line);
-  border-radius: 18px;
-  padding: 26px 28px;
+  border-radius: 24px;
+  padding: 28px 30px;
 }
 
 .l-trace-label {
@@ -356,8 +408,8 @@ html[data-page="landing"] body {
   gap: 16px;
   background: var(--l-raised);
   border: 1px solid var(--l-line);
-  border-radius: 14px;
-  padding: 16px 18px;
+  border-radius: 18px;
+  padding: 16px 20px;
 }
 .l-who { font-size: 15px; font-weight: 540; color: var(--l-text); }
 .l-said { font-size: 13px; color: var(--l-text-3); margin-top: 2px; }
@@ -380,7 +432,9 @@ html[data-page="landing"] body {
   border-top: 1px solid var(--l-line);
   text-align: center;
 }
-.l-close .l-h2 { margin-left: auto; margin-right: auto; }
+/* Outranks the `.landing h2.l-h2` margin shorthand, which would win on
+   specificity and pin the heading left. */
+.landing .l-close h2.l-h2 { margin-left: auto; margin-right: auto; }
 .l-close .l-lede { margin: 0 auto 38px; }
 .l-close .l-cta-row { justify-content: center; }
 

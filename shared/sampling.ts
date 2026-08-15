@@ -127,7 +127,7 @@ export function explain(
   const parts: string[] = [];
   if (strategy === 'random') {
     parts.push(
-      `${calibrationCount} scenarios drawn at random for discussion. There is no cleverness here — the sampler cannot know where your standard's edge is until people have voted.`,
+      `${calibrationCount} scenarios drawn at random for discussion. There is no cleverness here. The sampler cannot know where your standard's edge is until people have voted.`,
     );
   } else if (fromPriorSplits === 0) {
     parts.push(
@@ -144,7 +144,7 @@ export function explain(
     parts.push(
       reusedHeldout
         ? `${heldoutCount} held-back scenarios reused from the previous poll, so before-and-after agreement is measured on the same cases.`
-        : `${heldoutCount} scenarios held back. Everyone votes on them but they are never discussed — they are how the next poll measures whether agreement is actually improving.`,
+        : `${heldoutCount} scenarios held back. Everyone votes on them but they are never discussed. They are how the next poll measures whether agreement is actually improving.`,
     );
   }
   return parts.join(' ');

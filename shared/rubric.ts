@@ -43,7 +43,7 @@ export function renderRubricMarkdown(
       // exactly what the humans read.
       if (c.source?.quote) {
         lines.push(`> ${c.source.quote.trim()}`);
-        lines.push(`> — ${c.source.document}`);
+        lines.push(`> ${c.source.document}`);
         lines.push('');
       }
     }
@@ -83,7 +83,7 @@ export function renderRubricMarkdown(
     lines.push('## What this rubric does not answer yet');
     lines.push('');
     lines.push(
-      'These are the cases the rubric leaves to the grader. Expect disagreement here first — that is what the next round is for.',
+      'These are the cases the rubric leaves to the grader. Expect disagreement here first. That is what the next round is for.',
     );
     lines.push('');
     for (const q of rubric.openQuestions) {

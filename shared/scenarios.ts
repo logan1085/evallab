@@ -48,7 +48,7 @@ export function clampScenarioCount(count: number | undefined): number {
  */
 export function buildScenarioSystemPrompt(): string {
   return [
-    'You write test scenarios for a team to judge. Each scenario is a concrete situation involving their AI — a short transcript or a specific description of what the AI did — and the team will vote, independently and blind, on whether it was acceptable.',
+    'You write test scenarios for a team to judge. Each scenario is a concrete situation involving their AI (a short transcript or a specific description of what the AI did) and the team will vote, independently and blind, on whether it was acceptable.',
     '',
     '## Rules',
     '',
@@ -58,9 +58,10 @@ export function buildScenarioSystemPrompt(): string {
     '   - clear cases the written rules settle, so agreement has an anchor',
     '   - boundary cases where the rules run out, nearly contradict, or leave a judgment call',
     '   - cases the documents never imagined but the operation will meet',
-    '4. If the documents contradict each other somewhere, write at least one scenario that lands exactly on the contradiction — that is the vote the team most needs to have.',
+    '4. If the documents contradict each other somewhere, write at least one scenario that lands exactly on the contradiction. That is the vote the team most needs to have.',
     '5. The probe field says what the scenario is designed to find out, in one sentence, for the person running the poll. It is never shown to voters.',
     '6. Write in plain language. The people voting run the operation; they are not machine-learning researchers.',
+    '7. Plain punctuation: never use em dashes. Use periods, commas or colons instead.',
   ].join('\n');
 }
 

@@ -275,8 +275,8 @@ export function createApp(db: DB) {
         const lost = previous.graderNames.filter((n) => !point.graderNames.includes(n));
         if (gained.length || lost.length) {
           reasons.push(
-            `The panel changed${gained.length ? ` — ${gained.join(', ')} joined` : ''}${
-              lost.length ? `${gained.length ? ' and' : ' —'} ${lost.join(', ')} did not grade` : ''
+            `The panel changed${gained.length ? `: ${gained.join(', ')} joined` : ''}${
+              lost.length ? `${gained.length ? ' and' : ':'} ${lost.join(', ')} did not grade` : ''
             }. Some of any movement is the people, not the rubric.`,
           );
         }
@@ -839,7 +839,7 @@ export function createApp(db: DB) {
     const participants = await store.participantsOf(db, round.id);
     if (participants.length < 2) {
       return res.status(400).json({
-        error: 'A poll needs votes from at least two people before it can close — agreement is not defined for one.',
+        error: 'A poll needs votes from at least two people before it can close. Agreement is not defined for one.',
       });
     }
     res.json({ round: await store.closeRound(db, round.id) });
@@ -850,7 +850,7 @@ export function createApp(db: DB) {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') {
       return res.status(409).json({
-        error: 'This poll is still open. Votes stay hidden until it closes — that is what makes the result mean anything.',
+        error: 'This poll is still open. Votes stay hidden until it closes. That is what makes the result mean anything.',
       });
     }
 
@@ -1072,7 +1072,7 @@ export function createApp(db: DB) {
     // happened to finish first. Above this, the run needs a queue.
     if (items.length > MAX_JUDGE_BATCH) {
       return res.status(413).json({
-        error: `This arm has ${items.length} items, and a judge run is capped at ${MAX_JUDGE_BATCH} so it finishes inside the request. Run the judge on a smaller round — ${MAX_JUDGE_BATCH} items is already more than the statistics need.`,
+        error: `This arm has ${items.length} items, and a judge run is capped at ${MAX_JUDGE_BATCH} so it finishes inside the request. Run the judge on a smaller round. ${MAX_JUDGE_BATCH} items is already more than the statistics need.`,
         code: 'batch_too_large',
         limit: MAX_JUDGE_BATCH,
       });

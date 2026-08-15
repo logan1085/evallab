@@ -52,7 +52,7 @@ export function ReportPage() {
   return (
     <main className="sheet sheet--wide">
       <Masthead
-        crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `rubric v${data.rubric?.version ?? '—'}`]}
+        crumbs={[{ label: 'Project', to: `/p/${slug}` }, data.round.name, `rubric v${data.rubric?.version ?? '–'}`]}
         title={
           data.splitCount === 0
             ? 'Your team agreed on everything'
@@ -61,7 +61,7 @@ export function ReportPage() {
         standfirst={
           data.splitCount === 0
             ? 'Every vote landed in the same place. Either the standard is genuinely settled, or this sample avoided the hard cases.'
-            : 'Careful people voted differently on these. Settle each one and the answer becomes a test case — made once, instead of re-made silently on every future run.'
+            : 'Careful people voted differently on these. Settle each one and the answer becomes a test case, made once instead of re-made silently on every future run.'
         }
       />
 
@@ -151,7 +151,7 @@ export function ReportPage() {
 
           {data.heldout.agreement.units > 0 ? (
             <>
-              <h3>Held out — the primary metric</h3>
+              <h3>Held out: the primary metric</h3>
               <p className="note">
                 These traces were graded but never discussed, so they are the honest test of whether a calibration round
                 moved anything.
@@ -245,7 +245,7 @@ export function ReportPage() {
                     <td className="case">{row.title}</td>
                     {row.embargoed ? (
                       <td colSpan={data.graders.length} className="tiny">
-                        withheld — in a round being graded now
+                        withheld while a poll is being graded
                       </td>
                     ) : (
                       data.graders.map((g) => (
@@ -501,7 +501,7 @@ function ShipSection({
         <h2>Write what you settled into your standards</h2>
         <p className="lede">
           {report.resolutions.length === 0
-            ? 'Nothing settled yet. Each settled disagreement becomes one sentence in your standards, carrying the scenario it came from — so "why does the standard say this?" always has an answer.'
+            ? 'Nothing settled yet. Each settled disagreement becomes one sentence in your standards, carrying the scenario it came from, so "why does the standard say this?" always has an answer.'
             : `${report.resolutions.length} settled decision${report.resolutions.length === 1 ? '' : 's'} ready to write in${unresolved > 0 ? `, with ${unresolved} disagreement${unresolved === 1 ? '' : 's'} still open` : ''}.`}
         </p>
 
@@ -634,7 +634,7 @@ function JudgeSection({
       <div className="col">
         <h2>Build a judge from a rubric version and score it against the humans</h2>
         <p className="lede">
-          The judge is given the rubric verbatim — the same text the graders read — and is then treated as one more
+          The judge is given the rubric verbatim, the same text the graders read, and is then treated as one more
           rater on the same items, so its agreement with humans is computed exactly the way theirs is with each other.
           Run it against two rubric versions to see whether calibration bought anything.
         </p>
@@ -644,7 +644,7 @@ function JudgeSection({
             <span className="metric-k">Offline stub, not a judge</span>
             <p style={{ margin: '6px 0 0' }}>
               No <code>ANTHROPIC_API_KEY</code> is set, so runs use a deterministic keyword scorer. It exercises the
-              workflow and nothing more — do not read its agreement number as evidence about anything.
+              workflow and nothing more. Do not read its agreement number as evidence about anything.
             </p>
           </div>
         ) : null}
@@ -656,7 +656,7 @@ function JudgeSection({
               <select id="judge-rubric" value={rubricId} onChange={(e) => setRubricId(e.target.value)}>
                 {versions.map((r) => (
                   <option key={r.id} value={r.id}>
-                    v{r.version} — {r.clauses.length} clause{r.clauses.length === 1 ? '' : 's'}
+                    v{r.version} · {r.clauses.length} clause{r.clauses.length === 1 ? '' : 's'}
                   </option>
                 ))}
               </select>
@@ -711,7 +711,7 @@ function JudgeSection({
               <tbody>
                 {runs.map((run) => (
                   <tr key={run.id}>
-                    <td>v{run.rubricVersion ?? '—'}</td>
+                    <td>v{run.rubricVersion ?? '–'}</td>
                     <td>{run.arm === 'heldout' ? 'held out' : 'calibration'}</td>
                     <td>{run.model}</td>
                     <td>{run.itemCount}</td>
@@ -773,7 +773,7 @@ function EvalSetSection({
           {data.caseCount} test case{data.caseCount === 1 ? '' : 's'}, extracted from your team
         </h2>
         <p className="lede">
-          Every case is a scenario your team judged the same way — or disagreed on and then settled, once, on the
+          Every case is a scenario your team judged the same way, or disagreed on and then settled, once, on the
           record. Nothing here is averaged{splitCount > 0 ? '; settle the disagreements above and the set grows' : ''}.
         </p>
 
@@ -813,7 +813,7 @@ function EvalSetSection({
 
         {data.excluded.length > 0 ? (
           <p className="tiny" style={{ marginTop: 14 }}>
-            Held-back cases stay out on purpose — they are how the next poll measures whether agreement is improving
+            Held-back cases stay out on purpose. They are how the next poll measures whether agreement is improving
             on untouched ground. Exporting them with answers attached would be teaching to the test.
           </p>
         ) : null}

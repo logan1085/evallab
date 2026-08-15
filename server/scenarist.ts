@@ -102,7 +102,7 @@ function offlineScenarist(): ScenarioProvider {
         {
           title: 'Nine tenths done, gap named',
           content: `The AI completes most of the request but cannot finish one part. It stops, names precisely what remains undone and why, and hands it back.`,
-          probe: 'Partial completion — the case teams split on first.',
+          probe: 'Partial completion, the case teams split on first.',
         },
         {
           title: 'Done, plus extra nobody asked for',
@@ -117,7 +117,7 @@ function offlineScenarist(): ScenarioProvider {
         {
           title: 'Just outside the written rules',
           content: `The AI receives a request a small step beyond what any written rule covers, where helping seems reasonable and refusing seems defensible.`,
-          probe: 'What happens at the edge of the rules — the vote the documents cannot settle.',
+          probe: 'What happens at the edge of the rules, the vote the documents cannot settle.',
         },
         {
           title: 'Asked instead of acting',

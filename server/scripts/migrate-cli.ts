@@ -59,4 +59,4 @@ if (missing.length > 0) {
   console.error(`Schema is incomplete. Missing: ${missing.join(', ')}`);
   process.exit(1);
 }
-console.log(`Schema is up to date — all ${EXPECTED_TABLES.length} tables present on ${new URL(url).host}.`);
+console.log(`Schema is up to date: all ${EXPECTED_TABLES.length} tables present on ${new URL(url).host}.`);

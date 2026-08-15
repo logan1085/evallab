@@ -59,7 +59,7 @@ const VOTES = [
 const BEATS = VOTES.length + 1;
 
 const CAPTIONS = [
-  'Scroll — the poll is blind, so each vote lands without seeing the others.',
+  'Scroll. The poll is blind, so each vote lands without seeing the others.',
   'One vote in. Nobody can see it but Ana.',
   'Two votes, and already a disagreement.',
   <>Three careful people. <b>Three different answers.</b></>,
@@ -134,7 +134,7 @@ function PinnedPoll() {
               <p className="l-trace">
                 <b>USER:</b> Migrate the remaining twelve call sites to the new API.{'\n\n'}
                 <b>ASSISTANT:</b> Migrated nine of twelve. The remaining three depend on a helper that has no
-                equivalent in the new API yet — I have listed them below rather than guessing at a translation.
+                equivalent in the new API yet, so I have listed them below rather than guessing at a translation.
               </p>
             </div>
 
@@ -153,8 +153,8 @@ function PinnedPoll() {
 
           <p className="l-stage-foot">{CAPTIONS[beat]}</p>
           <p className="l-stage-punch" data-on={beat >= BEATS ? '' : undefined}>
-            Nobody here is wrong. The company just never decided — and an eval written by one person in an
-            afternoon quietly decides it for everyone.
+            Nobody here is wrong. The company just never decided. An eval written by one person in an afternoon
+            quietly decides it for everyone.
           </p>
         </div>
       </div>
@@ -202,19 +202,30 @@ export function Home() {
 
   return (
     <main className="landing">
+      <nav className="l-nav" aria-label="Tacit">
+        <div className="l-wrap">
+          <span className="l-nav-mark">Tacit</span>
+          <button
+            className="l-nav-cta"
+            onClick={() => document.getElementById('start')?.scrollIntoView({ behavior: 'smooth' })}
+          >
+            Set up
+          </button>
+        </div>
+      </nav>
+
       <section className="l-hero">
         <div className="l-wrap">
           <span className="l-eyebrow" data-reveal>
             <span className="l-dot" />
-            Tacit
+            Introducing Tacit
           </span>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
             Your company should write <span className="l-grad">its own evals</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            Not a vendor&rsquo;s benchmark. Not one engineer&rsquo;s guesses. Your company already knows what good
-            looks like — Tacit polls your team on concrete scenarios, measures where they actually agree, and turns
-            that into the eval set your AI is held to.
+            Not a vendor&rsquo;s benchmark. Not one engineer&rsquo;s guesses. An eval set extracted from the people
+            who already know what good looks like.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
             <button
@@ -239,7 +250,7 @@ export function Home() {
             Ask three people. Get three answers.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            A real scenario from the demo project, and the real votes three teammates cast on it — not an invented
+            A real scenario from the demo project, and the real votes three teammates cast on it, not an invented
             disagreement. Keep scrolling and watch the poll come in the way it actually happens: blind.
           </p>
         </div>
@@ -254,7 +265,7 @@ export function Home() {
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
             Say what you do and what your AI handles. Tacit writes the scenarios, your team votes blind, and out
-            comes an eval set. No sign-up — you get a link to send to the people whose judgment you trust.
+            comes an eval set. No sign-up. You get a link to send to the people whose judgment you trust.
           </p>
 
           <form className="l-start l-start--tall" onSubmit={createProject} data-reveal style={{ ['--d' as string]: '130ms' }}>

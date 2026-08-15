@@ -58,7 +58,7 @@ export function ProjectPage() {
       <div className="panel">
         <div className="between">
           <div style={{ flex: '1 1 340px', minWidth: 0 }}>
-            <span className="metric-k">Shared link — this is the only credential</span>
+            <span className="metric-k">Shared link: the only credential</span>
             <div className="link-box">{link}</div>
             <p className="tiny" style={{ margin: 0 }}>
               Anyone with this link can vote and see the results. That is v1&rsquo;s scope, not an oversight.
@@ -103,17 +103,17 @@ function NextStep({ view, slug }: { view: ProjectView; slug: string }) {
     step = {
       k: 'Step 1 of 3',
       title: 'Get your scenarios',
-      body: 'Describe what your AI does on the Scenarios tab and they will be written for you — or paste real conversations if you have them.',
+      body: 'Describe what your AI does on the Scenarios tab and they will be written for you, or paste real conversations if you have them.',
     };
   } else if (view.rounds.length === 0) {
     step = {
       k: 'Step 2 of 3',
       title: 'Send the poll to your team',
-      body: 'Start a poll below, then send the shared link above to the people whose judgment you trust — at least two. Everyone votes blind.',
+      body: 'Start a poll below, then send the shared link above to the people whose judgment you trust. At least two. Everyone votes blind.',
     };
   } else if (open) {
     step = {
-      k: 'Step 2 of 3 — poll open',
+      k: 'Step 2 of 3: poll open',
       title: 'Your team is voting',
       body: 'Send the link to anyone still missing, and close the poll once everyone has finished. Votes stay hidden from each other until then.',
     };
@@ -122,7 +122,7 @@ function NextStep({ view, slug }: { view: ProjectView; slug: string }) {
     step = {
       k: 'Step 3 of 3',
       title: 'Your eval set is ready',
-      body: 'Open the results: settle any disagreements your team had — each one grows the set — and download the finished eval set.',
+      body: 'Open the results: settle any disagreements your team had (each one grows the set) and download the finished eval set.',
       cta: { label: 'Open the results', to: `/p/${slug}/round/${latest.id}` },
     };
   }
@@ -273,7 +273,7 @@ function RoundsTab({
                 {view.rounds.map((round) => (
                   <tr key={round.id}>
                     <td className="case">{round.name}</td>
-                    <td>v{round.rubricVersion ?? '—'}</td>
+                    <td>v{round.rubricVersion ?? '–'}</td>
                     <td>{round.items}</td>
                     <td>{round.strategy === 'from_splits' ? 'from disagreements' : 'at random'}</td>
                     <td>
@@ -410,7 +410,7 @@ function TrajectorySection({
         </h3>
         <p className="note">
           One poll tells you where you stand. The second is what tells you whether settling the disagreements
-          changed anything — run it on the same held-back scenarios, with the same people, and the difference is
+          changed anything: run it on the same held-back scenarios, with the same people, and the difference is
           attributable to your standards.
         </p>
         {only.resolvedCount === 0 && only.splitCount > 0 ? (
@@ -463,10 +463,10 @@ function TrajectorySection({
               <tr key={point.roundId}>
                 <td className="case">{point.name}</td>
                 <td>
-                  v{point.rubricVersion ?? '—'} · {point.clauseCount} cl
+                  v{point.rubricVersion ?? '–'} · {point.clauseCount} cl
                 </td>
                 <td>
-                  {point.heldout.agreement.units > 0 ? pct(point.heldout.agreement.observed, 1) : '—'}
+                  {point.heldout.agreement.units > 0 ? pct(point.heldout.agreement.observed, 1) : '–'}
                   {point.heldoutDelta !== null ? (
                     <span className={point.heldoutDelta >= 0 ? 'delta-up' : 'delta-down'}>
                       {' '}
@@ -476,7 +476,7 @@ function TrajectorySection({
                   ) : null}
                 </td>
                 <td>
-                  {point.calibration.agreement.units > 0 ? pct(point.calibration.agreement.observed, 1) : '—'}
+                  {point.calibration.agreement.units > 0 ? pct(point.calibration.agreement.observed, 1) : '–'}
                 </td>
                 <td>{point.splitCount}</td>
                 <td>{point.resolvedCount}</td>
@@ -538,7 +538,7 @@ function OperationsTab({ slug, token, onError }: { slug: string; token: string; 
           <h3 style={{ marginTop: 0 }}>What you already have written down</h3>
           <p className="tiny" style={{ marginTop: 0 }}>
             Your refund policy, your escalation rules, the thread where someone settled a hard case. These become the
-            standards — each criterion quotes the sentence it came from, and anything that contradicts itself or cannot be
+            standards. Each criterion quotes the sentence it came from, and anything that contradicts itself or cannot be
             checked from a conversation gets handed back rather than quietly tidied up.
           </p>
 
@@ -584,7 +584,7 @@ function OperationsTab({ slug, token, onError }: { slug: string; token: string; 
           <Loading what="documents" />
         ) : documents.length === 0 ? (
           <div className="empty">
-            Nothing yet. Most teams already have this written somewhere — start with whatever governs the decisions your
+            Nothing yet. Most teams already have this written somewhere. Start with whatever governs the decisions your
             agent is making.
           </div>
         ) : (
@@ -662,7 +662,7 @@ function ScenarioWriter({
       const res = await api.generateScenarios(slug, token, { description });
       setResult(
         res.provider.real
-          ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below — edit or remove any before you poll.`
+          ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.`
           : `${res.scenarios.length} starter scenarios added. No ANTHROPIC_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
       );
       setDescription('');
@@ -678,7 +678,7 @@ function ScenarioWriter({
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>Write the scenarios for me</h3>
       <p className="tiny" style={{ marginTop: 0 }}>
-        Describe what your AI is supposed to do. You get concrete situations for your team to vote on — the clear
+        Describe what your AI is supposed to do. You get concrete situations for your team to vote on: the clear
         cases, the boundary cases, and the ones your documents never imagined. None of them contain their own answer.
       </p>
       <form onSubmit={write}>
@@ -761,7 +761,7 @@ function TracesTab({
         <div className="panel">
           <h3 style={{ marginTop: 0 }}>Bring in real conversations</h3>
           <p className="tiny" style={{ marginTop: 4 }}>
-            Already have transcripts of your AI at work? They make scenarios too — your team votes on what actually
+            Already have transcripts of your AI at work? They make scenarios too. Your team votes on what actually
             happened instead of a written situation.
           </p>
           <form onSubmit={importTraces}>
@@ -794,7 +794,7 @@ function TracesTab({
                 }
               />
               <p className="tiny" style={{ marginTop: 6 }}>
-                Field names are matched loosely — title, name, id, case for the label; content, transcript, output,
+                Field names are matched loosely: title, name, id, case for the label; content, transcript, output,
                 completion, messages for the body. Everything else is kept as metadata.
               </p>
             </div>
@@ -981,7 +981,7 @@ function DraftPanel({
               onChange={(e) => setDescription(e.target.value)}
             />
             <p className="tiny" style={{ margin: 0 }}>
-              A sentence or two. Include the limits it is supposed to respect — those are where graders argue.
+              A sentence or two. Include the limits it is supposed to respect. Those are where graders argue.
             </p>
           </div>
 
@@ -1031,7 +1031,7 @@ function DraftPanel({
               {available.length > MAX_DRAFT_EXAMPLES
                 ? `Showing the first ${MAX_DRAFT_EXAMPLES} of ${available.length}. `
                 : ''}
-              Pick a spread — the ones that went well, the ones that did not, and the ones you argued about.
+              Pick a spread: the ones that went well, the ones that did not, and the ones you argued about.
             </p>
           </div>
 
@@ -1060,7 +1060,7 @@ function DraftPanel({
             <div className="warn">
               <span className="metric-k">No model configured</span>
               <p style={{ margin: '6px 0 0' }}>
-                Nothing read your conversations, so there are no criteria below — inventing some would give you standards
+                Nothing read your conversations, so there are no criteria below. Inventing some would give you standards
                 that look drafted from your data and are not. What you get instead is a blank three-point scale and the
                 questions teams argue about first. Set ANTHROPIC_API_KEY to draft from your own material.
               </p>
@@ -1084,7 +1084,7 @@ function DraftPanel({
             <ul className="plain">
               {draft.draft.criteria.map((c) => (
                 <li key={c.id} style={{ marginBottom: 12 }}>
-                  <strong>{c.title}</strong> — {c.body}
+                  <strong>{c.title}</strong>: {c.body}
                   {c.source ? (
                     <div className="quote">
                       “{c.source.quote}”
@@ -1113,7 +1113,7 @@ function DraftPanel({
                     {c.detail ? (
                       <div className="tiny" style={{ marginTop: 3 }}>
                         {c.detail}
-                        {c.documents.length > 0 ? ` — ${c.documents.join(', ')}` : ''}
+                        {c.documents.length > 0 ? ` · ${c.documents.join(', ')}` : ''}
                       </div>
                     ) : null}
                   </li>
@@ -1298,7 +1298,7 @@ function RubricTab({
               {scale.map((l) => l.id).join('|') !== rubric.scale.map((l) => l.id).join('|') ? (
                 <p className="tiny" style={{ margin: 0 }}>
                   This scale differs from the saved one. Saving keeps every closed round on the scale it was graded
-                  against — an edit forks a new version rather than rewriting the old one.
+                  against. An edit forks a new version rather than rewriting the old one.
                 </p>
               ) : null}
               <p className="tiny" style={{ margin: 0 }}>
@@ -1352,7 +1352,7 @@ function RubricTab({
               <div className="field">
                 <label>Rules that could not become tests</label>
                 <p className="tiny" style={{ marginTop: 0 }}>
-                  Straight from your own documents, unreconciled. Settle each one where it lives — in the policy — then
+                  Straight from your own documents, unreconciled. Settle each one where it lives, in the policy, then
                   strike it here and redraft.
                 </p>
                 {conflicts.map((c, i) => (
@@ -1373,7 +1373,7 @@ function RubricTab({
                     {c.detail ? (
                       <p className="tiny" style={{ margin: '4px 0 0' }}>
                         {c.detail}
-                        {c.documents.length > 0 ? ` — ${c.documents.join(', ')}` : ''}
+                        {c.documents.length > 0 ? ` · ${c.documents.join(', ')}` : ''}
                       </p>
                     ) : null}
                   </div>
@@ -1427,7 +1427,7 @@ function RubricTab({
                   ))}
                 </ul>
                 <p className="tiny" style={{ margin: 0 }}>
-                  These are written when a disagreement is settled, not here — each one exists because two people
+                  These are written when a disagreement is settled, not here. Each one exists because two people
                   voted differently on a real scenario.
                 </p>
               </div>

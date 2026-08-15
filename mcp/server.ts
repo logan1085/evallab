@@ -91,7 +91,7 @@ export function buildServer() {
     {
       title: 'Create a project',
       description:
-        'Start an eval project for a company. Pass a description of what the company does and what its AI handles — scenarios for the team poll are written from it automatically. Returns a slug and token; the token is the only credential.',
+        'Start an eval project for a company. Pass a description of what the company does and what its AI handles. Scenarios for the team poll are written from it automatically. Returns a slug and token; the token is the only credential.',
       inputSchema: {
         name: z.string().min(1).max(120).describe('The company or team, e.g. "Acme support".'),
         description: z
@@ -161,7 +161,7 @@ export function buildServer() {
     {
       title: 'Add conversations to grade',
       description:
-        'Add agent transcripts. These are the cases people will grade — what actually happened, as against what the documents claim.',
+        'Add agent transcripts. These are the cases people will grade: what actually happened, as against what the documents claim.',
       inputSchema: {
         ...project,
         traces: z.array(z.object({ title: z.string().default(''), content: z.string().min(1) })).min(1),
@@ -221,7 +221,7 @@ export function buildServer() {
     {
       title: 'Save a rubric version',
       description:
-        'Store a rubric. Pass the draft back through unchanged unless a human has edited it. A version a round has already used is immutable — saving forks a new one.',
+        'Store a rubric. Pass the draft back through unchanged unless a human has edited it. A version a round has already used is immutable. Saving forks a new one.',
       inputSchema: {
         ...project,
         name: z.string().min(1),
@@ -320,7 +320,7 @@ export function buildServer() {
     {
       title: 'Open a grading round',
       description:
-        'Open a blind round over a sample. Then send the share link to at least two people — a round cannot close with fewer than two graders, because agreement is not defined for one.',
+        'Open a blind round over a sample. Then send the share link to at least two people. A round cannot close with fewer than two graders, because agreement is not defined for one.',
       inputSchema: {
         ...project,
         calibrationSize: z.number().int().min(1).default(8).describe('Cases used to fix the rubric.'),
@@ -341,7 +341,7 @@ export function buildServer() {
           roundId: made.round.id,
           name: made.round.name,
           gradeLink: `${BASE}/p/${slug}/grade/${made.round.id}?k=${token}`,
-          next: 'Send gradeLink to the people who will grade. You cannot grade it yourself — see why in the server description.',
+          next: 'Send gradeLink to the people who will grade. You cannot grade it yourself; see why in the server description.',
         });
       } catch (error) {
         return failure(error);
@@ -354,7 +354,7 @@ export function buildServer() {
     {
       title: 'Close a round',
       description:
-        'Stop accepting grades and unlock the report. Only do this when everyone has finished — the number is computed from whatever was submitted.',
+        'Stop accepting grades and unlock the report. Only do this when everyone has finished. The number is computed from whatever was submitted.',
       inputSchema: { ...project, roundId: z.string().min(1) },
     },
     async ({ token, roundId }) => {

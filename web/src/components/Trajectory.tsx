@@ -163,7 +163,7 @@ export function Trajectory({ series }: { series: TrajectoryPoint[] }) {
             >
               R{point.index}
               <tspan x={x(i)} dy={13} fill="var(--ink-4)">
-                v{point.rubricVersion ?? '—'}
+                v{point.rubricVersion ?? '–'}
               </tspan>
             </text>
           ))}
@@ -227,7 +227,7 @@ function Tooltip({ point, left }: { point: TrajectoryPoint; left: number }) {
       }}
     >
       <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 13, color: 'var(--ink)' }}>
-        {point.name} · rubric v{point.rubricVersion ?? '—'}
+        {point.name} · rubric v{point.rubricVersion ?? '–'}
       </div>
       <div className="tiny" style={{ marginTop: 4 }}>
         {stats.units > 0 ? (
