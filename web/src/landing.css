@@ -2,30 +2,33 @@
  * The landing page, which is a different design world from the product.
  *
  * The app is a light grey instrument you operate for an hour. This is the page
- * you read once, so it gets the opposite treatment: near-black, full-bleed,
+ * you read once, so it gets the opposite treatment: pure black, full-bleed,
  * type at display sizes, and content that arrives as you scroll rather than all
  * at once. Committing to dark here is a choice, not an omission — the page
  * ignores the viewer's theme entirely, the way a product launch page does.
  *
- * The one vibrant thing on the page is a gradient that runs rose → amber →
- * green. That is not decoration picked for warmth: it is the verdict scale, in
- * order, fail through partial to pass. Every accent on this page is a slice of
- * the thing the product actually measures.
+ * One identity color: international orange, on titanium greys over black.
+ * Everything else stays neutral. The verdict hues — rose, amber, green — are
+ * data, not decoration: they appear only where a vote appears, the way an
+ * instrument keeps its display colors regardless of the case around it.
  */
 
 :root {
-  --l-ground: #08080a;
-  --l-raised: #121216;
-  --l-raised-2: #1a1a20;
-  --l-text: #f7f7f9;
-  --l-text-2: #a8a8b3;
-  --l-text-3: #71717d;
-  --l-line: #26262e;
+  --l-ground: #000000;
+  --l-raised: #121214;
+  --l-raised-2: #1b1b1e;
+  --l-text: #f5f5f7;
+  --l-text-2: #a1a1a6;
+  --l-text-3: #6e6e73;
+  --l-line: #232327;
 
   --l-fail: #ff3b6b;
   --l-partial: #ffb020;
   --l-pass: #25d0a0;
   --l-spectrum: linear-gradient(100deg, var(--l-fail) 0%, var(--l-partial) 48%, var(--l-pass) 100%);
+
+  --l-accent: #ff4f00;
+  --l-accent-grad: linear-gradient(100deg, #ffa04d 0%, #ff4f00 60%, #e63c00 100%);
 }
 
 /* The page owns the whole viewport, including the overscroll gutter. */
@@ -49,7 +52,7 @@ html[data-page="landing"] body {
    */
 }
 
-.landing ::selection { background: rgba(37, 208, 160, 0.28); color: #fff; }
+.landing ::selection { background: rgba(255, 79, 0, 0.35); color: #fff; }
 
 .l-wrap {
   max-width: 1120px;
@@ -98,8 +101,8 @@ html[data-page="landing"] body {
   position: absolute;
   inset: -20% -30% auto;
   height: 720px;
-  background: radial-gradient(58% 52% at 50% 40%, rgba(255, 59, 107, 0.16), transparent 70%),
-    radial-gradient(46% 44% at 72% 46%, rgba(37, 208, 160, 0.14), transparent 70%);
+  background: radial-gradient(58% 52% at 50% 40%, rgba(255, 79, 0, 0.2), transparent 70%),
+    radial-gradient(40% 40% at 72% 48%, rgba(255, 160, 77, 0.08), transparent 70%);
   filter: blur(20px);
   z-index: -1;
   pointer-events: none;
@@ -123,7 +126,7 @@ html[data-page="landing"] body {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--l-spectrum);
+  background: var(--l-accent);
   flex: 0 0 auto;
 }
 
@@ -140,7 +143,7 @@ html[data-page="landing"] body {
 }
 
 .l-grad {
-  background: var(--l-spectrum);
+  background: var(--l-accent-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -160,16 +163,16 @@ html[data-page="landing"] body {
 .landing .l-primary {
   font-family: var(--ui);
   font-size: 16px;
-  font-weight: 560;
+  font-weight: 600;
   padding: 14px 26px;
   border-radius: 999px;
   border: none;
-  background: var(--l-text);
-  color: var(--l-ground);
+  background: var(--l-accent);
+  color: #000;
   cursor: pointer;
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s ease;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease;
 }
-.landing button.l-primary:hover:not(:disabled) { background: var(--l-text); transform: translateY(-1px); }
+.landing button.l-primary:hover:not(:disabled) { background: #ff6a26; transform: translateY(-1px); }
 .landing button.l-primary:disabled { background: var(--l-raised-2); color: var(--l-text-3); cursor: not-allowed; }
 
 .landing button.l-secondary {
@@ -371,89 +374,6 @@ html[data-page="landing"] body {
 .l-chip.partial { background: rgba(255, 176, 32, 0.14); color: var(--l-partial); }
 .l-chip.fail { background: rgba(255, 59, 107, 0.14); color: var(--l-fail); }
 
-/* Steps ------------------------------------------------------------------- */
-
-.l-steps {
-  margin-top: 56px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 18px;
-}
-.l-step {
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 18px;
-  padding: 26px;
-  position: relative;
-  overflow: hidden;
-}
-/* The rule at the top of each card is one slice of the spectrum, so the row of
-   cards reads left-to-right as fail → pass. */
-.l-step::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 2px;
-  background: var(--l-spectrum);
-  background-size: 400% 100%;
-  background-position: var(--slice, 0%) 0;
-}
-.l-step-n {
-  font-family: var(--data);
-  font-size: 12px;
-  color: var(--l-text-3);
-  margin-bottom: 12px;
-}
-.l-step h3 {
-  font-family: var(--display);
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.018em;
-  color: var(--l-text);
-  margin: 0 0 8px;
-}
-.l-step p { font-size: 14.5px; line-height: 1.6; color: var(--l-text-2); margin: 0; }
-
-/* The number -------------------------------------------------------------- */
-
-.l-numbers {
-  margin-top: 56px;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
-}
-.l-num-card {
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 18px;
-  padding: 28px;
-}
-.l-num {
-  font-family: var(--display);
-  font-size: clamp(40px, 5vw, 62px);
-  font-weight: 660;
-  letter-spacing: -0.04em;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  color: var(--l-text);
-}
-.l-num.up { color: var(--l-pass); }
-.l-num-k { font-size: 14px; color: var(--l-text-2); margin-top: 12px; }
-
-/* Not-this list ----------------------------------------------------------- */
-
-.l-nots { margin-top: 44px; display: grid; gap: 2px; }
-.l-not {
-  display: flex;
-  gap: 18px;
-  align-items: baseline;
-  padding: 20px 0;
-  border-top: 1px solid var(--l-line);
-  font-size: clamp(16px, 1.8vw, 19px);
-}
-.l-not b { color: var(--l-text); font-weight: 560; flex: 0 0 auto; }
-.l-not span { color: var(--l-text-3); }
-
 /* Closing ----------------------------------------------------------------- */
 
 .l-close {
@@ -484,7 +404,7 @@ html[data-page="landing"] body {
   resize: vertical;
 }
 .landing .l-start textarea::placeholder { color: var(--l-text-3); }
-.landing .l-start textarea:focus { outline: none; border-color: #3f3f4b; }
+.landing .l-start textarea:focus { outline: none; border-color: rgba(255, 79, 0, 0.55); }
 .landing .l-start input {
   flex: 1 1 auto;
   background: var(--l-raised);
@@ -497,9 +417,22 @@ html[data-page="landing"] body {
 .landing .l-start input::placeholder { color: var(--l-text-3); }
 .landing .l-start input:focus {
   outline: none;
-  border-color: #3f3f4b;
+  border-color: rgba(255, 79, 0, 0.55);
   box-shadow: none;
 }
+
+.landing button.l-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--l-text-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.landing button.l-link:hover:not(:disabled) { color: var(--l-text); }
+.landing button.l-link:disabled { cursor: default; color: var(--l-text-3); }
 
 .l-foot {
   border-top: 1px solid var(--l-line);
@@ -525,7 +458,6 @@ html[data-page="landing"] body {
   .l-section { padding: 84px 0; }
   .l-section--intro { padding-bottom: 16px; }
   .l-hero { min-height: auto; padding: 90px 0 60px; }
-  .l-not { flex-direction: column; gap: 6px; }
   /* Too little vertical room to pin honestly — the poll reads as a plain
      section and the script shows every vote at once. */
   .l-scroller { height: auto; }

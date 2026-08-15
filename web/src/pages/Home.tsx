@@ -162,39 +162,6 @@ function PinnedPoll() {
   );
 }
 
-const STEPS = [
-  {
-    n: '01',
-    title: 'Describe what your AI does',
-    body: 'A sentence or two. Add whatever rules you already have written down — a policy, a checklist, the thread where someone settled a hard case.',
-  },
-  {
-    n: '02',
-    title: 'It writes the scenarios',
-    body: 'Concrete situations for your team to judge: the clear cases, the boundary cases, and the ones your documents never imagined. None contain their own answer.',
-  },
-  {
-    n: '03',
-    title: 'Your team votes, blind',
-    body: 'Everyone answers the same scenarios independently. Nobody sees anyone else’s vote until the poll closes — that is what makes the result a measurement.',
-  },
-  {
-    n: '04',
-    title: 'Agreement becomes test cases',
-    body: 'Every scenario your team judged the same way exports as a test case, carrying their own words as the reason.',
-  },
-  {
-    n: '05',
-    title: 'Disagreement becomes a decision',
-    body: 'Where careful people split, your team settles it once, on the record — instead of re-deciding it silently on every future run.',
-  },
-  {
-    n: '06',
-    title: 'Out comes an eval set',
-    body: 'A .jsonl your eval platform can run, plus a judge built from the standard your team actually agreed on — and scored against them to prove it.',
-  },
-];
-
 export function Home() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
@@ -249,14 +216,14 @@ export function Home() {
             they actually agree, and hands back an eval set your AI can be held to — extracted, not invented.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
-            <button className="l-primary" onClick={openDemo} disabled={busy !== null}>
-              {busy === 'demo' ? 'Building…' : 'See it on real disagreements'}
-            </button>
             <button
-              className="l-secondary"
+              className="l-primary"
               onClick={() => document.getElementById('start')?.scrollIntoView({ behavior: 'smooth' })}
             >
-              Start with your own
+              Set up your company
+            </button>
+            <button className="l-secondary" onClick={openDemo} disabled={busy !== null}>
+              {busy === 'demo' ? 'Building…' : 'See it on real disagreements'}
             </button>
           </div>
         </div>
@@ -279,104 +246,17 @@ export function Home() {
 
       <PinnedPoll />
 
-      <section className="l-section">
-        <div className="l-wrap">
-          <p className="l-kicker" data-reveal>
-            How it works
-          </p>
-          <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            From your team&rsquo;s heads to a .jsonl file.
-          </h2>
-          <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            Six steps, and the honest part is the middle: the poll is blind, so what comes out is what your people
-            actually believe — not what the loudest person in the room said first.
-          </p>
-
-          <div className="l-steps">
-            {STEPS.map((step, i) => (
-              <div
-                key={step.n}
-                className="l-step"
-                data-reveal
-                style={{ ['--d' as string]: `${i * 80}ms`, ['--slice' as string]: `${(i / (STEPS.length - 1)) * 100}%` }}
-              >
-                <div className="l-step-n">{step.n}</div>
-                <h3>{step.title}</h3>
-                <p>{step.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="l-section">
-        <div className="l-wrap">
-          <p className="l-kicker" data-reveal>
-            What you get
-          </p>
-          <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Evals with receipts.
-          </h2>
-          <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            Every test case can answer &ldquo;why?&rdquo; with a person, a vote, and a sentence — not &ldquo;a model
-            decided&rdquo;. When the numbers are too thin to mean anything, they are withheld rather than estimated.
-          </p>
-
-          <div className="l-numbers">
-            {[
-              { v: '.jsonl', k: 'An eval set your platform can run today — one case per line, with your team’s own words as the evidence.' },
-              { v: '2⁄2', k: 'A case exports only when the votes agree, or the disagreement was settled on the record. Nothing is averaged.' },
-              { v: 'held back', k: 'Some scenarios never export — they measure whether your team’s agreement is improving on untouched ground.' },
-            ].map((n, i) => (
-              <div key={n.k} className="l-num-card" data-reveal style={{ ['--d' as string]: `${i * 90}ms` }}>
-                <div className="l-num">{n.v}</div>
-                <div className="l-num-k">{n.k}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="l-section">
-        <div className="l-wrap">
-          <p className="l-kicker" data-reveal>
-            The restraint is the plan
-          </p>
-          <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Four things it will never do.
-          </h2>
-          <div className="l-nots">
-            {[
-              ['It does not grade your employees.', 'It asks them. Their judgment is the raw material, never the subject.'],
-              ['It does not average disagreement away.', 'A 2–1 split is a decision your company has not made, not a data point.'],
-              ['It does not run your evals.', 'It writes them. The .jsonl drops into whatever you already run.'],
-              ['It does not let the AI vote.', 'A model can be scored against your team, never counted as one of them.'],
-            ].map(([bold, rest], i) => (
-              <div key={bold} className="l-not" data-reveal style={{ ['--d' as string]: `${i * 70}ms` }}>
-                <b>{bold}</b>
-                <span>{rest}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       <section className="l-close" id="start">
         <div className="l-wrap">
           <h2 className="l-h2" data-reveal>
-            Extract what your team knows.
+            Set up your company.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
-            No sign-up. Create a project, and you get a link — send it to the people whose judgment you trust.
+            Say what you do and what your AI handles. Tacit writes the scenarios, your team votes blind, and out
+            comes an eval set. No sign-up — you get a link to send to the people whose judgment you trust.
           </p>
 
-          <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            <button className="l-primary" onClick={openDemo} disabled={busy !== null}>
-              {busy === 'demo' ? 'Building…' : 'Open the demo project'}
-            </button>
-          </div>
-
-          <form className="l-start l-start--tall" onSubmit={createProject} data-reveal style={{ ['--d' as string]: '170ms' }}>
+          <form className="l-start l-start--tall" onSubmit={createProject} data-reveal style={{ ['--d' as string]: '130ms' }}>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -394,6 +274,13 @@ export function Home() {
               {busy === 'new' ? 'Writing your scenarios…' : 'Create my eval poll'}
             </button>
           </form>
+
+          <p className="tiny" data-reveal style={{ ['--d' as string]: '180ms', color: 'var(--l-text-3)', marginTop: 18 }}>
+            Not ready?{' '}
+            <button className="l-link" onClick={openDemo} disabled={busy !== null}>
+              {busy === 'demo' ? 'Building the demo…' : 'Open the demo project instead'}
+            </button>
+          </p>
 
           <ErrorBanner message={error} onDismiss={() => setError(null)} />
         </div>

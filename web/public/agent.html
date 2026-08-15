@@ -23,18 +23,21 @@
  */
 
 :root {
-  --l-ground: #08080a;
-  --l-raised: #121216;
-  --l-raised-2: #1a1a20;
-  --l-text: #f7f7f9;
-  --l-text-2: #a8a8b3;
-  --l-text-3: #71717d;
-  --l-line: #26262e;
+  --l-ground: #000000;
+  --l-raised: #121214;
+  --l-raised-2: #1b1b1e;
+  --l-text: #f5f5f7;
+  --l-text-2: #a1a1a6;
+  --l-text-3: #6e6e73;
+  --l-line: #232327;
 
   --l-fail: #ff3b6b;
   --l-partial: #ffb020;
   --l-pass: #25d0a0;
   --l-spectrum: linear-gradient(100deg, var(--l-fail) 0%, var(--l-partial) 48%, var(--l-pass) 100%);
+
+  --l-accent: #ff4f00;
+  --l-accent-grad: linear-gradient(100deg, #ffa04d 0%, #ff4f00 60%, #e63c00 100%);
 
   --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -61,7 +64,7 @@ html, body {
    * that overflows is the hero bloom, so it clips itself instead.
    */
 }
-::selection { background: rgba(37, 208, 160, 0.28); color: #fff; }
+::selection { background: rgba(255, 79, 0, 0.35); color: #fff; }
 
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
 
@@ -104,7 +107,7 @@ h2 {
   text-wrap: balance;
 }
 .grad {
-  background: var(--l-spectrum);
+  background: var(--l-accent-grad);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -150,8 +153,8 @@ h2 {
   inset: -20% -30% auto;
   height: 720px;
   background:
-    radial-gradient(58% 52% at 46% 40%, rgba(255, 59, 107, 0.15), transparent 70%),
-    radial-gradient(46% 44% at 70% 46%, rgba(37, 208, 160, 0.13), transparent 70%);
+    radial-gradient(58% 52% at 46% 40%, rgba(255, 79, 0, 0.2), transparent 70%),
+    radial-gradient(40% 40% at 70% 48%, rgba(255, 160, 77, 0.08), transparent 70%);
   filter: blur(20px);
   z-index: -1;
   pointer-events: none;
@@ -169,7 +172,7 @@ h2 {
   border-radius: 999px;
   margin-bottom: 30px;
 }
-.dot { width: 7px; height: 7px; border-radius: 999px; background: var(--l-spectrum); flex: 0 0 auto; }
+.dot { width: 7px; height: 7px; border-radius: 999px; background: var(--l-accent); flex: 0 0 auto; }
 
 .tag-proto {
   display: inline-block;
