@@ -105,12 +105,7 @@ h2 {
   max-width: 20ch;
   text-wrap: balance;
 }
-.grad {
-  background: var(--l-silver);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+.grad { color: var(--l-text-3); }
 .kicker {
   font-size: 13px;
   font-weight: 600;
@@ -146,32 +141,14 @@ h2 {
   isolation: isolate;
   overflow: hidden;
 }
-.hero::before {
-  content: "";
-  position: absolute;
-  inset: -20% -30% auto;
-  height: 720px;
-  background:
-    radial-gradient(58% 52% at 46% 40%, rgba(245, 245, 247, 0.1), transparent 70%),
-    radial-gradient(40% 40% at 70% 48%, rgba(245, 245, 247, 0.04), transparent 70%);
-  filter: blur(20px);
-  z-index: -1;
-  pointer-events: none;
-}
 .eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 550;
-  color: var(--l-text-2);
-  border: 1px solid var(--l-line);
-  background: rgba(255, 255, 255, 0.03);
-  padding: 7px 14px 7px 9px;
-  border-radius: 999px;
-  margin-bottom: 30px;
+  display: block;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--l-text);
+  margin-bottom: 18px;
 }
-.dot { width: 7px; height: 7px; border-radius: 999px; background: var(--l-text); flex: 0 0 auto; }
 
 .tag-proto {
   display: inline-block;
@@ -187,7 +164,7 @@ h2 {
 
 /* Sections ---------------------------------------------------------------- */
 
-section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
+section.band { padding: 150px 0 0; }
 
 /* The pinned sequence ----------------------------------------------------- */
 
@@ -230,10 +207,9 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
 
 .docs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .doc {
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 18px;
-  padding: 20px 22px;
+  background: var(--l-raised-2);
+  border-radius: 24px;
+  padding: 22px 24px;
   min-height: 0;
 }
 .doc-name {
@@ -301,10 +277,9 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
 
 .clash { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 44px; }
 .clash-card {
-  background: var(--l-raised);
-  border: 1px solid rgba(255, 59, 107, 0.3);
-  border-radius: 18px;
-  padding: 26px 28px;
+  background: rgba(255, 59, 107, 0.07);
+  border-radius: 24px;
+  padding: 28px 30px;
 }
 .clash-quote {
   font-size: clamp(17px, 2vw, 21px);
@@ -328,10 +303,9 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
 
 .steps { margin-top: 52px; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 18px; }
 .step {
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 18px;
-  padding: 26px;
+  background: var(--l-raised-2);
+  border-radius: 24px;
+  padding: 28px;
   position: relative;
   overflow: hidden;
 }
@@ -355,15 +329,14 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
 
 /* Close ------------------------------------------------------------------- */
 
-.close { padding: 130px 0 150px; border-top: 1px solid var(--l-line); text-align: center; }
+.close { padding: 170px 0 170px; text-align: center; }
 .close h2 { margin-left: auto; margin-right: auto; }
 .close .lede { margin: 0 auto 32px; }
 .code {
   font-family: var(--data);
   font-size: 13px;
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 12px;
+  background: var(--l-raised-2);
+  border-radius: 16px;
   padding: 16px 20px;
   color: var(--l-text-2);
   max-width: 620px;
@@ -407,7 +380,7 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
 
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow" data-reveal><span class="dot"></span>Tacit · direction two</span>
+    <span class="eyebrow" data-reveal>Tacit · direction two</span>
     <h1 data-reveal style="--d:60ms">Your agent follows rules you <span class="grad">never finished writing</span></h1>
     <p class="sub" data-reveal style="--d:120ms">
       Claude reads your <code style="font-family:var(--data);font-size:0.92em">CLAUDE.md</code> at the start of every

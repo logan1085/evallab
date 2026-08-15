@@ -124,7 +124,8 @@ html[data-page="landing"] body {
 
 /* Hero -------------------------------------------------------------------- */
 
-/* Centred, the way a product introduces itself. */
+/* Centred, the way a product introduces itself. Nothing behind the type: no
+   badge, no gradient, no glow. The headline carries the page or nothing does. */
 .l-hero {
   position: relative;
   min-height: 92vh;
@@ -142,114 +143,75 @@ html[data-page="landing"] body {
   text-align: center;
 }
 
-/* A single wide, very soft bloom. One light source, not a glow on everything. */
-.l-hero::before {
-  content: "";
-  position: absolute;
-  inset: -20% -30% auto;
-  height: 720px;
-  background: radial-gradient(58% 52% at 50% 40%, rgba(245, 245, 247, 0.1), transparent 70%),
-    radial-gradient(40% 40% at 72% 48%, rgba(245, 245, 247, 0.04), transparent 70%);
-  filter: blur(20px);
-  z-index: -1;
-  pointer-events: none;
-}
-
-.l-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 550;
-  letter-spacing: 0.02em;
-  color: var(--l-text-2);
-  border: 1px solid var(--l-line);
-  background: rgba(255, 255, 255, 0.03);
-  padding: 7px 14px 7px 9px;
-  border-radius: 999px;
-  margin-bottom: 30px;
-}
-.l-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--l-text);
-  flex: 0 0 auto;
+.l-name {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--l-text);
+  margin-bottom: 18px;
 }
 
 .landing h1.l-title {
   font-family: var(--display);
-  font-size: clamp(44px, 7.8vw, 104px);
-  font-weight: 700;
-  letter-spacing: -0.045em;
-  line-height: 1.02;
+  font-size: clamp(48px, 8vw, 112px);
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.03;
   color: var(--l-text);
-  margin: 0 0 24px;
-  max-width: 14ch;
+  margin: 0 0 22px;
+  max-width: 16ch;
   text-wrap: balance;
 }
 
-.l-grad {
-  background: var(--l-silver);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+/* The second phrase of a two-tone headline: same size, stepped back to grey. */
+.l-mute { color: var(--l-text-3); }
 
 .l-sub {
   font-size: clamp(18px, 2.1vw, 24px);
   line-height: 1.45;
-  font-weight: 500;
+  font-weight: 480;
   color: var(--l-text-2);
-  max-width: 42ch;
+  max-width: 44ch;
   margin: 0 0 36px;
   text-wrap: balance;
 }
 
-.l-cta-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.l-cta-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: center; }
 
 .landing button.l-primary,
 .landing .l-primary {
   font-family: var(--ui);
   font-size: 16px;
-  font-weight: 600;
-  padding: 14px 26px;
+  font-weight: 500;
+  padding: 12px 22px;
   border-radius: 999px;
   border: none;
   background: var(--l-text);
   color: #000;
   cursor: pointer;
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease;
+  transition: background 0.18s ease;
 }
-.landing button.l-primary:hover:not(:disabled) { background: #ffffff; transform: translateY(-1px); }
+.landing button.l-primary:hover:not(:disabled) { background: #ffffff; }
 .landing button.l-primary:disabled { background: var(--l-raised-2); color: var(--l-text-3); cursor: not-allowed; }
 
-.landing button.l-secondary {
+/* The quiet alternative to the pill: a plain link with a chevron. */
+.landing button.l-tlink {
   font-family: var(--ui);
-  font-size: 16px;
-  font-weight: 520;
-  padding: 14px 24px;
-  border-radius: 999px;
-  border: 1px solid var(--l-line);
-  background: transparent;
+  font-size: 17px;
+  font-weight: 480;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--l-text);
   cursor: pointer;
-  transition: border-color 0.18s ease, background 0.18s ease;
 }
-.landing button.l-secondary:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); border-color: #3a3a45; }
+.landing button.l-tlink:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 4px; }
+.landing button.l-tlink:disabled { color: var(--l-text-3); cursor: default; }
+.l-tlink .chev { color: var(--l-text-3); margin-left: 2px; }
 
-/* Sections ---------------------------------------------------------------- */
+/* Sections: separated by space, not rules. ---------------------------------- */
 
-.l-section { padding: 120px 0; border-top: 1px solid var(--l-line); }
-
-.l-kicker {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--l-text-3);
-  margin: 0 0 18px;
-}
+.l-section { padding: 150px 0 0; }
 
 .landing h2.l-h2 {
   font-family: var(--display);
@@ -375,10 +337,9 @@ html[data-page="landing"] body {
 .l-demo--stage { margin-top: 30px; }
 
 .l-card {
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 24px;
-  padding: 28px 30px;
+  background: var(--l-raised-2);
+  border-radius: 28px;
+  padding: 30px 32px;
 }
 
 .l-trace-label {
@@ -406,10 +367,9 @@ html[data-page="landing"] body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
-  border-radius: 18px;
-  padding: 16px 20px;
+  background: var(--l-raised-2);
+  border-radius: 20px;
+  padding: 17px 22px;
 }
 .l-who { font-size: 15px; font-weight: 540; color: var(--l-text); }
 .l-said { font-size: 13px; color: var(--l-text-3); margin-top: 2px; }
@@ -428,8 +388,7 @@ html[data-page="landing"] body {
 /* Closing ----------------------------------------------------------------- */
 
 .l-close {
-  padding: 140px 0 160px;
-  border-top: 1px solid var(--l-line);
+  padding: 170px 0 170px;
   text-align: center;
 }
 /* Outranks the `.landing h2.l-h2` margin shorthand, which would win on
@@ -447,31 +406,30 @@ html[data-page="landing"] body {
 .l-start--tall { flex-direction: column; max-width: 560px; }
 .l-start--tall button { align-self: center; }
 .landing .l-start textarea {
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
+  background: var(--l-raised-2);
+  border: none;
   color: var(--l-text);
-  border-radius: 16px;
-  padding: 13px 20px;
+  border-radius: 18px;
+  padding: 15px 22px;
   font-size: 15px;
   font-family: var(--ui);
   resize: vertical;
 }
 .landing .l-start textarea::placeholder { color: var(--l-text-3); }
-.landing .l-start textarea:focus { outline: none; border-color: #4a4a4f; }
+.landing .l-start textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(245, 245, 247, 0.22); }
 .landing .l-start input {
   flex: 1 1 auto;
-  background: var(--l-raised);
-  border: 1px solid var(--l-line);
+  background: var(--l-raised-2);
+  border: none;
   color: var(--l-text);
   border-radius: 999px;
-  padding: 13px 20px;
+  padding: 15px 22px;
   font-size: 15px;
 }
 .landing .l-start input::placeholder { color: var(--l-text-3); }
 .landing .l-start input:focus {
   outline: none;
-  border-color: #4a4a4f;
-  box-shadow: none;
+  box-shadow: 0 0 0 3px rgba(245, 245, 247, 0.22);
 }
 
 .landing button.l-link {
@@ -508,7 +466,7 @@ html[data-page="landing"] body {
 
 @media (max-width: 860px) {
   .l-demo { grid-template-columns: 1fr; }
-  .l-section { padding: 84px 0; }
+  .l-section { padding: 96px 0 0; }
   .l-section--intro { padding-bottom: 16px; }
   .l-hero { min-height: auto; padding: 90px 0 60px; }
   /* Too little vertical room to pin honestly — the poll reads as a plain

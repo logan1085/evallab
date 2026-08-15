@@ -216,16 +216,14 @@ export function Home() {
 
       <section className="l-hero">
         <div className="l-wrap">
-          <span className="l-eyebrow" data-reveal>
-            <span className="l-dot" />
-            Introducing Tacit
-          </span>
+          <div className="l-name" data-reveal>
+            Tacit
+          </div>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Your company should write <span className="l-grad">its own evals</span>
+            Write your own evals. <span className="l-mute">Not a vendor&rsquo;s.</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            Not a vendor&rsquo;s benchmark. Not one engineer&rsquo;s guesses. An eval set extracted from the people
-            who already know what good looks like.
+            Your company already knows what good looks like. Tacit turns that into the eval set your AI is held to.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
             <button
@@ -234,8 +232,8 @@ export function Home() {
             >
               Set up your company
             </button>
-            <button className="l-secondary" onClick={openDemo} disabled={busy !== null}>
-              {busy === 'demo' ? 'Building…' : 'See it on real disagreements'}
+            <button className="l-tlink" onClick={openDemo} disabled={busy !== null}>
+              {busy === 'demo' ? 'Building the demo…' : 'See it on real disagreements'} <span className="chev">›</span>
             </button>
           </div>
         </div>
@@ -243,15 +241,12 @@ export function Home() {
 
       <section className="l-section l-section--intro">
         <div className="l-wrap">
-          <p className="l-kicker" data-reveal>
-            Why polling
-          </p>
-          <h2 className="l-h2" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Ask three people. Get three answers.
+          <h2 className="l-h2" data-reveal>
+            Ask three people. <span className="l-mute">Get three answers.</span>
           </h2>
-          <p className="l-lede" data-reveal style={{ ['--d' as string]: '110ms' }}>
-            A real scenario from the demo project, and the real votes three teammates cast on it, not an invented
-            disagreement. Keep scrolling and watch the poll come in the way it actually happens: blind.
+          <p className="l-lede" data-reveal style={{ ['--d' as string]: '80ms' }}>
+            A real scenario, and the real votes three teammates cast on it. Keep scrolling and watch the poll come
+            in the way it actually happens: blind.
           </p>
         </div>
       </section>

@@ -742,10 +742,25 @@ function TracesTab({
     }
   }
 
+  const stubScenarios = (data?.traces ?? []).filter(
+    (t) => t.meta?.generated === true && t.meta?.real === false,
+  ).length;
+
   return (
     <section className="rail-grid">
       <div className="col">
         <ScenarioWriter slug={slug} token={token} onDone={() => { reload(); onChange(); }} onError={onError} />
+
+        {stubScenarios > 0 ? (
+          <div className="warn">
+            <span className="metric-k">Placeholder scenarios</span>
+            <p style={{ margin: '6px 0 0' }}>
+              {stubScenarios} of these scenarios are generic starters, not written from your description, because
+              the server has no ANTHROPIC_API_KEY. Set one in your deployment, then use the writer above to replace
+              them with scenarios about your actual operation.
+            </p>
+          </div>
+        ) : null}
 
         {authored > 0 ? (
           <div className="warn">
