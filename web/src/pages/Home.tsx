@@ -209,11 +209,12 @@ export function Home() {
             Tacit
           </span>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Your company already knows <span className="l-grad">what good looks like</span>
+            Your company should write <span className="l-grad">its own evals</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            It just lives in your people&rsquo;s heads. Tacit polls your team on concrete scenarios, measures where
-            they actually agree, and hands back an eval set your AI can be held to — extracted, not invented.
+            Not a vendor&rsquo;s benchmark. Not one engineer&rsquo;s guesses. Your company already knows what good
+            looks like — Tacit polls your team on concrete scenarios, measures where they actually agree, and turns
+            that into the eval set your AI is held to.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
             <button

@@ -36,8 +36,7 @@
   --l-pass: #25d0a0;
   --l-spectrum: linear-gradient(100deg, var(--l-fail) 0%, var(--l-partial) 48%, var(--l-pass) 100%);
 
-  --l-accent: #ff4f00;
-  --l-accent-grad: linear-gradient(100deg, #ffa04d 0%, #ff4f00 60%, #e63c00 100%);
+  --l-silver: linear-gradient(105deg, #ffffff 0%, #dedee3 45%, #86868b 100%);
 
   --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -64,7 +63,7 @@ html, body {
    * that overflows is the hero bloom, so it clips itself instead.
    */
 }
-::selection { background: rgba(255, 79, 0, 0.35); color: #fff; }
+::selection { background: rgba(245, 245, 247, 0.9); color: #000; }
 
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
 
@@ -107,7 +106,7 @@ h2 {
   text-wrap: balance;
 }
 .grad {
-  background: var(--l-accent-grad);
+  background: var(--l-silver);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -153,8 +152,8 @@ h2 {
   inset: -20% -30% auto;
   height: 720px;
   background:
-    radial-gradient(58% 52% at 46% 40%, rgba(255, 79, 0, 0.2), transparent 70%),
-    radial-gradient(40% 40% at 70% 48%, rgba(255, 160, 77, 0.08), transparent 70%);
+    radial-gradient(58% 52% at 46% 40%, rgba(245, 245, 247, 0.1), transparent 70%),
+    radial-gradient(40% 40% at 70% 48%, rgba(245, 245, 247, 0.04), transparent 70%);
   filter: blur(20px);
   z-index: -1;
   pointer-events: none;
@@ -172,7 +171,7 @@ h2 {
   border-radius: 999px;
   margin-bottom: 30px;
 }
-.dot { width: 7px; height: 7px; border-radius: 999px; background: var(--l-accent); flex: 0 0 auto; }
+.dot { width: 7px; height: 7px; border-radius: 999px; background: var(--l-text); flex: 0 0 auto; }
 
 .tag-proto {
   display: inline-block;
@@ -180,8 +179,8 @@ h2 {
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--l-partial);
-  background: rgba(255, 176, 32, 0.12);
+  color: var(--l-text-2);
+  background: rgba(255, 255, 255, 0.06);
   border-radius: 999px;
   padding: 5px 13px;
 }
@@ -341,9 +340,7 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
   position: absolute;
   inset: 0 0 auto;
   height: 2px;
-  background: var(--l-spectrum);
-  background-size: 300% 100%;
-  background-position: var(--slice, 0%) 0;
+  background: rgba(255, 255, 255, 0.16);
 }
 .step-n { font-family: var(--data); font-size: 12px; color: var(--l-text-3); margin-bottom: 12px; }
 .step h3 {
@@ -492,17 +489,17 @@ section.band { padding: 120px 0; border-top: 1px solid var(--l-line); }
     </p>
 
     <div class="steps">
-      <div class="step" data-reveal style="--slice:0%">
+      <div class="step" data-reveal>
         <div class="step-n">01</div>
         <h3>It reads what you already wrote</h3>
         <p>CLAUDE.md, the contributing guide, the review checklist, the thread where someone settled a hard case.</p>
       </div>
-      <div class="step" data-reveal style="--d:80ms;--slice:50%">
+      <div class="step" data-reveal style="--d:80ms">
         <div class="step-n">02</div>
         <h3>It sorts, and refuses to repair</h3>
         <p>Enforceable rules become tests carrying the sentence they came from. Contradictions come back untouched.</p>
       </div>
-      <div class="step" data-reveal style="--d:160ms;--slice:100%">
+      <div class="step" data-reveal style="--d:160ms">
         <div class="step-n">03</div>
         <h3>Your team answers once</h3>
         <p>The answer goes back into the standard. Every session after that inherits it, instead of guessing again.</p>

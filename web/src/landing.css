@@ -7,10 +7,10 @@
  * at once. Committing to dark here is a choice, not an omission — the page
  * ignores the viewer's theme entirely, the way a product launch page does.
  *
- * One identity color: international orange, on titanium greys over black.
- * Everything else stays neutral. The verdict hues — rose, amber, green — are
- * data, not decoration: they appear only where a vote appears, the way an
- * instrument keeps its display colors regardless of the case around it.
+ * No color. Black ground, titanium greys, white type — the page is
+ * monochrome end to end, and anything that shines does it in silver. The
+ * only hues anywhere are the verdict chips, because a vote's value is data
+ * and data keeps its display colors regardless of the case around it.
  */
 
 :root {
@@ -27,8 +27,7 @@
   --l-pass: #25d0a0;
   --l-spectrum: linear-gradient(100deg, var(--l-fail) 0%, var(--l-partial) 48%, var(--l-pass) 100%);
 
-  --l-accent: #ff4f00;
-  --l-accent-grad: linear-gradient(100deg, #ffa04d 0%, #ff4f00 60%, #e63c00 100%);
+  --l-silver: linear-gradient(105deg, #ffffff 0%, #dedee3 45%, #86868b 100%);
 }
 
 /* The page owns the whole viewport, including the overscroll gutter. */
@@ -52,7 +51,7 @@ html[data-page="landing"] body {
    */
 }
 
-.landing ::selection { background: rgba(255, 79, 0, 0.35); color: #fff; }
+.landing ::selection { background: rgba(245, 245, 247, 0.9); color: #000; }
 
 .l-wrap {
   max-width: 1120px;
@@ -101,8 +100,8 @@ html[data-page="landing"] body {
   position: absolute;
   inset: -20% -30% auto;
   height: 720px;
-  background: radial-gradient(58% 52% at 50% 40%, rgba(255, 79, 0, 0.2), transparent 70%),
-    radial-gradient(40% 40% at 72% 48%, rgba(255, 160, 77, 0.08), transparent 70%);
+  background: radial-gradient(58% 52% at 50% 40%, rgba(245, 245, 247, 0.1), transparent 70%),
+    radial-gradient(40% 40% at 72% 48%, rgba(245, 245, 247, 0.04), transparent 70%);
   filter: blur(20px);
   z-index: -1;
   pointer-events: none;
@@ -126,7 +125,7 @@ html[data-page="landing"] body {
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--l-accent);
+  background: var(--l-text);
   flex: 0 0 auto;
 }
 
@@ -143,7 +142,7 @@ html[data-page="landing"] body {
 }
 
 .l-grad {
-  background: var(--l-accent-grad);
+  background: var(--l-silver);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -167,12 +166,12 @@ html[data-page="landing"] body {
   padding: 14px 26px;
   border-radius: 999px;
   border: none;
-  background: var(--l-accent);
+  background: var(--l-text);
   color: #000;
   cursor: pointer;
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), background 0.18s ease;
 }
-.landing button.l-primary:hover:not(:disabled) { background: #ff6a26; transform: translateY(-1px); }
+.landing button.l-primary:hover:not(:disabled) { background: #ffffff; transform: translateY(-1px); }
 .landing button.l-primary:disabled { background: var(--l-raised-2); color: var(--l-text-3); cursor: not-allowed; }
 
 .landing button.l-secondary {
@@ -404,7 +403,7 @@ html[data-page="landing"] body {
   resize: vertical;
 }
 .landing .l-start textarea::placeholder { color: var(--l-text-3); }
-.landing .l-start textarea:focus { outline: none; border-color: rgba(255, 79, 0, 0.55); }
+.landing .l-start textarea:focus { outline: none; border-color: #4a4a4f; }
 .landing .l-start input {
   flex: 1 1 auto;
   background: var(--l-raised);
@@ -417,7 +416,7 @@ html[data-page="landing"] body {
 .landing .l-start input::placeholder { color: var(--l-text-3); }
 .landing .l-start input:focus {
   outline: none;
-  border-color: rgba(255, 79, 0, 0.55);
+  border-color: #4a4a4f;
   box-shadow: none;
 }
 
