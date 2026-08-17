@@ -92,7 +92,9 @@ function PinnedPoll() {
         ticking = false;
         const box = el!.getBoundingClientRect();
         const travel = box.height - window.innerHeight;
-        if (travel <= 0) {
+        // Small screens unpin the stage in CSS, so scroll progress no longer
+        // maps to the poll: show it finished rather than frozen at zero votes.
+        if (travel <= 0 || window.matchMedia('(max-width: 860px)').matches) {
           setBeat(BEATS);
           return;
         }

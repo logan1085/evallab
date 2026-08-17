@@ -1,8 +1,8 @@
 {
-  "name": "grading-room",
+  "name": "tacit",
   "version": "1.0.0",
   "private": true,
-  "description": "The Grading Room \u2014 a calibration layer for teams whose ground truth comes from human judgment.",
+  "description": "Tacit: extract your company\u2019s experience into evals. Blind team polls become test cases your AI is held to.",
   "type": "module",
   "engines": {
     "node": ">=20"

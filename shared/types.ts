@@ -1,5 +1,5 @@
 /**
- * Domain types for The Grading Room.
+ * Domain types for Tacit.
  *
  * The vocabulary here is deliberate. A *round* is one blind grading pass over a
  * sample of traces. A *split* is a trace the graders did not agree on. A

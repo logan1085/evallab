@@ -373,7 +373,7 @@ export interface SeedResult {
  * which is also what makes the report legal to look at.
  */
 export async function seedDemoProject(db: DB, name = 'Tacit demo'): Promise<SeedResult> {
-  const project = await store.createProject(db, { slug: newSlug('grading-room-demo'), token: newToken(), name });
+  const project = await store.createProject(db, { slug: newSlug('tacit-demo'), token: newToken(), name });
 
   const rubric = await store.createRubricVersion(db, {
     projectId: project.id,

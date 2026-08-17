@@ -30,7 +30,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 
-const BASE = (process.env.GR_BASE_URL ?? 'http://localhost:8787').replace(/\/+$/, '');
+const BASE = (process.env.TACIT_BASE_URL ?? process.env.GR_BASE_URL ?? 'http://localhost:8787').replace(/\/+$/, '');
 
 class ApiError extends Error {
   constructor(
@@ -84,7 +84,7 @@ const project = {
 };
 
 export function buildServer() {
-  const server = new McpServer({ name: 'grading-room', version: '1.0.0' });
+  const server = new McpServer({ name: 'tacit', version: '1.0.0' });
 
   server.registerTool(
     'create_project',
@@ -450,7 +450,7 @@ export function buildServer() {
 }
 
 /* c8 ignore start — process wiring, exercised by the integration test via buildServer */
-if (process.env.GR_MCP_NO_LISTEN !== '1') {
+if (process.env.TACIT_MCP_NO_LISTEN !== '1' && process.env.GR_MCP_NO_LISTEN !== '1') {
   const server = buildServer();
   await server.connect(new StdioServerTransport());
 }

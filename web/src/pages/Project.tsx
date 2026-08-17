@@ -158,7 +158,7 @@ function GraderIdentity({
   if (grader) {
     return (
       <div className="tiny">
-        Grading as <strong style={{ color: 'var(--ink)' }}>{grader.name}</strong>{' '}
+        Voting as <strong style={{ color: 'var(--ink)' }}>{grader.name}</strong>{' '}
         <button
           className="ghost tiny-btn"
           onClick={() => {
