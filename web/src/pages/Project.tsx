@@ -46,9 +46,7 @@ export function ProjectPage() {
         crumbs={[{ label: 'Home', to: '/' }, data.project.name]}
         title={data.project.name}
         standfirst={[
-          `${data.documentCount} document${data.documentCount === 1 ? '' : 's'}`,
           `${data.traceCount} scenario${data.traceCount === 1 ? '' : 's'}`,
-          `standards v${data.rubric?.version ?? 1}`,
           `${data.rounds.length} poll${data.rounds.length === 1 ? '' : 's'}`,
         ].join(' · ')}
       />
@@ -58,10 +56,10 @@ export function ProjectPage() {
       <div className="panel">
         <div className="between">
           <div style={{ flex: '1 1 340px', minWidth: 0 }}>
-            <span className="metric-k">Shared link: the only credential</span>
+            <span className="metric-k">Your team&rsquo;s link</span>
             <div className="link-box">{link}</div>
             <p className="tiny" style={{ margin: 0 }}>
-              Anyone with this link can vote and see the results. That is v1&rsquo;s scope, not an oversight.
+              Send it to the people whose judgment you trust. Anyone with it can vote and see the results.
             </p>
           </div>
           <div className="shrink stack">
@@ -76,7 +74,7 @@ export function ProjectPage() {
       <div className="tabs">
         {(['rounds', 'operations', 'traces', 'rubric'] as Tab[]).map((t) => (
           <button key={t} className={`tab ${tab === t ? 'on' : ''}`} onClick={() => setTab(t)}>
-            {t === 'rounds' ? 'Polls' : t === 'operations' ? 'Operations' : t === 'traces' ? 'Scenarios' : 'Standards'}
+            {t === 'rounds' ? 'Polls' : t === 'operations' ? 'Documents' : t === 'traces' ? 'Scenarios' : 'Standards'}
           </button>
         ))}
       </div>
@@ -253,18 +251,14 @@ function RoundsTab({
         <NextStep view={view} slug={slug} />
         <TrajectorySection slug={slug} token={token} rounds={view.rounds} />
 
-        {view.rounds.length === 0 ? (
-          <div className="empty">No polls yet. A poll sends the same scenarios to everyone, and nobody sees anyone else’s answer until it closes.</div>
-        ) : (
+        {view.rounds.length === 0 ? null : (
           <div className="scroll-x">
             <table>
               <caption>Polls, oldest first</caption>
               <thead>
                 <tr>
                   <th scope="col">Poll</th>
-                  <th scope="col">Standards</th>
-                  <th scope="col">Items</th>
-                  <th scope="col">Drawn</th>
+                  <th scope="col">Scenarios</th>
                   <th scope="col">Status</th>
                   <th scope="col" />
                 </tr>
@@ -273,9 +267,7 @@ function RoundsTab({
                 {view.rounds.map((round) => (
                   <tr key={round.id}>
                     <td className="case">{round.name}</td>
-                    <td>v{round.rubricVersion ?? '–'}</td>
                     <td>{round.items}</td>
-                    <td>{round.strategy === 'from_splits' ? 'from disagreements' : 'at random'}</td>
                     <td>
                       <span className={`verdict ${round.status === 'closed' ? 'v-mid' : 'v-pass'}`}>{round.status}</span>
                     </td>
@@ -304,71 +296,87 @@ function RoundsTab({
         <div className="panel" style={{ marginTop: 22 }}>
           <h3 style={{ marginTop: 0 }}>Start a poll</h3>
           <form onSubmit={create}>
-            <div className="row">
-              <div className="field">
-                <label htmlFor="cal">Scenarios to discuss</label>
-                <input
-                  id="cal"
-                  type="number"
-                  min={1}
-                  value={calibrationSize}
-                  onChange={(e) => setCalibrationSize(Number(e.target.value))}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="held">Scenarios to hold back</label>
-                <input
-                  id="held"
-                  type="number"
-                  min={0}
-                  value={heldoutSize}
-                  onChange={(e) => setHeldoutSize(Number(e.target.value))}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="strategy">Sampling</label>
-                <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as 'random')}>
-                  <option value="random">Random</option>
-                  <option value="from_splits" disabled={closedRounds.length === 0}>
-                    From the last poll&rsquo;s disagreements
-                  </option>
-                </select>
-              </div>
-              {strategy === 'from_splits' ? (
-                <div className="field">
-                  <label htmlFor="source">Source round</label>
-                  <select id="source" value={sourceRoundId} onChange={(e) => setSourceRoundId(e.target.value)}>
-                    {closedRounds.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-            </div>
-
-            {strategy === 'from_splits' ? (
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={reuseHeldout}
-                  onChange={(e) => setReuseHeldout(e.target.checked)}
-                />
-                Reuse the previous poll&rsquo;s held-back scenarios, so before and after are measured on the same cases
-              </label>
-            ) : null}
-
-            <p className={attention.overBudget ? 'warn' : 'note'} style={{ marginTop: 14 }}>
-              {calibrationSize + heldoutSize} scenarios ≈ <strong>{minutes(attention.minutes * 60000)}</strong> per person.{' '}
-              {attention.overBudget
-                ? `Past roughly ${ATTENTION_BUDGET_MINUTES} minutes a second poll tends not to happen. ${attention.maxItems} scenarios fits the budget.`
-                : 'Within the thirty-minute budget that makes a second poll likely.'}
+            <p className="note" style={{ marginTop: 0 }}>
+              Everyone gets the same {calibrationSize + heldoutSize} scenarios, about{' '}
+              <strong>{minutes(attention.minutes * 60000)}</strong> of their time. Nobody sees anyone else&rsquo;s
+              votes until you close it.
             </p>
 
+            {attention.overBudget ? (
+              <p className="warn" style={{ marginTop: 0 }}>
+                Past roughly {ATTENTION_BUDGET_MINUTES} minutes a second poll tends not to happen.{' '}
+                {attention.maxItems} scenarios fits the budget.
+              </p>
+            ) : null}
+
             <button type="submit" disabled={busy}>
-              {busy ? 'Drawing scenarios…' : 'Start poll'}
+              {busy ? 'Drawing scenarios…' : 'Start the poll'}
             </button>
+
+            <details style={{ marginTop: 16 }}>
+              <summary className="tiny" style={{ cursor: 'pointer' }}>
+                Adjust how the scenarios are drawn
+              </summary>
+              <div className="row" style={{ marginTop: 12 }}>
+                <div className="field">
+                  <label htmlFor="cal">Scenarios to discuss</label>
+                  <input
+                    id="cal"
+                    type="number"
+                    min={1}
+                    value={calibrationSize}
+                    onChange={(e) => setCalibrationSize(Number(e.target.value))}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="held">Scenarios to hold back</label>
+                  <input
+                    id="held"
+                    type="number"
+                    min={0}
+                    value={heldoutSize}
+                    onChange={(e) => setHeldoutSize(Number(e.target.value))}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="strategy">Drawn</label>
+                  <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as 'random')}>
+                    <option value="random">At random</option>
+                    <option value="from_splits" disabled={closedRounds.length === 0}>
+                      From the last poll&rsquo;s disagreements
+                    </option>
+                  </select>
+                </div>
+                {strategy === 'from_splits' ? (
+                  <div className="field">
+                    <label htmlFor="source">Source poll</label>
+                    <select id="source" value={sourceRoundId} onChange={(e) => setSourceRoundId(e.target.value)}>
+                      {closedRounds.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+              </div>
+
+              {strategy === 'from_splits' ? (
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={reuseHeldout}
+                    onChange={(e) => setReuseHeldout(e.target.checked)}
+                  />
+                  Reuse the previous poll&rsquo;s held-back scenarios, so before and after are measured on the same cases
+                </label>
+              ) : null}
+
+              <p className="tiny">
+                Held-back scenarios are voted on but never discussed, and never export. They are how the next poll
+                measures whether your team&rsquo;s agreement is actually improving.
+              </p>
+            </details>
           </form>
         </div>
       </div>

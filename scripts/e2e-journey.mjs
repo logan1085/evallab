@@ -35,7 +35,7 @@ await page.waitForTimeout(400);
 await page.fill('input[aria-label="Your name"]', 'Ana');
 await page.getByRole('button', { name: 'Join', exact: true }).click();
 await page.waitForTimeout(400);
-await page.getByRole('button', { name: 'Start poll' }).click();
+await page.getByRole('button', { name: 'Start the poll' }).click();
 await page.waitForTimeout(800);
 const voteLink = page.locator('a[href*="/grade/"]').first();
 ok('open poll row with a vote link', (await voteLink.count()) > 0);

@@ -776,14 +776,18 @@ export function createApp(db: DB) {
       (await store.listItems(db, round.id)).map(async (item) => {
       const trace = await store.getTrace(db, item.traceId);
       const own = mine.get(item.id);
+      // The arm is deliberately withheld: a grader who knows an item is held
+      // out grades it differently, which is exactly what held out must not be.
+      // The probe is withheld for the same reason: it says what the scenario
+      // was written to find out, and a voter who reads it has been told which
+      // way to look. Import metadata passes through; authoring metadata does not.
+      const { probe: _probe, generated: _generated, real: _real, ...visibleMeta } = trace?.meta ?? {};
       return {
         itemId: item.id,
         position: item.position,
-        // The arm is deliberately withheld: a grader who knows an item is held
-        // out grades it differently, which is exactly what held out must not be.
         title: trace?.title ?? 'Missing trace',
         content: trace?.content ?? '',
-        meta: trace?.meta ?? {},
+        meta: visibleMeta,
         myVerdict: own?.verdict ?? null,
         myNote: own?.note ?? '',
         };

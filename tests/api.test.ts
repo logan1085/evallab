@@ -98,6 +98,31 @@ describe('blind grading', () => {
     }
   });
 
+  it('never shows a voter the probe, which says what the scenario is testing', async () => {
+    // A generated scenario carries its probe in trace meta for the owner's
+    // view. The queue is the voter's view, and a voter who reads the probe
+    // has been told which way to look. Import metadata still passes through.
+    const { project, auth } = await makeProject(0);
+    await auth(
+      request(app)
+        .post(`/api/projects/${project.slug}/scenarios`)
+        .send({ description: 'A support agent that answers billing questions and refunds up to $50.' }),
+    ).expect(201);
+    const ana = await joinGrader(project, 'Ana');
+
+    const round = (
+      await auth(request(app).post(`/api/projects/${project.slug}/rounds`)).send({ calibrationSize: 4 }).expect(201)
+    ).body.round;
+
+    const queue = await auth(request(app).get(`/api/rounds/${round.id}/queue?graderId=${ana.id}`)).expect(200);
+    expect(queue.body.items.length).toBeGreaterThan(0);
+    expect(JSON.stringify(queue.body)).not.toContain('probe');
+    for (const item of queue.body.items) {
+      expect(item.meta.probe).toBeUndefined();
+      expect(item.meta.generated).toBeUndefined();
+    }
+  });
+
   it('refuses to serve the report while the round is open', async () => {
     const { project, auth } = await makeProject(4);
     const round = (

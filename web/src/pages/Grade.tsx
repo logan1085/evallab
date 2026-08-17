@@ -110,7 +110,7 @@ export function GradePage() {
           {Object.keys(item.meta).length > 0 ? (
             <details style={{ marginTop: 12 }}>
               <summary className="tiny" style={{ cursor: 'pointer' }}>
-                METADATA FROM THE EXPORT
+                Details that came with this conversation
               </summary>
               <pre className="transcript" style={{ maxHeight: 180, marginTop: 8 }}>
                 {JSON.stringify(item.meta, null, 2)}
