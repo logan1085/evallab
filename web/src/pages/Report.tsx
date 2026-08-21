@@ -67,15 +67,23 @@ export function ReportPage() {
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <p className="note" style={{ marginBottom: 26 }}>
-        {data.samplingNote}
+      {/* One obvious next action, before anything asks to be read. */}
+      <p style={{ margin: '2px 0 30px' }}>
+        {unresolved > 0 ? (
+          <a className="btn" href="#disagreements">
+            Settle the first disagreement
+          </a>
+        ) : (
+          <a className="btn" href={api.evalsetUrl(roundId!, token)} download>
+            Download your eval set (.jsonl)
+          </a>
+        )}
       </p>
 
       {/* ---- Splits first ------------------------------------------------ */}
 
-      <section className="band rail-grid">
+      <section className="band rail-grid" id="disagreements">
         <div className="rail">
-          <span className="num">01</span>
           <span className="rail-label">Where they disagreed</span>
           <span className="rail-note">Clustered by kind.</span>
         </div>
@@ -134,11 +142,17 @@ export function ReportPage() {
 
       <EvalSetSection roundId={roundId!} token={token} splitCount={data.splitCount} reloadKey={data.resolutions.length} />
 
-      {/* ---- Aggregate --------------------------------------------------- */}
+      {/* ---- The heavy tail, behind one disclosure ----------------------- */}
+
+      <details className="deep">
+        <summary>Every vote, the agreement numbers, and the judge</summary>
+
+        <p className="note" style={{ margin: '18px 0 6px' }}>
+          {data.samplingNote}
+        </p>
 
       <section className="band rail-grid">
         <div className="rail">
-          <span className="num">04</span>
           <span className="rail-label">The number</span>
           <span className="rail-note">Second, not first.</span>
         </div>
@@ -217,7 +231,6 @@ export function ReportPage() {
 
       <section className="band rail-grid">
         <div className="rail">
-          <span className="num">05</span>
           <span className="rail-label">Every scenario</span>
           <span className="rail-note">Splits shaded.</span>
         </div>
@@ -269,6 +282,7 @@ export function ReportPage() {
       {/* ---- Judge ------------------------------------------------------- */}
 
       <JudgeSection slug={slug!} roundId={roundId!} token={token} report={data} onError={setError} />
+      </details>
     </main>
   );
 }
@@ -493,7 +507,6 @@ function ShipSection({
   return (
     <section className="band rail-grid">
       <div className="rail">
-        <span className="num">02</span>
         <span className="rail-label">Update the standards</span>
         <span className="rail-note">Settled once, kept forever.</span>
       </div>
@@ -627,7 +640,6 @@ function JudgeSection({
   return (
     <section className="band rail-grid">
       <div className="rail">
-        <span className="num">06</span>
         <span className="rail-label">The judge</span>
         <span className="rail-note">Why this exists.</span>
       </div>
@@ -764,7 +776,6 @@ function EvalSetSection({
   return (
     <section className="band rail-grid">
       <div className="rail">
-        <span className="num">03</span>
         <span className="rail-label">Your eval set</span>
         <span className="rail-note">The deliverable.</span>
       </div>
