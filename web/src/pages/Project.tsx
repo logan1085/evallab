@@ -1,22 +1,9 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ATTENTION_BUDGET_MINUTES, attentionEstimate } from '@shared/sampling';
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
 import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
-import {
-  api,
-  forgetGrader,
-  recallGrader,
-  recallKey,
-  rememberGrader,
-  type DraftResponse,
-  type ProjectView,
-  type RoundSummary,
-} from '../api';
-import { Trajectory } from '../components/Trajectory';
-import { ErrorBanner, Loading, Masthead, minutes, pct, useAsync } from '../ui';
-
-type Tab = 'rounds' | 'operations' | 'traces' | 'rubric';
+import { api, recallKey, type DraftResponse, type ProjectView } from '../api';
+import { ErrorBanner, Loading, Masthead, useAsync } from '../ui';
 
 /** The stored source values are import formats; the owner reads provenance. */
 function sourceLabel(source: string): string {
@@ -30,25 +17,29 @@ function sourceLabel(source: string): string {
 export function ProjectPage() {
   const { slug } = useParams<{ slug: string }>();
   const token = recallKey(slug!) ?? '';
-  const [tab, setTab] = useState<Tab>('rounds');
   const [error, setError] = useState<string | null>(null);
 
   const { data, loading, reload } = useAsync<ProjectView>(() => api.project(slug!, token), [slug, token]);
+  const tracesQ = useAsync<{ traces: Trace[] }>(() => api.traces(slug!, token), [slug, token]);
 
   if (loading && !data) return <main className="sheet"><Loading what="project" /></main>;
   if (!data) return <main className="sheet"><ErrorBanner message="Could not load this project." /></main>;
 
   const link = `${window.location.origin}/p/${data.project.slug}?k=${data.project.token}`;
+  const traces = tracesQ.data?.traces ?? [];
+  const answered = traces.filter((t) => t.expectedVerdict).length;
+  const scale = [...(data.rubric?.scale ?? [])].sort((a, b) => b.rank - a.rank);
+  const refresh = () => {
+    tracesQ.reload();
+    reload();
+  };
 
   return (
     <main className="sheet sheet--wide">
       <Masthead
         crumbs={[{ label: 'Home', to: '/' }, data.project.name]}
         title={data.project.name}
-        standfirst={[
-          `${data.traceCount} scenario${data.traceCount === 1 ? '' : 's'}`,
-          `${data.rounds.length} poll${data.rounds.length === 1 ? '' : 's'}`,
-        ].join(' · ')}
+        standfirst={`${traces.length} scenario${traces.length === 1 ? '' : 's'} · ${answered} answered`}
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
@@ -56,445 +47,65 @@ export function ProjectPage() {
       <div className="panel">
         <div className="between">
           <div style={{ flex: '1 1 340px', minWidth: 0 }}>
-            <span className="metric-k">Your team&rsquo;s link</span>
+            <span className="metric-k">Your project link</span>
             <div className="link-box">{link}</div>
             <p className="tiny" style={{ margin: 0 }}>
-              Send it to the people whose judgment you trust. Anyone with it can vote and see the results.
+              Keep it somewhere safe. It is the only way back to this project.
             </p>
           </div>
           <div className="shrink stack">
             <button className="ghost" onClick={() => navigator.clipboard?.writeText(link)}>
               Copy link
             </button>
-            <GraderIdentity slug={slug!} token={token} onError={setError} />
           </div>
         </div>
       </div>
 
-      <div className="tabs">
-        {(['rounds', 'operations', 'traces', 'rubric'] as Tab[]).map((t) => (
-          <button key={t} className={`tab ${tab === t ? 'on' : ''}`} onClick={() => setTab(t)}>
-            {t === 'rounds' ? 'Polls' : t === 'operations' ? 'Documents' : t === 'traces' ? 'Scenarios' : 'Standards'}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'rounds' ? <RoundsTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
-      {tab === 'operations' ? <OperationsTab slug={slug!} token={token} onError={setError} /> : null}
-      {tab === 'traces' ? <TracesTab slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
-      {tab === 'rubric' ? <RubricTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} /> : null}
-    </main>
-  );
-}
-
-/**
- * The guided journey: a company arrives, explains itself, and this card always
- * says the one next thing between them and a finished eval set. It reads state
- * rather than remembering steps, so it survives any order of operations.
- */
-function NextStep({ view, slug }: { view: ProjectView; slug: string }) {
-  const open = view.rounds.find((r) => r.status === 'open');
-  const closed = view.rounds.filter((r) => r.status === 'closed');
-
-  let step: { k: string; title: string; body: string; cta?: { label: string; to: string } };
-  if (view.traceCount === 0) {
-    step = {
-      k: 'Step 1 of 3',
-      title: 'Get your scenarios',
-      body: 'Describe what your AI does on the Scenarios tab and they will be written for you, or paste real conversations if you have them.',
-    };
-  } else if (view.rounds.length === 0) {
-    step = {
-      k: 'Step 2 of 3',
-      title: 'Send the poll to your team',
-      body: 'Start a poll below, then send the shared link above to the people whose judgment you trust. At least two. Everyone votes blind.',
-    };
-  } else if (open) {
-    step = {
-      k: 'Step 2 of 3: poll open',
-      title: 'Your team is voting',
-      body: 'Send the link to anyone still missing, and close the poll once everyone has finished. Votes stay hidden from each other until then.',
-    };
-  } else {
-    const latest = closed[closed.length - 1]!;
-    step = {
-      k: 'Step 3 of 3',
-      title: 'Your eval set is ready',
-      body: 'Open the results: settle any disagreements your team had (each one grows the set) and download the finished eval set.',
-      cta: { label: 'Open the results', to: `/p/${slug}/round/${latest.id}` },
-    };
-  }
-
-  return (
-    <div className="panel">
-      <span className="metric-k">{step.k}</span>
-      <h3 style={{ marginTop: 6 }}>{step.title}</h3>
-      <p className="note">{step.body}</p>
-      {step.cta ? (
-        <Link className="btn" to={step.cta.to}>
-          {step.cta.label}
-        </Link>
-      ) : null}
-    </div>
-  );
-}
-
-/* ---- Grader identity ---------------------------------------------------- */
-
-function GraderIdentity({
-  slug,
-  token,
-  onError,
-}: {
-  slug: string;
-  token: string;
-  onError: (m: string) => void;
-}) {
-  const [grader, setGrader] = useState(() => recallGrader(slug));
-  const [name, setName] = useState('');
-
-  if (grader) {
-    return (
-      <div className="tiny">
-        Voting as <strong style={{ color: 'var(--ink)' }}>{grader.name}</strong>{' '}
-        <button
-          className="ghost tiny-btn"
-          onClick={() => {
-            forgetGrader(slug);
-            setGrader(null);
-          }}
-        >
-          change
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <form
-      className="row"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        if (!name.trim()) return;
-        try {
-          const { grader: joined } = await api.joinGrader(slug, token, name.trim());
-          rememberGrader(slug, joined);
-          setGrader(joined);
-        } catch (err) {
-          onError(err instanceof Error ? err.message : 'Could not join.');
-        }
-      }}
-    >
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" aria-label="Your name" />
-      <div className="shrink">
-        <button type="submit" className="ghost">
-          Join
-        </button>
-      </div>
-    </form>
-  );
-}
-
-/* ---- Rounds ------------------------------------------------------------- */
-
-function RoundsTab({
-  view,
-  slug,
-  token,
-  onChange,
-  onError,
-}: {
-  view: ProjectView;
-  slug: string;
-  token: string;
-  onChange: () => void;
-  onError: (m: string) => void;
-}) {
-  const closedRounds = view.rounds.filter((r) => r.status === 'closed');
-  // Sized to the project: two thirds discussed, a third held back, never more
-  // than exists. A brand-new project with six scenarios gets 4 + 2, not a
-  // default of 8 + 4 that the server would refuse.
-  const defaultDiscuss = Math.min(8, Math.max(1, Math.ceil((view.traceCount * 2) / 3)));
-  const defaultHold = Math.min(4, Math.max(0, view.traceCount - defaultDiscuss));
-  const [calibrationSize, setCalibrationSize] = useState(defaultDiscuss);
-  const [heldoutSize, setHeldoutSize] = useState(defaultHold);
-  const [strategy, setStrategy] = useState<'random' | 'from_splits'>(closedRounds.length ? 'from_splits' : 'random');
-  const [sourceRoundId, setSourceRoundId] = useState(closedRounds[closedRounds.length - 1]?.id ?? '');
-  const [reuseHeldout, setReuseHeldout] = useState(true);
-  const [busy, setBusy] = useState(false);
-
-  const grader = recallGrader(slug);
-  const attention = attentionEstimate(calibrationSize + heldoutSize);
-
-  async function create(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api.createRound(slug, token, {
-        calibrationSize,
-        heldoutSize,
-        strategy,
-        sourceRoundId: strategy === 'from_splits' ? sourceRoundId : null,
-        reuseHeldout,
-      });
-      onChange();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not start the poll.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="rail-grid">
-      <div className="col">
-        <NextStep view={view} slug={slug} />
-        <TrajectorySection slug={slug} token={token} rounds={view.rounds} />
-
-        {view.rounds.length === 0 ? null : (
-          <div className="scroll-x">
-            <table>
-              <caption>Polls, oldest first</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Poll</th>
-                  <th scope="col">Scenarios</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {view.rounds.map((round) => (
-                  <tr key={round.id}>
-                    <td className="case">{round.name}</td>
-                    <td>{round.items}</td>
-                    <td>
-                      <span className={`verdict ${round.status === 'closed' ? 'v-mid' : 'v-pass'}`}>{round.status}</span>
-                    </td>
-                    <td style={{ whiteSpace: 'nowrap' }}>
-                      {round.status === 'open' ? (
-                        grader ? (
-                          <Link className="btn ghost tiny-btn" to={`/p/${slug}/grade/${round.id}`}>
-                            Vote
-                          </Link>
-                        ) : (
-                          <span className="tiny">join first</span>
-                        )
-                      ) : (
-                        <Link className="btn ghost tiny-btn" to={`/p/${slug}/round/${round.id}`}>
-                          Results
-                        </Link>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        <div className="panel" style={{ marginTop: 22 }}>
-          <h3 style={{ marginTop: 0 }}>Start a poll</h3>
-          <form onSubmit={create}>
-            <p className="note" style={{ marginTop: 0 }}>
-              Everyone gets the same {calibrationSize + heldoutSize} scenarios, about{' '}
-              <strong>{minutes(attention.minutes * 60000)}</strong> of their time. Nobody sees anyone else&rsquo;s
-              votes until you close it.
-            </p>
-
-            {attention.overBudget ? (
-              <p className="warn" style={{ marginTop: 0 }}>
-                Past roughly {ATTENTION_BUDGET_MINUTES} minutes a second poll tends not to happen.{' '}
-                {attention.maxItems} scenarios fits the budget.
-              </p>
-            ) : null}
-
-            <button type="submit" disabled={busy}>
-              {busy ? 'Drawing scenarios…' : 'Start the poll'}
-            </button>
-
-            <details style={{ marginTop: 16 }}>
-              <summary className="tiny" style={{ cursor: 'pointer' }}>
-                Adjust how the scenarios are drawn
-              </summary>
-              <div className="row" style={{ marginTop: 12 }}>
-                <div className="field">
-                  <label htmlFor="cal">Scenarios to discuss</label>
-                  <input
-                    id="cal"
-                    type="number"
-                    min={1}
-                    value={calibrationSize}
-                    onChange={(e) => setCalibrationSize(Number(e.target.value))}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="held">Scenarios to hold back</label>
-                  <input
-                    id="held"
-                    type="number"
-                    min={0}
-                    value={heldoutSize}
-                    onChange={(e) => setHeldoutSize(Number(e.target.value))}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="strategy">Drawn</label>
-                  <select id="strategy" value={strategy} onChange={(e) => setStrategy(e.target.value as 'random')}>
-                    <option value="random">At random</option>
-                    <option value="from_splits" disabled={closedRounds.length === 0}>
-                      From the last poll&rsquo;s disagreements
-                    </option>
-                  </select>
-                </div>
-                {strategy === 'from_splits' ? (
-                  <div className="field">
-                    <label htmlFor="source">Source poll</label>
-                    <select id="source" value={sourceRoundId} onChange={(e) => setSourceRoundId(e.target.value)}>
-                      {closedRounds.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-              </div>
-
-              {strategy === 'from_splits' ? (
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={reuseHeldout}
-                    onChange={(e) => setReuseHeldout(e.target.checked)}
-                  />
-                  Reuse the previous poll&rsquo;s held-back scenarios, so before and after are measured on the same cases
-                </label>
-              ) : null}
-
-              <p className="tiny">
-                Held-back scenarios are voted on but never discussed, and never export. They are how the next poll
-                measures whether your team&rsquo;s agreement is actually improving.
-              </p>
-            </details>
-          </form>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/**
- * The trajectory, and — when there is only one closed round — the nudge toward
- * a second one. A single round is a measurement; two is the first time the
- * product can say anything about whether calibration worked, which is the whole
- * reason to come back.
- */
-function TrajectorySection({
-  slug,
-  token,
-  rounds,
-}: {
-  slug: string;
-  token: string;
-  rounds: RoundSummary[];
-}) {
-  const closedCount = rounds.filter((r) => r.status === 'closed').length;
-  const { data } = useAsync(() => api.trajectory(slug, token), [slug, token, rounds.length, closedCount]);
-  const series = data?.series ?? [];
-
-  if (series.length === 0) return null;
-
-  if (series.length === 1) {
-    const only = series[0]!;
-    const held = only.heldout.agreement;
-    return (
+      {/* The deliverable, and the one number that matters on this page. */}
       <div className="panel">
-        <span className="metric-k">One poll in</span>
-        <h3 style={{ marginTop: 6 }}>
-          {held.units > 0
-            ? `Your team agreed ${pct(held.observed, 1)} of the time on the held-back scenarios. Nothing to compare it against yet.`
-            : 'This poll held nothing back, so there is no baseline to improve on yet.'}
-        </h3>
-        <p className="note">
-          One poll tells you where you stand. The second is what tells you whether settling the disagreements
-          changed anything: run it on the same held-back scenarios, with the same people, and the difference is
-          attributable to your standards.
-        </p>
-        {only.resolvedCount === 0 && only.splitCount > 0 ? (
-          <Link className="btn ghost" to={`/p/${slug}/round/${only.roundId}`}>
-            Settle {only.splitCount} disagreement{only.splitCount === 1 ? '' : 's'} first
-          </Link>
-        ) : (
-          <Link className="btn ghost" to={`/p/${slug}/round/${only.roundId}`}>
-            Open the results to start poll two
-          </Link>
-        )}
-      </div>
-    );
-  }
-
-  const latest = series[series.length - 1]!;
-
-  return (
-    <div className="panel">
-      <div className="between" style={{ marginBottom: 6 }}>
-        <h3 style={{ margin: 0 }}>Did agreement move?</h3>
-        {latest.heldoutDelta !== null ? (
-          <span className={`tiny ${latest.heldoutDelta >= 0 ? 'delta-up' : 'delta-down'}`}>
-            {latest.heldoutDelta >= 0 ? '+' : ''}
-            {(latest.heldoutDelta * 100).toFixed(1)} PTS ON THE SAME HELD-BACK SCENARIOS
-          </span>
-        ) : (
-          <span className="tiny">LATEST POLL NOT COMPARABLE TO THE ONE BEFORE IT</span>
-        )}
+        <div className="between">
+          <div>
+            <h3 style={{ margin: 0 }}>Your eval set</h3>
+            <p className="note" style={{ margin: '6px 0 0' }}>
+              {answered === 0
+                ? 'Answer your first scenario below and this becomes downloadable.'
+                : `${answered} test case${answered === 1 ? '' : 's'} ready, each carrying your reasoning. Unanswered scenarios stay out.`}
+            </p>
+          </div>
+          <div className="shrink">
+            {answered > 0 ? (
+              <a className="btn" href={api.soloEvalsetUrl(slug!, token)} download>
+                Download (.jsonl)
+              </a>
+            ) : (
+              <button disabled title="Answer a scenario first">
+                Download (.jsonl)
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
-      <Trajectory series={series} />
+      <TracesTab
+        slug={slug!}
+        token={token}
+        scale={scale}
+        traces={traces}
+        loading={tracesQ.loading}
+        onChange={refresh}
+        onError={setError}
+      />
 
-      <div className="scroll-x">
-        <table>
-          <caption>Every closed poll</caption>
-          <thead>
-            <tr>
-              <th scope="col">Poll</th>
-              <th scope="col">Standards</th>
-              <th scope="col">Held back</th>
-              <th scope="col">Discussed</th>
-              <th scope="col">Disagreed</th>
-              <th scope="col">Settled</th>
-              <th scope="col">Voters</th>
-            </tr>
-          </thead>
-          <tbody>
-            {series.map((point) => (
-              <tr key={point.roundId}>
-                <td className="case">{point.name}</td>
-                <td>
-                  v{point.rubricVersion ?? '–'} · {point.clauseCount} cl
-                </td>
-                <td>
-                  {point.heldout.agreement.units > 0 ? pct(point.heldout.agreement.observed, 1) : '–'}
-                  {point.heldoutDelta !== null ? (
-                    <span className={point.heldoutDelta >= 0 ? 'delta-up' : 'delta-down'}>
-                      {' '}
-                      ({point.heldoutDelta >= 0 ? '+' : ''}
-                      {(point.heldoutDelta * 100).toFixed(1)})
-                    </span>
-                  ) : null}
-                </td>
-                <td>
-                  {point.calibration.agreement.units > 0 ? pct(point.calibration.agreement.observed, 1) : '–'}
-                </td>
-                <td>{point.splitCount}</td>
-                <td>{point.resolvedCount}</td>
-                <td>{point.graderNames.join(', ')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+      <details className="deep">
+        <summary>Your documents: the rules you already have written down</summary>
+        <OperationsTab slug={slug!} token={token} onError={setError} />
+      </details>
+
+      <details className="deep">
+        <summary>Your standards and the judge prompt</summary>
+        <RubricTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} />
+      </details>
+    </main>
   );
 }
 
@@ -686,8 +297,8 @@ function ScenarioWriter({
     <div className="panel">
       <h3 style={{ marginTop: 0 }}>Write the scenarios for me</h3>
       <p className="tiny" style={{ marginTop: 0 }}>
-        Describe what your AI is supposed to do. You get concrete situations for your team to vote on: the clear
-        cases, the boundary cases, and the ones your documents never imagined. None of them contain their own answer.
+        Describe what your AI is supposed to do. You get concrete situations to make calls on: the clear cases,
+        the boundary cases, and the ones your documents never imagined. None of them contain their own answer.
       </p>
       <form onSubmit={write}>
         <div className="field">
@@ -709,30 +320,56 @@ function ScenarioWriter({
   );
 }
 
-/* ---- Traces ------------------------------------------------------------- */
+/* ---- Scenarios, answered in place ---------------------------------------- */
 
+/**
+ * The heart of the solo flow. Each scenario is a card: read it, say what
+ * should happen, say why. The verdict saves on click; the reason saves when
+ * you leave the field. Answered cards are test cases already.
+ */
 function TracesTab({
   slug,
   token,
+  scale,
+  traces,
+  loading,
   onChange,
   onError,
 }: {
   slug: string;
   token: string;
+  scale: VerdictLevel[];
+  traces: Trace[];
+  loading: boolean;
   onChange: () => void;
   onError: (m: string) => void;
 }) {
-  const { data, loading, reload } = useAsync<{ traces: Trace[] }>(() => api.traces(slug, token), [slug, token]);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const [format, setFormat] = useState<'paste' | 'jsonl' | 'csv'>('paste');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
-  const authored = useMemo(() => (data?.traces ?? []).filter((t) => t.source === 'authored-demo').length, [data]);
+  const stubScenarios = traces.filter((t) => t.meta?.generated === true && t.meta?.real === false).length;
+  const reasonFor = (t: Trace) => reasons[t.id] ?? t.expectedReason;
+
+  async function save(trace: Trace, verdict: string | null) {
+    try {
+      await api.setExpected(slug, token, trace.id, { verdict, reason: reasonFor(trace) });
+      onChange();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not save that call.');
+    }
+  }
+
+  async function saveReason(trace: Trace) {
+    if (!trace.expectedVerdict) return;
+    if (reasonFor(trace) === trace.expectedReason) return;
+    await save(trace, trace.expectedVerdict);
+  }
 
   async function importTraces(e: React.FormEvent) {
     e.preventDefault();
-    if (!body.trim()) return;
     setBusy(true);
     setResult(null);
     try {
@@ -741,7 +378,6 @@ function TracesTab({
         `Added ${res.traces.length} scenario${res.traces.length === 1 ? '' : 's'}${res.skipped ? `, skipped ${res.skipped} that did not parse` : ''}.`,
       );
       setBody('');
-      reload();
       onChange();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Could not import those conversations.');
@@ -750,137 +386,141 @@ function TracesTab({
     }
   }
 
-  const stubScenarios = (data?.traces ?? []).filter(
-    (t) => t.meta?.generated === true && t.meta?.real === false,
-  ).length;
-
   return (
     <section className="rail-grid">
       <div className="col">
-        <ScenarioWriter slug={slug} token={token} onDone={() => { reload(); onChange(); }} onError={onError} />
-
         {stubScenarios > 0 ? (
           <div className="warn">
             <span className="metric-k">Placeholder scenarios</span>
             <p style={{ margin: '6px 0 0' }}>
               {stubScenarios} of these scenarios are generic starters, not written from your description, because
-              the server has no ANTHROPIC_API_KEY. Set one in your deployment, then use the writer above to replace
+              the server has no ANTHROPIC_API_KEY. Set one in your deployment, then use the writer below to replace
               them with scenarios about your actual operation.
             </p>
           </div>
         ) : null}
 
-        {authored > 0 ? (
-          <div className="warn">
-            <span className="metric-k">Authored, not captured</span>
-            <p style={{ margin: '6px 0 0' }}>
-              {authored} of these transcripts were written for the demo rather than captured from real runs. Anything
-              you conclude from them is about the workflow, not about a production agent. Replacing them with real
-              conversations is the first thing to do with your own project.
-            </p>
-          </div>
-        ) : null}
-
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Bring in real conversations</h3>
-          <p className="tiny" style={{ marginTop: 4 }}>
-            Already have transcripts of your AI at work? They make scenarios too. Your team votes on what actually
-            happened instead of a written situation.
-          </p>
-          <form onSubmit={importTraces}>
-            <div className="pill-row">
-              {(['paste', 'jsonl', 'csv'] as const).map((f) => (
-                <button key={f} type="button" className={`pill ${format === f ? 'on' : ''}`} onClick={() => setFormat(f)}>
-                  {f === 'paste' ? 'Paste' : f.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div className="field">
-              <label htmlFor="import-body">
-                {format === 'paste'
-                  ? 'One conversation per block, separated by a line of three dashes'
-                  : format === 'jsonl'
-                    ? 'One JSON object per line, or a JSON array'
-                    : 'CSV with a header row'}
-              </label>
-              <textarea
-                id="import-body"
-                rows={10}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder={
-                  format === 'paste'
-                    ? 'Refund outside policy window\nUSER: …\nASSISTANT: …\n---\nNext conversation\n…'
-                    : format === 'jsonl'
-                      ? '{"name": "Refund case", "output": "ASSISTANT: …"}'
-                      : 'name,output\nRefund case,"ASSISTANT: …"'
-                }
-              />
-              <p className="tiny" style={{ marginTop: 6 }}>
-                Field names are matched loosely: title, name, id, case for the label; content, transcript, output,
-                completion, messages for the body. Everything else is kept as metadata.
-              </p>
-            </div>
-            <button type="submit" disabled={busy || !body.trim()}>
-              {busy ? 'Parsing…' : 'Import'}
-            </button>
-            {result ? <span className="tiny" style={{ marginLeft: 12 }}>{result}</span> : null}
-          </form>
-        </div>
-
-        {loading && !data ? (
+        {loading && traces.length === 0 ? (
           <Loading what="scenarios" />
-        ) : (data?.traces.length ?? 0) === 0 ? (
-          <div className="empty">No scenarios yet.</div>
+        ) : traces.length === 0 ? (
+          <div className="empty">No scenarios yet. Describe your AI below and they will be written for you.</div>
         ) : (
-          <div className="scroll-x">
-            <table>
-              <caption>{data!.traces.length} scenarios</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Scenario</th>
-                  <th scope="col">Where it came from</th>
-                  <th scope="col">Length</th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {data!.traces.map((trace) => (
-                  <tr key={trace.id}>
-                    <td className="case">
-                      {trace.title}
-                      {typeof trace.meta?.probe === 'string' && trace.meta.probe ? (
-                        // The probe is for the person running the poll — what
-                        // this scenario is testing. Voters never see it.
-                        <div className="tiny" style={{ fontWeight: 400, marginTop: 4 }}>
-                          Probes: {trace.meta.probe}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>{sourceLabel(trace.source)}</td>
-                    <td>{trace.content.length.toLocaleString()} ch</td>
-                    <td>
-                      <button
-                        className="ghost tiny-btn"
-                        onClick={async () => {
-                          try {
-                            await api.deleteTrace(slug, token, trace.id);
-                            reload();
-                            onChange();
-                          } catch (err) {
-                            onError(err instanceof Error ? err.message : 'Could not remove that scenario.');
-                          }
-                        }}
-                      >
-                        remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          traces.map((trace) => {
+            const probe = typeof trace.meta?.probe === 'string' ? trace.meta.probe : '';
+            return (
+              <div className="panel" key={trace.id}>
+                <div className="between" style={{ marginBottom: 8 }}>
+                  <h3 style={{ margin: 0 }}>{trace.title}</h3>
+                  <span className="tiny shrink">
+                    {trace.expectedVerdict
+                      ? `answered · ${sourceLabel(trace.source)}`
+                      : sourceLabel(trace.source)}
+                  </span>
+                </div>
+                {probe ? (
+                  <p className="tiny" style={{ marginTop: 0 }}>
+                    Probes: {probe}
+                  </p>
+                ) : null}
+                <div className="transcript" style={{ maxHeight: 220 }}>{trace.content}</div>
+
+                <span className="metric-k" style={{ display: 'block', marginTop: 14 }}>
+                  What should happen here?
+                </span>
+                <div className="verdict-picker" style={{ marginTop: 8 }}>
+                  {scale.map((level) => (
+                    <button
+                      key={level.id}
+                      className={trace.expectedVerdict === level.id ? 'selected' : ''}
+                      onClick={() => save(trace, trace.expectedVerdict === level.id ? null : level.id)}
+                    >
+                      {level.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
+                  <label htmlFor={`why-${trace.id}`}>Why? Your words go on the test case.</label>
+                  <textarea
+                    id={`why-${trace.id}`}
+                    rows={2}
+                    value={reasonFor(trace)}
+                    placeholder="Because naming the gap honestly is the behaviour we want."
+                    onChange={(e) => setReasons((r) => ({ ...r, [trace.id]: e.target.value }))}
+                    onBlur={() => saveReason(trace)}
+                  />
+                </div>
+
+                <p className="tiny" style={{ margin: '10px 0 0' }}>
+                  <button
+                    className="ghost tiny-btn"
+                    onClick={async () => {
+                      try {
+                        await api.deleteTrace(slug, token, trace.id);
+                        onChange();
+                      } catch (err) {
+                        onError(err instanceof Error ? err.message : 'Could not remove that scenario.');
+                      }
+                    }}
+                  >
+                    remove
+                  </button>
+                </p>
+              </div>
+            );
+          })
         )}
+
+        <ScenarioWriter slug={slug} token={token} onDone={onChange} onError={onError} />
+
+        <details className="deep">
+          <summary>Bring in real conversations instead</summary>
+          <div className="panel" style={{ marginTop: 14 }}>
+            <p className="tiny" style={{ marginTop: 0 }}>
+              Already have transcripts of your AI at work? They make scenarios too. You judge what actually
+              happened instead of a written situation.
+            </p>
+            <form onSubmit={importTraces}>
+              <div className="pill-row">
+                {(['paste', 'jsonl', 'csv'] as const).map((f) => (
+                  <button key={f} type="button" className={`pill ${format === f ? 'on' : ''}`} onClick={() => setFormat(f)}>
+                    {f === 'paste' ? 'Paste' : f.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="field">
+                <label htmlFor="import-body">
+                  {format === 'paste'
+                    ? 'One conversation per block, separated by a line of three dashes'
+                    : format === 'jsonl'
+                      ? 'One JSON object per line, or a JSON array'
+                      : 'CSV with a header row'}
+                </label>
+                <textarea
+                  id="import-body"
+                  rows={8}
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder={
+                    format === 'paste'
+                      ? 'Refund outside policy window\nUSER: …\nASSISTANT: …\n---\nNext conversation\n…'
+                      : format === 'jsonl'
+                        ? '{"name": "Refund case", "output": "ASSISTANT: …"}'
+                        : 'name,output\nRefund case,"ASSISTANT: …"'
+                  }
+                />
+                <p className="tiny" style={{ marginTop: 6 }}>
+                  Field names are matched loosely: title, name, id, case for the label; content, transcript, output,
+                  completion, messages for the body. Everything else is kept as metadata.
+                </p>
+              </div>
+              <button type="submit" disabled={busy || !body.trim()}>
+                {busy ? 'Parsing…' : 'Import'}
+              </button>
+              {result ? <span className="tiny" style={{ marginLeft: 12 }}>{result}</span> : null}
+            </form>
+          </div>
+        </details>
       </div>
     </section>
   );

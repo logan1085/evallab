@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS traces (
   content     TEXT NOT NULL,
   source      TEXT NOT NULL DEFAULT 'paste',
   meta        TEXT NOT NULL DEFAULT '{}',
+  -- The owner's call on this scenario: what should happen, and why. This is
+  -- the solo flow's whole payload; the poll machinery never reads it.
+  expected_verdict TEXT,
+  expected_reason  TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_traces_project ON traces(project_id);
@@ -182,6 +186,8 @@ ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NUL
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE projects        ADD COLUMN IF NOT EXISTS description    TEXT NOT NULL DEFAULT '';
+ALTER TABLE traces          ADD COLUMN IF NOT EXISTS expected_verdict TEXT;
+ALTER TABLE traces          ADD COLUMN IF NOT EXISTS expected_reason  TEXT NOT NULL DEFAULT '';
 `;
 
 /** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */

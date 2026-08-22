@@ -49,21 +49,14 @@ function useDarkPage() {
   }, []);
 }
 
-const VOTES = [
-  { who: 'Ana', chip: 'partial', said: 'It stopped short. That is partial by definition.' },
-  { who: 'Ben', chip: 'fail', said: 'The task was twelve. It did nine.' },
-  { who: 'Cass', chip: 'pass', said: 'It named exactly what it did not do. That is the behaviour I want.' },
-] as const;
-
-/** Beats of the pinned sequence: one per vote, then the punchline. */
-const BEATS = VOTES.length + 1;
+/** Beats of the pinned sequence: the call lands, the test case appears, the punchline. */
+const BEATS = 3;
 
 const CAPTIONS = [
-  'Scroll. The poll is blind, so each vote lands without seeing the others.',
-  'One vote in. Nobody can see it but Ana.',
-  'Two votes, and already a disagreement.',
-  <>Three careful people. <b>Three different answers.</b></>,
-  <>Three careful people. <b>Three different answers.</b></>,
+  'Scroll. Read it the way a grader would.',
+  'Your call: naming the gap honestly is exactly what you want.',
+  <>And that is <b>a line your eval platform can run.</b></>,
+  <>And that is <b>a line your eval platform can run.</b></>,
 ] as const;
 
 /**
@@ -93,13 +86,13 @@ function PinnedPoll() {
         const box = el!.getBoundingClientRect();
         const travel = box.height - window.innerHeight;
         // Small screens unpin the stage in CSS, so scroll progress no longer
-        // maps to the poll: show it finished rather than frozen at zero votes.
+        // maps to the sequence: show it finished rather than frozen at zero.
         if (travel <= 0 || window.matchMedia('(max-width: 860px)').matches) {
           setBeat(BEATS);
           return;
         }
         // 0 as the stage pins, 1 as it releases; the last stretch holds the
-        // finished poll so it is readable before the page moves on.
+        // finished state so it is readable before the page moves on.
         const p = Math.min(Math.max(-box.top / travel, 0), 1);
         setBeat(Math.round(Math.min(p / 0.82, 1) * BEATS));
       });
@@ -113,20 +106,14 @@ function PinnedPoll() {
     };
   }, []);
 
-  const votesIn = Math.min(beat, VOTES.length);
-  const tally = { pass: 0, partial: 0, fail: 0 };
-  VOTES.slice(0, votesIn).forEach((v) => { tally[v.chip] += 1; });
-
   return (
     <section className="l-scroller" ref={ref}>
       <div className="l-stage">
         <div className="l-wrap">
           <div className="l-stage-head">
-            <span className="l-stage-title">One scenario, three teammates</span>
+            <span className="l-stage-title">One scenario, one call</span>
             <div className="l-tally" aria-hidden="true">
-              <span className="n-pass"><b>{tally.pass}</b> pass</span>
-              <span className="n-partial"><b>{tally.partial}</b> partial</span>
-              <span className="n-fail"><b>{tally.fail}</b> fail</span>
+              <span className="n-pass"><b>{beat >= 2 ? 1 : 0}</b> in the eval set</span>
             </div>
           </div>
 
@@ -141,22 +128,25 @@ function PinnedPoll() {
             </div>
 
             <div className="l-verdicts">
-              {VOTES.map((v, i) => (
-                <div key={v.who} className="l-verdict" data-on={i < votesIn ? '' : undefined}>
-                  <div>
-                    <div className="l-who">{v.who}</div>
-                    <div className="l-said">{v.said}</div>
-                  </div>
-                  <span className={`l-chip ${v.chip}`}>{v.chip}</span>
+              <div className="l-verdict" data-on={beat >= 1 ? '' : undefined}>
+                <div>
+                  <div className="l-who">Your call</div>
+                  <div className="l-said">It named exactly what it did not do. That is the behaviour I want.</div>
                 </div>
-              ))}
+                <span className="l-chip pass">pass</span>
+              </div>
+
+              <div className="l-json" data-on={beat >= 2 ? '' : undefined}>
+                <div className="l-trace-label">evalset.jsonl</div>
+                {'{"input": "Migrate the remaining twelve…", "expected": "pass", "why": "Named the gap honestly"}'}
+              </div>
             </div>
           </div>
 
           <p className="l-stage-foot">{CAPTIONS[beat]}</p>
           <p className="l-stage-punch" data-on={beat >= BEATS ? '' : undefined}>
-            Nobody here is wrong. The company just never decided. An eval written by one person in an afternoon
-            quietly decides it for everyone.
+            You just wrote a test case. The rest of your eval set works the same way: your scenarios, your bar,
+            your words.
           </p>
         </div>
       </div>
@@ -168,7 +158,7 @@ export function Home() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [busy, setBusy] = useState<'new' | 'demo' | null>(null);
+  const [busy, setBusy] = useState<'new' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useDarkPage();
@@ -185,19 +175,6 @@ export function Home() {
       navigate(`/p/${project.slug}?k=${encodeURIComponent(project.token)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the project.');
-      setBusy(null);
-    }
-  }
-
-  async function openDemo() {
-    setBusy('demo');
-    setError(null);
-    try {
-      const seeded = await api.createDemo();
-      rememberKey(seeded.slug, seeded.token);
-      navigate(`/p/${seeded.slug}?k=${encodeURIComponent(seeded.token)}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not build the demo project.');
       setBusy(null);
     }
   }
@@ -225,7 +202,8 @@ export function Home() {
             Write your own evals. <span className="l-mute">Not a vendor&rsquo;s.</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            Your company already knows what good looks like. Tacit turns that into the eval set your AI is held to.
+            Describe what your AI does. Tacit writes the hard scenarios, you say what should happen, and out comes
+            an eval set your AI is held to.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
             <button
@@ -234,21 +212,24 @@ export function Home() {
             >
               Set up your company
             </button>
-            <button className="l-tlink" onClick={openDemo} disabled={busy !== null}>
-              {busy === 'demo' ? 'Building the demo…' : 'See it on real disagreements'} <span className="chev">›</span>
+            <button
+              className="l-tlink"
+              onClick={() => document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' })}
+            >
+              See how it works <span className="chev">›</span>
             </button>
           </div>
         </div>
       </section>
 
-      <section className="l-section l-section--intro">
+      <section className="l-section l-section--intro" id="how">
         <div className="l-wrap">
           <h2 className="l-h2" data-reveal>
-            Ask three people. <span className="l-mute">Get three answers.</span>
+            Say what should happen. <span className="l-mute">It becomes a test.</span>
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '80ms' }}>
-            A real scenario, and the real votes three teammates cast on it. Keep scrolling and watch the poll come
-            in the way it actually happens: blind.
+            Tacit writes concrete scenarios: the clear cases, the boundary cases, the ones nobody imagined. You make
+            the call on each one, and your reasoning travels with it.
           </p>
         </div>
       </section>
@@ -261,8 +242,8 @@ export function Home() {
             Set up your company.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
-            Say what you do and what your AI handles. Tacit writes the scenarios, your team votes blind, and out
-            comes an eval set. No sign-up. You get a link to send to the people whose judgment you trust.
+            Say what you do and what your AI handles. Tacit writes the scenarios, you make the calls, and out comes
+            an eval set. No sign-up. Your project link is the only credential.
           </p>
 
           <form className="l-start l-start--tall" onSubmit={createProject} data-reveal style={{ ['--d' as string]: '130ms' }}>
@@ -280,16 +261,9 @@ export function Home() {
               aria-label="What your company does and what your AI handles"
             />
             <button type="submit" className="l-primary" disabled={busy !== null || !name.trim()}>
-              {busy === 'new' ? 'Writing your scenarios…' : 'Create my eval poll'}
+              {busy === 'new' ? 'Writing your scenarios…' : 'Create my eval set'}
             </button>
           </form>
-
-          <p className="tiny" data-reveal style={{ ['--d' as string]: '180ms', color: 'var(--l-text-3)', marginTop: 18 }}>
-            Not ready?{' '}
-            <button className="l-link" onClick={openDemo} disabled={busy !== null}>
-              {busy === 'demo' ? 'Building the demo…' : 'Open the demo project instead'}
-            </button>
-          </p>
 
           <ErrorBanner message={error} onDismiss={() => setError(null)} />
         </div>
@@ -298,7 +272,7 @@ export function Home() {
       <div className="l-wrap">
         <div className="l-foot">
           <span>Tacit</span>
-          <span>Extract your company&rsquo;s experience into evals.</span>
+          <span>Write your own evals: your scenarios, your bar, your words.</span>
         </div>
       </div>
     </main>

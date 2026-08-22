@@ -3,8 +3,6 @@ import { Navigate, Route, Routes, useParams, useSearchParams } from 'react-route
 import { recallKey, rememberKey } from './api';
 import { Home } from './pages/Home';
 import { ProjectPage } from './pages/Project';
-import { GradePage } from './pages/Grade';
-import { ReportPage } from './pages/Report';
 import { Masthead } from './ui';
 
 export function App() {
@@ -16,22 +14,6 @@ export function App() {
         element={
           <KeyGate>
             <ProjectPage />
-          </KeyGate>
-        }
-      />
-      <Route
-        path="/p/:slug/grade/:roundId"
-        element={
-          <KeyGate>
-            <GradePage />
-          </KeyGate>
-        }
-      />
-      <Route
-        path="/p/:slug/round/:roundId"
-        element={
-          <KeyGate>
-            <ReportPage />
           </KeyGate>
         }
       />

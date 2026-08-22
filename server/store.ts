@@ -146,6 +146,8 @@ export async function addTraces(
       content: t.content,
       source: t.source ?? 'paste',
       meta: t.meta ?? {},
+      expectedVerdict: null,
+      expectedReason: '',
       createdAt: now(),
     };
     await db.run(
@@ -174,6 +176,22 @@ export async function getTrace(db: DB, id: string): Promise<Trace | null> {
   return row ? toTrace(row) : null;
 }
 
+export async function setTraceExpected(
+  db: DB,
+  projectId: string,
+  traceId: string,
+  expected: { verdict: string | null; reason: string },
+): Promise<Trace | null> {
+  await db.run(
+    'UPDATE traces SET expected_verdict = ?, expected_reason = ? WHERE id = ? AND project_id = ?',
+    expected.verdict,
+    expected.reason,
+    traceId,
+    projectId,
+  );
+  return getTrace(db, traceId);
+}
+
 export async function deleteTrace(db: DB, projectId: string, traceId: string): Promise<boolean> {
   const res = await db.run('DELETE FROM traces WHERE id = ? AND project_id = ?', traceId, projectId);
   return Number(res.changes) > 0;
@@ -187,6 +205,8 @@ function toTrace(row: Row): Trace {
     content: str(row.content),
     source: str(row.source),
     meta: parseJson<Record<string, unknown>>(row.meta, {}),
+    expectedVerdict: row.expected_verdict == null ? null : str(row.expected_verdict),
+    expectedReason: str(row.expected_reason ?? ''),
     createdAt: str(row.created_at),
   };
 }

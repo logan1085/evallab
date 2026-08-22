@@ -2,19 +2,16 @@
 
 Extract your company's experience into evals.
 
-Your company already knows what good looks like. It lives in your people's
-heads. Tacit writes concrete scenarios from a description of your AI (and
-whatever rules you have written down), polls your team on them blind, and turns
-the result into an eval set: every scenario the team judged the same way becomes
-a test case carrying their own words, every disagreement becomes a decision the
-company makes once instead of re-making silently on every future run.
+Describe what your AI does. Tacit writes the hard scenarios (the clear cases,
+the boundary cases, the ones your documents never imagined), you say what
+should happen on each one, and out comes an eval set: a `.jsonl` your eval
+platform can run today, where every test case carries your own reasoning,
+plus a judge prompt built from your standards.
 
-The output is a `.jsonl` your eval platform can run today, plus an LLM judge
-built from the standard your team actually agreed on, and scored against them
-to prove it.
-
-Nothing is averaged. A 2–1 split is not a test case with the majority answer;
-it is a decision the company has not made yet, and the product hands it back.
+A blind team-polling mode (rounds, agreement measurement, held-out arms,
+disagreement resolution) is built, tested, and dormant: it lives in the HTTP
+API and the MCP server but is not surfaced in the product while the launch
+focus is the single-player tool.
 
 ```
 npm install

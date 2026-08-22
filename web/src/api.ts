@@ -288,6 +288,19 @@ export const api = {
   evalsetUrl: (roundId: string, token: string) =>
     `/api/rounds/${roundId}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
 
+  setExpected: (slug: string, token: string, traceId: string, body: { verdict: string | null; reason: string }) =>
+    call<{ trace: Trace }>(`/projects/${slug}/traces/${traceId}/expected`, { method: 'PATCH', token, body: json(body) }),
+
+  soloEvalset: (slug: string, token: string) =>
+    call<{
+      cases: { id: string; title: string; input: string; expected: string; why: string }[];
+      unanswered: { id: string; title: string }[];
+      judgeSystemPrompt: string | null;
+    }>(`/projects/${slug}/evalset`, { token }),
+
+  soloEvalsetUrl: (slug: string, token: string) =>
+    `/api/projects/${slug}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
+
   generateScenarios: (slug: string, token: string, body: { description: string; count?: number }) =>
     call<{
       scenarios: { id: string; title: string; content: string; probe: string }[];

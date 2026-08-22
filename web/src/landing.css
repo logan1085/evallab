@@ -290,6 +290,11 @@ html[data-page="landing"] body {
     opacity: 0.3;
     transition: opacity 0.45s ease;
   }
+  .l-demo--stage .l-json {
+    opacity: 0.3;
+    transform: translateY(6px);
+    transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
   .l-demo--stage .l-verdict .l-chip {
     opacity: 0;
     transform: translateY(-3px);
@@ -303,7 +308,20 @@ html[data-page="landing"] body {
 }
 .l-demo--stage .l-verdict[data-on] { opacity: 1; }
 .l-demo--stage .l-verdict[data-on] .l-chip { opacity: 1; transform: none; }
+.l-demo--stage .l-json[data-on] { opacity: 1; transform: none; }
 .l-stage-punch[data-on] { opacity: 1; transform: none; }
+
+/* The deliverable, as it actually looks: one line of a .jsonl file. */
+.l-json {
+  background: var(--l-raised-2);
+  border-radius: 20px;
+  padding: 17px 22px;
+  font-family: var(--data);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--l-pass);
+  word-break: break-all;
+}
 
 .l-stage-foot {
   margin-top: 22px;

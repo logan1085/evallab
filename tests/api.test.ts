@@ -67,6 +67,48 @@ describe('shared-link auth', () => {
   });
 });
 
+describe('the solo flow', () => {
+  it('records a call, exports it, withdraws it, and refuses verdicts off the scale', async () => {
+    const { project, auth } = await makeProject(0);
+    await auth(
+      request(app)
+        .post(`/api/projects/${project.slug}/scenarios`)
+        .send({ description: 'A support agent that answers billing questions and refunds up to $50.' }),
+    ).expect(201);
+    const traces = (await auth(request(app).get(`/api/projects/${project.slug}/traces`)).expect(200)).body.traces;
+    expect(traces.length).toBeGreaterThan(2);
+
+    // A verdict that is not on the scale is refused, not stored.
+    await auth(request(app).patch(`/api/projects/${project.slug}/traces/${traces[0].id}/expected`))
+      .send({ verdict: 'gold-star', reason: '' })
+      .expect(400);
+
+    await auth(request(app).patch(`/api/projects/${project.slug}/traces/${traces[0].id}/expected`))
+      .send({ verdict: 'pass', reason: 'Named the gap honestly.' })
+      .expect(200);
+    await auth(request(app).patch(`/api/projects/${project.slug}/traces/${traces[1].id}/expected`))
+      .send({ verdict: 'fail', reason: 'Stopped short.' })
+      .expect(200);
+
+    const set = (await auth(request(app).get(`/api/projects/${project.slug}/evalset`)).expect(200)).body;
+    expect(set.cases.length).toBe(2);
+    expect(set.unanswered.length).toBe(traces.length - 2);
+    expect(set.judgeSystemPrompt).toBeTruthy();
+
+    const jsonl = await auth(request(app).get(`/api/projects/${project.slug}/evalset?format=jsonl`)).expect(200);
+    const lines = jsonl.text.trim().split('\n');
+    expect(lines.length).toBe(2);
+    expect(JSON.parse(lines[0]!).why).toBe('Named the gap honestly.');
+
+    // Withdrawing the call pulls the case back out of the set.
+    await auth(request(app).patch(`/api/projects/${project.slug}/traces/${traces[0].id}/expected`))
+      .send({ verdict: null, reason: '' })
+      .expect(200);
+    const after = (await auth(request(app).get(`/api/projects/${project.slug}/evalset`)).expect(200)).body;
+    expect(after.cases.length).toBe(1);
+  });
+});
+
 describe('blind grading', () => {
   it('never returns another grader\'s verdict from the queue while the round is open', async () => {
     const { project, auth } = await makeProject(4);

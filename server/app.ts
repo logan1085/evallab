@@ -26,9 +26,11 @@ import {
   attentionEstimate,
   buildJudgeSystemPrompt,
   buildEvalSet,
+  buildSoloEvalSet,
   buildSplitReport,
   clusterSplits,
   evalSetToJsonl,
+  soloEvalSetToJsonl,
   coverageStats,
   type ItemContext,
   type ItemVerdicts,
@@ -446,6 +448,54 @@ export function createApp(db: DB) {
   api.delete('/projects/:slug/traces/:traceId', requireProject, async (req, res) => {
     const ok = await store.deleteTrace(db, (req as ProjectRequest).project.id, req.params.traceId!);
     res.status(ok ? 204 : 404).end();
+  });
+
+  /**
+   * The owner's call on one scenario: what should happen, and why. Null verdict
+   * withdraws the call, which also pulls the case back out of the eval set.
+   */
+  api.patch('/projects/:slug/traces/:traceId/expected', requireProject, async (req, res) => {
+    const body = z
+      .object({ verdict: z.string().min(1).nullable(), reason: z.string().max(2000).default('') })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'A call needs a verdict, or null to withdraw one.' });
+
+    const project = (req as ProjectRequest).project;
+    if (body.data.verdict !== null) {
+      const rubric = await store.currentRubric(db, project.id);
+      const scale = rubric?.scale ?? DEFAULT_SCALE;
+      if (!scale.some((level) => level.id === body.data.verdict)) {
+        return res.status(400).json({ error: `The verdict must be one of: ${scale.map((l) => l.id).join(', ')}.` });
+      }
+    }
+    const trace = await store.setTraceExpected(db, project.id, req.params.traceId!, {
+      verdict: body.data.verdict,
+      reason: body.data.reason.trim(),
+    });
+    if (!trace) return res.status(404).json({ error: 'No such scenario in this project.' });
+    res.json({ trace });
+  });
+
+  /**
+   * The solo deliverable: every scenario the owner has made a call on, as an
+   * eval set. ?format=jsonl downloads; the JSON form carries the judge prompt.
+   */
+  api.get('/projects/:slug/evalset', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const set = buildSoloEvalSet(await store.listTraces(db, project.id));
+    if (req.query.format === 'jsonl') {
+      res
+        .type('application/jsonl')
+        .setHeader('Content-Disposition', `attachment; filename="${project.slug}-evalset.jsonl"`)
+        .send(soloEvalSetToJsonl(set));
+      return;
+    }
+    const rubric = await store.currentRubric(db, project.id);
+    res.json({
+      cases: set.cases,
+      unanswered: set.unanswered,
+      judgeSystemPrompt: rubric ? buildJudgeSystemPrompt(rubric) : null,
+    });
   });
 
   /* ---- Rubric ----------------------------------------------------------- */

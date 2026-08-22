@@ -14,7 +14,8 @@ import type { DB } from '../server/db.js';
 import { testDb } from './helpers.js';
 
 const trace = (id: string, title: string): Trace => ({
-  id, projectId: 'p', title, content: `body of ${title}`, source: 'scenario', meta: {}, createdAt: '',
+  id, projectId: 'p', title, content: `body of ${title}`, source: 'scenario', meta: {},
+  expectedVerdict: null, expectedReason: '', createdAt: '',
 });
 const item = (id: string, traceId: string, arm: 'calibration' | 'heldout' = 'calibration'): RoundItem => ({
   id, roundId: 'r', traceId, arm, position: 0,

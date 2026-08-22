@@ -1,6 +1,14 @@
 # Where this is going
 
-**The pivot, recorded.** This began as The Grading Room — bring your own
+**Pivot three, recorded.** The polls are off the stage. The launch product is
+single-player: describe your AI, scenarios are written, you make the call on
+each (verdict plus a written reason), and the eval set exports with your
+reasoning on every case. The whole poll engine (rounds, blind queues,
+agreement, splits, held-out arms) remains in the API and MCP server, tested
+and dormant, because the team mode is where this goes once single-player has
+users. The web UI no longer routes to it.
+
+**The pivot before that, recorded.** This began as The Grading Room — bring your own
 transcripts, calibrate a rubric. It is now Tacit: a company arrives, explains
 what it is and what its AI handles, scenarios are written for it on the spot,
 its team votes blind, and the deliverable is an eval set — unanimity and

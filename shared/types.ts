@@ -162,6 +162,10 @@ export interface Trace {
   source: string;
   /** Opaque metadata carried through from an export, shown collapsed. */
   meta: Record<string, unknown>;
+  /** The owner's call: what should happen on this scenario. Null until made. */
+  expectedVerdict: string | null;
+  /** Why, in the owner's words. Travels onto the exported test case. */
+  expectedReason: string;
   createdAt: string;
 }
 

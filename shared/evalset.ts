@@ -121,3 +121,43 @@ export function evalSetToJsonl(set: EvalSet): string {
     .map((c) => JSON.stringify({ input: c.input, expected: c.expected, title: c.title, basis: c.basis }))
     .join('\n');
 }
+
+/* ---- The solo flow ------------------------------------------------------- */
+
+/**
+ * One person, their scenarios, their calls. A scenario exports the moment its
+ * owner has said what should happen; the reason travels with it. Scenarios
+ * without a call are excluded and say so, because an eval set padded with
+ * unanswered cases would be quantity pretending to be judgment.
+ */
+export interface SoloCase {
+  id: string;
+  title: string;
+  input: string;
+  expected: string;
+  why: string;
+}
+
+export interface SoloEvalSet {
+  cases: SoloCase[];
+  unanswered: { id: string; title: string }[];
+}
+
+export function buildSoloEvalSet(traces: Trace[]): SoloEvalSet {
+  const cases: SoloCase[] = [];
+  const unanswered: { id: string; title: string }[] = [];
+  for (const t of traces) {
+    if (t.expectedVerdict) {
+      cases.push({ id: t.id, title: t.title, input: t.content, expected: t.expectedVerdict, why: t.expectedReason });
+    } else {
+      unanswered.push({ id: t.id, title: t.title });
+    }
+  }
+  return { cases, unanswered };
+}
+
+export function soloEvalSetToJsonl(set: SoloEvalSet): string {
+  return set.cases
+    .map((c) => JSON.stringify({ input: c.input, expected: c.expected, title: c.title, why: c.why }))
+    .join('\n');
+}

@@ -1,6 +1,6 @@
-// The whole product, walked as a customer: landing form -> scenarios -> two blind
-// voters -> close -> settle a split -> download the .jsonl. Run against a dev
-// server: PORT=4188 npx tsx server/index.ts &  then  node scripts/e2e-journey.mjs
+// The whole product, walked as a customer: landing form -> scenarios written ->
+// answer three of them -> download the .jsonl. Run against a dev server:
+//   PORT=4188 npx tsx server/index.ts &   then   node scripts/e2e-journey.mjs
 // Requires the web bundle to be built (npm run build:web) and Playwright's chromium.
 import { chromium } from 'playwright';
 
@@ -19,90 +19,47 @@ await page.fill(
 );
 await page.click('form.l-start button[type=submit]');
 await page.waitForURL('**/p/**', { timeout: 30000 });
-await page.waitForTimeout(600);
+await page.waitForTimeout(800);
 ok('project created from landing form', page.url().includes('/p/'));
-const slug = page.url().split('/p/')[1].split('?')[0];
 
-// 2. Scenarios were written, and the placeholder honesty note shows (no key here).
-ok('six scenarios in standfirst', (await page.textContent('body')).includes('6 scenarios'));
-await page.getByRole('button', { name: 'Scenarios', exact: true }).click();
+// 2. Scenarios were written; the placeholder note shows when there is no key.
+const body0 = await page.textContent('body');
+ok('six scenarios in standfirst', body0.includes('6 scenarios'));
+ok('placeholder notice visible without a key', body0.includes('Placeholder scenarios'));
+ok('download starts disabled', await page.locator('button[disabled]', { hasText: 'Download' }).count() > 0);
+
+// 3. Answer the first three scenarios: verdict click plus a written reason.
+const cards = page.locator('.panel:has(.verdict-picker)');
+ok('scenario cards rendered', (await cards.count()) === 6);
+for (let i = 0; i < 3; i++) {
+  const card = cards.nth(i);
+  await card.locator('.verdict-picker button').first().click();
+  await page.waitForTimeout(350);
+  await card.locator('textarea').fill(`Because this is the behaviour we want, case ${i + 1}.`);
+  await card.locator('textarea').blur();
+  await page.waitForTimeout(350);
+}
 await page.waitForTimeout(500);
-ok('placeholder notice visible without a key', (await page.textContent('body')).includes('Placeholder scenarios'));
-await page.getByRole('button', { name: 'Polls', exact: true }).click();
-await page.waitForTimeout(400);
+const body1 = await page.textContent('body');
+ok('standfirst counts three answered', body1.includes('3 answered'));
+ok('eval set panel counts three test cases', body1.includes('3 test cases ready'));
+await page.screenshot({ path: `${out}/journey-answered.png`, fullPage: true });
 
-// 3. Ana joins and starts the poll.
-await page.fill('input[aria-label="Your name"]', 'Ana');
-await page.getByRole('button', { name: 'Join', exact: true }).click();
-await page.waitForTimeout(400);
-await page.getByRole('button', { name: 'Start the poll' }).click();
-await page.waitForTimeout(800);
-const voteLink = page.locator('a[href*="/grade/"]').first();
-ok('open poll row with a vote link', (await voteLink.count()) > 0);
-await page.screenshot({ path: `${out}/journey-project.png` });
-
-// 4. Ana votes on everything.
-async function voteAll(pattern) {
-  await page.waitForSelector('.verdict-picker');
-  const total = await page.locator('.pill-row .pill').count() - 2; // minus prev/next
-  for (let i = 0; i < total; i++) {
-    const buttons = page.locator('.verdict-picker button');
-    await buttons.nth(pattern[i % pattern.length]).click();
-    await page.waitForTimeout(350);
-  }
-  return total;
-}
-await voteLink.click();
-const n = await voteAll([0, 0, 2, 1, 0, 2]); // Ana: mostly generous
-ok('Ana graded all scenarios', (await page.textContent('body')).includes('Your votes are in'));
-await page.screenshot({ path: `${out}/journey-grade.png` });
-
-// 5. Ben joins from the same link and disagrees in places.
-await page.goto(`http://localhost:4188/p/${slug}`, { waitUntil: 'networkidle' });
-await page.getByRole('button', { name: 'change' }).click();
-await page.fill('input[aria-label="Your name"]', 'Ben');
-await page.getByRole('button', { name: 'Join', exact: true }).click();
-await page.waitForTimeout(400);
-await page.locator('a[href*="/grade/"]').first().click();
-await voteAll([0, 2, 2, 0, 0, 2]); // Ben: harsher, splits with Ana on 2 and 4
-ok('Ben graded all scenarios', (await page.textContent('body')).includes('Your votes are in'));
-
-// 6. Close the poll from the done panel.
-await page.getByRole('button', { name: 'Close the poll and see where you agree' }).click();
-await page.waitForURL('**/round/**', { timeout: 15000 });
-await page.waitForTimeout(800);
-const reportText = await page.textContent('body');
-ok('report opened', page.url().includes('/round/'));
-ok('report speaks in decisions', /decision|agree/i.test(reportText));
-ok('eval set section present', reportText.includes('Download eval set'));
-await page.screenshot({ path: `${out}/journey-report.png`, fullPage: true });
-
-// 7. Settle the first disagreement through the UI.
-const settle = page.getByRole('button', { name: 'Settle this disagreement' }).first();
-if ((await settle.count()) > 0) {
-  await settle.click();
-  await page.waitForTimeout(300);
-  const pick = page.locator('form .pill-row .pill, form button[type=button]').first();
-  await pick.click();
-  await page.locator('textarea[id^="clause-"]').fill('Partial credit only when the gap is named explicitly.');
-  await page.locator('button[type=submit]:not([disabled])').first().click();
-  await page.waitForTimeout(700);
-  ok('split resolved via UI', (await page.textContent('body')).includes('resolved'));
-} else {
-  ok('split available to settle (none found!)', false);
-}
-
-// 8. The deliverable: download the eval set.
-const href = await page.locator('a', { hasText: 'Download eval set' }).first().getAttribute('href');
+// 4. The deliverable downloads and parses.
+const href = await page.locator('a', { hasText: 'Download' }).first().getAttribute('href');
 const res = await page.request.get(href.startsWith('http') ? href : `http://localhost:4188${href}`);
-const bodyText = await res.text();
-const lines = bodyText.trim().split('\n').filter(Boolean);
+const text = await res.text();
+const lines = text.trim().split('\n').filter(Boolean);
 let parsed = 0;
-for (const line of lines) { try { JSON.parse(line); parsed++; } catch { /* not jsonl */ } }
+for (const line of lines) { try { const o = JSON.parse(line); if (o.input && o.expected && 'why' in o) parsed++; } catch { /* not jsonl */ } }
 ok('eval set downloads', res.ok());
-ok(`eval set is valid jsonl (${parsed} cases)`, parsed > 0 && parsed === lines.length);
+ok(`eval set is valid jsonl with reasons (${parsed} cases)`, parsed === 3 && lines.length === 3);
 console.log('CASES', lines.length, lines[0]?.slice(0, 140));
 
-await page.screenshot({ path: `${out}/journey-settled.png`, fullPage: true });
+// 5. Withdrawing a call shrinks the set.
+await cards.nth(0).locator('.verdict-picker button.selected').click();
+await page.waitForTimeout(500);
+ok('withdrawing a call updates the count', (await page.textContent('body')).includes('2 test cases ready'));
+
 await browser.close();
 console.log(fails.length ? `FAILURES: ${fails.join(' | ')}` : 'ALL PASS');
