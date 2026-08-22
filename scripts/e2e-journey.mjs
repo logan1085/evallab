@@ -10,14 +10,19 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const fails = [];
 const ok = (name, cond) => { console.log(`${cond ? 'PASS' : 'FAIL'} ${name}`); if (!cond) fails.push(name); };
 
-// 1. A company arrives and explains itself.
+// 1. A company arrives and explains itself, in conversation.
 await page.goto('http://localhost:4188/', { waitUntil: 'networkidle' });
-await page.fill('input[aria-label="Company or team name"]', 'Acme Outdoor');
-await page.fill(
-  'textarea[aria-label="What your company does and what your AI handles"]',
-  'We sell outdoor gear online; our AI answers billing questions and can refund up to $50 without approval.',
-);
-await page.click('form.l-start button[type=submit]');
+const chat = page.locator('.l-chat input');
+async function answer(text) {
+  await chat.fill(text);
+  await chat.press('Enter');
+  await page.waitForTimeout(600);
+}
+await page.locator('.l-chat').scrollIntoViewIfNeeded();
+await answer('Acme Outdoor');
+await answer('We sell outdoor gear online; our AI answers billing questions and can refund up to $50 without approval.');
+ok('interview asks about limits', (await page.textContent('.l-msgs')).includes('never do'));
+await answer('Never refund over $50 without human approval.');
 await page.waitForURL('**/p/**', { timeout: 30000 });
 await page.waitForTimeout(800);
 ok('project created from landing form', page.url().includes('/p/'));

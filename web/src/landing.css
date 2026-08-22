@@ -415,40 +415,66 @@ html[data-page="landing"] body {
 .l-close .l-lede { margin: 0 auto 38px; }
 .l-close .l-cta-row { justify-content: center; }
 
-.l-start {
+/* The arrival conversation ------------------------------------------------- */
+
+.l-chat {
   margin: 34px auto 0;
-  max-width: 460px;
+  max-width: 640px;
+  background: var(--l-raised);
+  border-radius: 28px;
+  padding: 20px;
+  text-align: left;
+}
+.l-msgs {
   display: flex;
+  flex-direction: column;
   gap: 10px;
+  min-height: 170px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
 }
-.l-start--tall { flex-direction: column; max-width: 560px; }
-.l-start--tall button { align-self: center; }
-.landing .l-start textarea {
-  background: var(--l-raised-2);
-  border: none;
-  color: var(--l-text);
+.l-msg {
+  max-width: 85%;
+  padding: 11px 16px;
   border-radius: 18px;
-  padding: 15px 22px;
   font-size: 15px;
-  font-family: var(--ui);
-  resize: vertical;
+  line-height: 1.5;
 }
-.landing .l-start textarea::placeholder { color: var(--l-text-3); }
-.landing .l-start textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(245, 245, 247, 0.22); }
-.landing .l-start input {
+.l-msg.a {
+  background: var(--l-raised-2);
+  color: var(--l-text-2);
+  align-self: flex-start;
+  border-bottom-left-radius: 6px;
+}
+.l-msg.u {
+  background: var(--l-text);
+  color: #000;
+  align-self: flex-end;
+  border-bottom-right-radius: 6px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .l-msg {
+    animation: l-msg-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes l-msg-in {
+    from { opacity: 0; transform: translateY(8px); }
+  }
+}
+.l-chat form { display: flex; gap: 10px; margin-top: 14px; }
+.l-chat input {
   flex: 1 1 auto;
+  min-width: 0;
   background: var(--l-raised-2);
   border: none;
   color: var(--l-text);
   border-radius: 999px;
-  padding: 15px 22px;
+  padding: 13px 20px;
   font-size: 15px;
+  font-family: var(--ui);
 }
-.landing .l-start input::placeholder { color: var(--l-text-3); }
-.landing .l-start input:focus {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(245, 245, 247, 0.22);
-}
+.l-chat input::placeholder { color: var(--l-text-3); }
+.l-chat input:focus { outline: none; box-shadow: 0 0 0 3px rgba(245, 245, 247, 0.22); }
 
 .landing button.l-link {
   background: none;
