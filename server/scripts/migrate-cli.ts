@@ -26,6 +26,7 @@ const EXPECTED_TABLES = [
   'user_verdicts',
   'model_call',
   'self_consistency',
+  'exports',
   'judge_verdicts',
 ];
 

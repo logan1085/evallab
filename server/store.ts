@@ -554,6 +554,7 @@ export async function createRound(
     strategy: args.strategy,
     seed: args.seed,
     sourceRoundId: args.sourceRoundId,
+    falseSettleRate: null,
     createdAt: now(),
     closedAt: null,
   };
@@ -649,6 +650,7 @@ function toRound(row: Row): Round {
     strategy: str(row.strategy) === 'from_splits' ? 'from_splits' : 'random',
     seed: str(row.seed),
     sourceRoundId: nullable(row.source_round_id),
+    falseSettleRate: row.false_settle_rate == null ? null : Number(row.false_settle_rate),
     createdAt: str(row.created_at),
     closedAt: nullable(row.closed_at),
   };
@@ -1096,4 +1098,12 @@ export async function outputLengthsByGrader(db: DB, roundId: string) {
 
 export async function setRoundFalseSettleRate(db: DB, roundId: string, rate: number | null): Promise<void> {
   await db.run('UPDATE rounds SET false_settle_rate = ? WHERE id = ?', rate, roundId);
+}
+
+
+export async function recordExport(db: DB, roundId: string, artifactType: string, contentHash: string): Promise<void> {
+  await db.run(
+    'INSERT INTO exports (id, round_id, artifact_type, content_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+    newId(), roundId, artifactType, contentHash, now(),
+  );
 }

@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx server/scripts/migrate-cli.ts",
     "mcp": "tsx mcp/server.ts",
-    "build:mcp": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/mcp.js"
+    "build:mcp": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/mcp.js",
+    "recovery": "tsx scripts/recovery-test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

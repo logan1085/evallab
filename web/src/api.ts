@@ -418,6 +418,10 @@ export const api = {
       judgeSystemPrompt: string;
       panel: unknown[];
       panelEdits: unknown[];
+      pinnedModels: Record<string, string>;
+      cost: { totalCredits: number; totalTokens: number; perSeat: { seat: string; credits: number; tokens: number }[] };
+      falseSettleRate: number | null;
+      hashes: Record<string, string>;
       rerunScript: string;
     }>(`/rounds/${roundId}/bundle`, { token }),
 

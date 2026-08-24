@@ -186,6 +186,8 @@ export interface Round {
   seed: string;
   /** The round this one drew its splits from, when strategy is from_splits. */
   sourceRoundId: string | null;
+  /** The product's honest headline: set once the owner has graded their ten. */
+  falseSettleRate: number | null;
   createdAt: string;
   closedAt: string | null;
 }

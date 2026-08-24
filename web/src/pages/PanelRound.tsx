@@ -448,7 +448,8 @@ function ExportSection({ roundId, token, onError }: { roundId: string; token: st
         ['rubric.md', b.rubricMarkdown],
         ['golden-set.jsonl', b.goldenJsonl],
         ['judge-prompt.txt', b.judgeSystemPrompt],
-        ['panel.json', JSON.stringify({ panel: b.panel, edits: b.panelEdits }, null, 2)],
+        ['panel.json', JSON.stringify({ panel: b.panel, edits: b.panelEdits, pinnedModels: b.pinnedModels }, null, 2)],
+        ['round.json', JSON.stringify({ cost: b.cost, falseSettleRate: b.falseSettleRate, pinnedModels: b.pinnedModels, hashes: b.hashes }, null, 2)],
         ['rerun.sh', b.rerunScript],
       ];
       for (const [name, content] of files) {

@@ -296,6 +296,15 @@ CREATE TABLE IF NOT EXISTS self_consistency (
   UNIQUE (round_id, grader_id)
 );
 
+/* Every exported artifact leaves a hash, so a bundle can be re-verified. */
+CREATE TABLE IF NOT EXISTS exports (
+  id            TEXT PRIMARY KEY,
+  round_id      TEXT NOT NULL,
+  artifact_type TEXT NOT NULL,
+  content_hash  TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';

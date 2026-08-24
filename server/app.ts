@@ -9,6 +9,7 @@
  * number fiction, so it is enforced structurally rather than by convention.
  */
 
+import { createHash } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { DB } from './db.js';
@@ -1426,14 +1427,31 @@ export function createApp(db: DB) {
       });
     }
 
-    res.json({
+    // An export without its pinned versions would invite comparisons that
+    // mean nothing. Refused, not footnoted.
+    const pinnedModels = await store.getRoundPinnedModels(db, round.id);
+    if (Object.keys(pinnedModels).length === 0) {
+      return res.status(409).json({ error: 'This round has no pinned model map, so its bundle cannot be exported honestly.' });
+    }
+    const cost = await store.costForRound(db, round.id);
+    const perSeatCost = [];
+    for (const s of seats) {
+      const c = await store.costForPanelist(db, round.id, s.id);
+      perSeatCost.push({ seat: s.name, credits: c.totalCredits, tokens: c.totalTokens });
+    }
+    const roundRow = await store.getRound(db, round.id);
+
+    const payload = {
       project: { name: project.name, slug: project.slug },
       rubricMarkdown: rubric ? renderRubricMarkdown(rubric) : '',
       goldenJsonl: golden.map((g) => JSON.stringify(g)).join('\n'),
       judgeSystemPrompt: rubric ? buildJudgeSystemPrompt(rubric) : '',
       panel: seats.map((s) => ({
-        name: s.name, objective: s.objective, failsFor: s.failsFor, model: s.model, family: s.family, origin: s.origin,
+        name: s.name, objective: s.objective, failsFor: s.failsFor, model: s.model, family: s.family, origin: s.origin, weight: s.weight,
       })),
+      pinnedModels,
+      cost: { totalCredits: cost.totalCredits, totalTokens: cost.totalTokens, perSeat: perSeatCost },
+      falseSettleRate: roundRow?.falseSettleRate ?? null,
       panelEdits: await store.listPanelEdits(db, round.projectId),
       rerunScript: [
         '#!/usr/bin/env bash',
@@ -1445,6 +1463,78 @@ export function createApp(db: DB) {
         'done',
         `curl -s "$GR_BASE_URL/api/rounds/$ROUND/map" -H "x-gr-token: $GR_TOKEN"`,
       ].join('\n'),
+    };
+
+    const hashes: Record<string, string> = {};
+    const artifacts: [string, string][] = [
+      ['rubric.md', payload.rubricMarkdown],
+      ['golden-set.jsonl', payload.goldenJsonl],
+      ['judge-prompt.txt', payload.judgeSystemPrompt],
+      ['panel.json', JSON.stringify({ panel: payload.panel, edits: payload.panelEdits, pinnedModels })],
+      ['round.json', JSON.stringify({ cost: payload.cost, falseSettleRate: payload.falseSettleRate, pinnedModels })],
+      ['rerun.sh', payload.rerunScript],
+    ];
+    for (const [name, content] of artifacts) {
+      const hash = createHash('sha256').update(content).digest('hex');
+      hashes[name] = hash;
+      await store.recordExport(db, round.id, name, hash);
+    }
+    res.json({ ...payload, hashes });
+  });
+
+  /**
+   * The re-run comparison: same cases, two rounds, and the list of cases
+   * whose panel outcome flipped. Refused when either round lacks its pinned
+   * model map, because an unpinned comparison is not a comparison.
+   */
+  api.get('/rounds/:roundId/compare/:otherRoundId', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const other = await store.getRound(db, req.params.otherRoundId!);
+    if (!other || other.projectId !== round.projectId) return res.status(404).json({ error: 'No such round to compare.' });
+    if (round.status !== 'closed' || other.status !== 'closed') {
+      return res.status(409).json({ error: 'Both rounds must be finished before comparing.' });
+    }
+    const pinsA = await store.getRoundPinnedModels(db, round.id);
+    const pinsB = await store.getRoundPinnedModels(db, other.id);
+    if (Object.keys(pinsA).length === 0 || Object.keys(pinsB).length === 0) {
+      return res.status(409).json({ error: 'A round without pinned model versions cannot be compared. Refused, not footnoted.' });
+    }
+
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const outcomeByTrace = async (roundId: string) => {
+      const items = await store.listItems(db, roundId);
+      const grades = (await store.allGradesForRound(db, roundId)).filter((g) => seatIds.has(g.graderId));
+      const byItem = new Map<string, string[]>();
+      for (const g of grades) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g.verdict]);
+      const out = new Map<string, string>();
+      for (const item of items) {
+        const votes = byItem.get(item.id) ?? [];
+        const distinct = new Set(votes);
+        out.set(item.traceId, votes.length >= 2 && distinct.size === 1 ? votes[0]! : 'split');
+      }
+      return out;
+    };
+    const a = await outcomeByTrace(round.id);
+    const b = await outcomeByTrace(other.id);
+
+    const flips = [];
+    let shared = 0;
+    for (const [traceId, fromOutcome] of a) {
+      if (!b.has(traceId)) continue;
+      shared++;
+      const toOutcome = b.get(traceId)!;
+      if (toOutcome !== fromOutcome) {
+        const trace = await store.getTrace(db, traceId);
+        flips.push({ traceId, title: trace?.title ?? 'Case', from: fromOutcome, to: toOutcome });
+      }
+    }
+    res.json({
+      from: { roundId: round.id, name: round.name, pinnedModels: pinsA },
+      to: { roundId: other.id, name: other.name, pinnedModels: pinsB },
+      sharedCases: shared,
+      flips,
+      stable: flips.length === 0,
     });
   });
 
