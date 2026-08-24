@@ -687,6 +687,13 @@ export function createApp(db: DB) {
       calibration: traces.map((t) => t.id),
       heldout: [],
     });
+    // Pin every seat's model at round start. A round whose panel silently
+    // changed composition has a worthless history.
+    await store.setRoundPinnedModels(
+      db,
+      round.id,
+      Object.fromEntries(seats.map((s) => [s.name, `${s.family}:${adapterFor(s.family).model}`])),
+    );
     res.status(201).json({ round, seats: seats.map((s) => ({ id: s.id, name: s.name })), cases: traces.length });
   });
 
@@ -777,9 +784,50 @@ export function createApp(db: DB) {
         graderId: seat.id,
         verdict: verdict.verdict,
         note: verdict.reason,
+        outputLength: trace.content.length,
       });
       graded++;
     });
+
+    // The repeat sample: this seat re-grades 20% of its cases, and the rate
+    // at which it agrees with itself decides whether its disagreement gets
+    // treated as signal. Below threshold, the seat is flagged and its weight
+    // halved, and that action is recorded like any other panel change.
+    const sample = shuffled.slice(0, Math.max(1, Math.ceil(shuffled.length * 0.2)));
+    let agreements = 0;
+    const firstPass = new Map(
+      (await store.gradesForGrader(db, round.id, seat.id)).map((g) => [g.itemId, g.verdict]),
+    );
+    for (const item of sample) {
+      const trace = await store.getTrace(db, item.traceId);
+      if (!trace) continue;
+      const repeat = await adapter.score(
+        { seat, rubricMarkdown, caseId: item.traceId, caseTitle: trace.title, caseContent: trace.content },
+        gateway,
+      );
+      if (repeat.verdict === firstPass.get(item.id)) agreements++;
+    }
+    const threshold = Number(process.env.GR_CONSISTENCY_THRESHOLD ?? '0.7');
+    const rate = sample.length === 0 ? 1 : agreements / sample.length;
+    const flagged = rate < threshold;
+    await store.saveSelfConsistency(db, {
+      roundId: round.id,
+      graderId: seat.id,
+      sampleSize: sample.length,
+      agreements,
+      flagged,
+    });
+    if (flagged && seat.weight === 1) {
+      await store.setSeatWeight(db, seat.id, 0.5);
+      await store.recordPanelEdit(db, {
+        projectId: round.projectId,
+        seatName: seat.name,
+        action: 'down_weight',
+        before: 'weight 1',
+        after: `weight 0.5 (self-consistency ${(rate * 100).toFixed(0)}% under ${(threshold * 100).toFixed(0)}%)`,
+        note: 'Automatic: a seat that cannot agree with itself is not signal.',
+      });
+    }
 
     // Close the round once every seat has graded every item.
     const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
@@ -852,9 +900,21 @@ export function createApp(db: DB) {
       contested: cases.filter((c) => c.pattern === 'contested').length,
       blindSpots: cases.filter((c) => c.pattern === 'blind-spot').length,
     };
+    const consistency = await store.listSelfConsistency(db, round.id);
+    const consistencyBySeat = new Map(consistency.map((c) => [c.graderId, c]));
     res.json({
       round: { id: round.id, name: round.name, status: round.status },
-      seats: seats.map((s) => ({ id: s.id, name: s.name, family: s.family, model: s.model, objective: s.objective })),
+      pinnedModels: await store.getRoundPinnedModels(db, round.id),
+      cost: await store.costForRound(db, round.id),
+      seats: seats.map((s) => ({
+        id: s.id,
+        name: s.name,
+        family: s.family,
+        model: s.model,
+        objective: s.objective,
+        weight: s.weight,
+        selfConsistency: consistencyBySeat.get(s.id) ?? null,
+      })),
       cases,
       counts,
       agreement: {

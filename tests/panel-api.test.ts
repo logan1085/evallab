@@ -69,10 +69,21 @@ describe('the synthetic panel', () => {
     }
     expect(closed).toBe(true);
 
-    // 4. The map: every case read, agreement numbers with AC1 beside alpha.
+    // 4. The map: every case read, agreement numbers with AC1 beside alpha,
+    // pinned versions, telemetry-backed cost, and per-seat self-consistency.
     const map = (await auth(request(app).get(`/api/rounds/${created.round.id}/map`)).expect(200)).body;
     expect(map.cases.length).toBe(6);
     expect(map.simulated).toBe(true);
+    expect(Object.keys(map.pinnedModels).length).toBe(5);
+    expect(map.cost.attempts).toBeGreaterThanOrEqual(30); // 5 seats x 6 cases, simulated telemetry
+    expect(map.cost.totalCredits).toBe(0); // simulation is free, and says so in numbers
+    for (const seat of map.seats) {
+      expect(seat.selfConsistency).not.toBeNull();
+      // The simulation is deterministic, so every seat agrees with itself.
+      expect(seat.selfConsistency.rate).toBe(1);
+      expect(seat.selfConsistency.flagged).toBe(false);
+      expect(seat.weight).toBe(1);
+    }
     const patterns = new Set(map.cases.map((c: { pattern: string }) => c.pattern));
     expect(patterns.size).toBeGreaterThan(1); // the offline personas genuinely split
     for (const c of map.cases) {

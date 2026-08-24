@@ -25,6 +25,7 @@ const EXPECTED_TABLES = [
   'patches',
   'user_verdicts',
   'model_call',
+  'self_consistency',
   'judge_verdicts',
 ];
 

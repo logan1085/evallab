@@ -680,7 +680,7 @@ export async function getItem(db: DB, id: string): Promise<RoundItem | null> {
 
 export async function submitGrade(
   db: DB,
-  args: { itemId: string; graderId: string; verdict: string; note?: string; elapsedMs?: number },
+  args: { itemId: string; graderId: string; verdict: string; note?: string; elapsedMs?: number; outputLength?: number },
 ): Promise<Grade> {
   const grade: Grade = {
     id: newId(),
@@ -691,11 +691,11 @@ export async function submitGrade(
     elapsedMs: args.elapsedMs ?? 0,
     createdAt: now(),
   };
-  await db.run(`INSERT INTO grades (id, item_id, grader_id, verdict, note, elapsed_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+  await db.run(`INSERT INTO grades (id, item_id, grader_id, verdict, note, elapsed_ms, output_length, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (item_id, grader_id) DO UPDATE SET
        verdict = excluded.verdict, note = excluded.note,
-       elapsed_ms = excluded.elapsed_ms, created_at = excluded.created_at`, grade.id, grade.itemId, grade.graderId, grade.verdict, grade.note, grade.elapsedMs, grade.createdAt);
+       elapsed_ms = excluded.elapsed_ms, output_length = excluded.output_length, created_at = excluded.created_at`, grade.id, grade.itemId, grade.graderId, grade.verdict, grade.note, grade.elapsedMs, args.outputLength ?? 0, grade.createdAt);
 
   const stored = await db.get('SELECT * FROM grades WHERE item_id = ? AND grader_id = ?', args.itemId, args.graderId) as Row;
   return toGrade(stored);
@@ -1036,4 +1036,57 @@ export async function dailySpend(db: DB): Promise<number> {
     'SELECT COALESCE(SUM(cost_credits), 0) AS c FROM model_call WHERE created_at >= ?', cutoff,
   ) as Row;
   return Number(row.c ?? 0);
+}
+
+
+/* ---- Self-consistency and pinned versions --------------------------------- */
+
+export async function saveSelfConsistency(
+  db: DB,
+  a: { roundId: string; graderId: string; sampleSize: number; agreements: number; flagged: boolean },
+): Promise<void> {
+  await db.run(
+    `INSERT INTO self_consistency (id, round_id, grader_id, sample_size, agreements, rate, flagged, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (round_id, grader_id) DO UPDATE SET
+       sample_size = EXCLUDED.sample_size, agreements = EXCLUDED.agreements,
+       rate = EXCLUDED.rate, flagged = EXCLUDED.flagged`,
+    newId(), a.roundId, a.graderId, a.sampleSize, a.agreements,
+    a.sampleSize === 0 ? 1 : a.agreements / a.sampleSize, a.flagged, now(),
+  );
+}
+
+export async function listSelfConsistency(db: DB, roundId: string) {
+  return (await db.all('SELECT * FROM self_consistency WHERE round_id = ?', roundId) as Row[]).map((r) => ({
+    graderId: str(r.grader_id),
+    sampleSize: Number(r.sample_size),
+    agreements: Number(r.agreements),
+    rate: Number(r.rate),
+    flagged: Boolean(r.flagged),
+  }));
+}
+
+export async function setSeatWeight(db: DB, graderId: string, weight: number): Promise<void> {
+  await db.run('UPDATE graders SET weight = ? WHERE id = ?', weight, graderId);
+}
+
+export async function setRoundPinnedModels(db: DB, roundId: string, map: Record<string, string>): Promise<void> {
+  await db.run('UPDATE rounds SET pinned_models = ? WHERE id = ?', JSON.stringify(map), roundId);
+}
+
+export async function getRoundPinnedModels(db: DB, roundId: string): Promise<Record<string, string>> {
+  const row = await db.get('SELECT pinned_models FROM rounds WHERE id = ?', roundId) as Row | undefined;
+  return row ? parseJson<Record<string, string>>(row.pinned_models, {}) : {};
+}
+
+export async function outputLengthsByGrader(db: DB, roundId: string) {
+  return (await db.all(
+    `SELECT g.grader_id, g.verdict, g.output_length FROM grades g
+       JOIN round_items ri ON ri.id = g.item_id WHERE ri.round_id = ?`,
+    roundId,
+  ) as Row[]).map((r) => ({
+    graderId: str(r.grader_id),
+    verdict: str(r.verdict),
+    outputLength: Number(r.output_length ?? 0),
+  }));
 }

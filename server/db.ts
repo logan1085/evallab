@@ -279,6 +279,23 @@ CREATE TABLE IF NOT EXISTS model_call (
 CREATE INDEX IF NOT EXISTS idx_model_call_round ON model_call(round_id);
 CREATE INDEX IF NOT EXISTS idx_model_call_round_seat ON model_call(round_id, panelist_id);
 
+/*
+ * A seat that cannot agree with itself has nothing to say about the rubric.
+ * Each seat re-grades a sample; the repeat rate lands here, and a seat below
+ * threshold is down-weighted before its disagreement is treated as signal.
+ */
+CREATE TABLE IF NOT EXISTS self_consistency (
+  id          TEXT PRIMARY KEY,
+  round_id    TEXT NOT NULL,
+  grader_id   TEXT NOT NULL,
+  sample_size INTEGER NOT NULL,
+  agreements  INTEGER NOT NULL,
+  rate        DOUBLE PRECISION NOT NULL,
+  flagged     BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TEXT NOT NULL,
+  UNIQUE (round_id, grader_id)
+);
+
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';
@@ -294,6 +311,8 @@ ALTER TABLE graders         ADD COLUMN IF NOT EXISTS origin       TEXT NOT NULL 
 ALTER TABLE graders         ADD COLUMN IF NOT EXISTS archetype_id TEXT;
 ALTER TABLE graders         ADD COLUMN IF NOT EXISTS weight       REAL NOT NULL DEFAULT 1;
 ALTER TABLE graders         ADD COLUMN IF NOT EXISTS same_family_as_sut BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE grades          ADD COLUMN IF NOT EXISTS output_length INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE rounds          ADD COLUMN IF NOT EXISTS pinned_models TEXT NOT NULL DEFAULT '{}';
 `;
 
 /** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */

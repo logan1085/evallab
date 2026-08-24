@@ -92,7 +92,28 @@ function openrouterAdapter(family: 'anthropic' | 'openai' | 'google'): FamilyAda
         gateway,
       );
       if (result.error) throw new DrafterError('api', result.error.message);
-      return normalizeVerdict(JSON.parse(result.text));
+      try {
+        return normalizeVerdict(JSON.parse(result.text));
+      } catch {
+        // One repair retry with the requirement restated, then the schema
+        // failure stands as a recorded failure for this case.
+        const retry = await callModel(
+          {
+            pin_id: pin.pin_id,
+            messages: [
+              { role: 'system', content: buildSeatSystemPrompt(req.seat, req.rubricMarkdown) },
+              { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
+              { role: 'user', content: 'Your previous reply was missing the verdict or the one-sentence reason. Reply with both.' },
+            ],
+            max_tokens: 300,
+            response_format: { type: 'json_schema', json_schema: { name: 'verdict', strict: true, schema: SEAT_VERDICT_SCHEMA } },
+            caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.caseId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
+          },
+          gateway,
+        );
+        if (retry.error) throw new DrafterError('api', retry.error.message);
+        return normalizeVerdict(JSON.parse(retry.text));
+      }
     },
   };
 }
@@ -242,7 +263,12 @@ export function offlineAdapter(): FamilyAdapter {
 function normalizeVerdict(parsed: unknown): SeatVerdict {
   const obj = (parsed ?? {}) as { verdict?: unknown; reason?: unknown };
   const verdict = obj.verdict === 'pass' || obj.verdict === 'recoverable' || obj.verdict === 'fail' ? obj.verdict : 'recoverable';
-  const reason = typeof obj.reason === 'string' && obj.reason.trim() ? obj.reason.trim() : 'No reason given.';
+  const reason = typeof obj.reason === 'string' ? obj.reason.trim() : '';
+  if (!reason) {
+    // A verdict without a reason is a schema failure, not a verdict. The
+    // reason lines are what the rubric diff quotes; a blank one is worthless.
+    throw new DrafterError('schema', 'The seat returned a verdict without a reason.');
+  }
   return { verdict, reason };
 }
 
