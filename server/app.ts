@@ -672,6 +672,16 @@ export function createApp(db: DB) {
     if (seats.length < 3) {
       return res.status(400).json({ error: 'A panel needs at least three seats before it can grade. Generate or add seats first.' });
     }
+    // Fewer than three real families is quietly seating one family twice,
+    // which is the thing family diversity exists to prevent. Zero real
+    // families is the labeled simulation and allowed; one or two is blocked
+    // loudly rather than papered over.
+    const realFamilies = new Set(availableFamilies().filter((f) => f.real).map((f) => f.family));
+    if (realFamilies.size > 0 && realFamilies.size < 3) {
+      return res.status(409).json({
+        error: `Only ${realFamilies.size} real model famil${realFamilies.size === 1 ? 'y is' : 'ies are'} reachable (${[...realFamilies].join(', ')}). The panel needs three disjoint families; add OPENROUTER_API_KEY for all three through one key, or run with no keys for the labeled simulation.`,
+      });
+    }
     const rubric = await store.currentRubric(db, project.id);
     if (!rubric) return res.status(400).json({ error: 'This project has no rubric to grade against.' });
     const traces = (await store.listTraces(db, project.id)).slice(0, 30);

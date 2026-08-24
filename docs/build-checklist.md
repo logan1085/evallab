@@ -40,8 +40,8 @@ Status: [x] built and tested here · [ ] to build
 - [x] Description in → rubric + cases + panel out, all editable drafts, cases
       capped, generated cases labeled, literalist always seated
 - [x] Schema-validated generation with offline fallback
-- [ ] Family-spread failure is loud at creation when under three real families
-      (currently reported, not blocking)
+- [x] Family-spread failure is loud at creation when under three real families
+      (round creation refuses with the reachable families named)
 - [ ] Live-call cost cross-check against the OpenRouter dashboard (needs key;
       external)
 
@@ -49,9 +49,9 @@ Status: [x] built and tested here · [ ] to build
 
 - [x] Seats as readable paragraphs; edit, delete, add from library; every edit
       a panel_edit row with before/after
-- [ ] Family-spread summary line and under-three-families inline block
-- [ ] same_family_as_sut label with its one-sentence explanation
-- [ ] Delete-literalist warning naming what goes with it
+- [x] Family-spread summary line and under-three-families inline block
+- [x] same_family_as_sut label with its one-sentence explanation
+- [x] Delete-literalist warning naming what goes with it
 
 ## Sitting 5: the round runner
 
@@ -80,7 +80,7 @@ Status: [x] built and tested here · [ ] to build
       corroborate are marked theater and excluded from patch mining
 - [x] same_family_as_sut seats excluded from settled math by default, with a
       visible toggle
-- [ ] Down-weighted seats shown as down-weighted
+- [x] Down-weighted seats shown as down-weighted
 
 ## Sitting 8: the rubric diff
 

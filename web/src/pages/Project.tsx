@@ -186,6 +186,13 @@ function PanelSection({
         </div>
       </div>
 
+      <p className="tiny" style={{ margin: '10px 0 0' }}>
+        Families on the panel: {[...new Set(seats.map((s) => (s.family === 'offline' ? 'simulated' : s.family)))].join(', ')}.
+        {new Set(seats.map((s) => s.family)).size < 3 && seats.some((s) => s.family !== 'offline')
+          ? ' Fewer than three disjoint families: the run will refuse until the spread is real.'
+          : ''}
+      </p>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 12, marginTop: 14 }}>
         {seats.map((seat) => (
           <div key={seat.id} style={{ background: 'var(--sunk)', borderRadius: 14, padding: '14px 16px' }}>
@@ -237,6 +244,11 @@ function PanelSection({
                 </div>
                 <p className="tiny" style={{ margin: '6px 0 0' }}>{seat.objective}</p>
                 <p className="tiny" style={{ margin: '4px 0 8px', opacity: 0.75 }}>{seat.failsFor}</p>
+                {seat.sameFamilyAsSut ? (
+                  <p className="tiny" style={{ margin: '0 0 8px', color: 'var(--split)' }}>
+                    Same family as your system: excluded from settled-case math by default, because judges favor their own family.
+                  </p>
+                ) : null}
                 <button
                   className="ghost tiny-btn"
                   onClick={() => {
@@ -249,6 +261,14 @@ function PanelSection({
                 <button
                   className="ghost tiny-btn"
                   onClick={async () => {
+                    if (
+                      /literalist/i.test(seat.name) &&
+                      !window.confirm(
+                        'The literalist is the instrument: without it, persona splits cannot be tested for theater and the map loses the "would the rubric alone have decided this" reading. Remove it anyway?',
+                      )
+                    ) {
+                      return;
+                    }
                     try {
                       await api.deleteSeat(slug, token, seat.id);
                       onChange();

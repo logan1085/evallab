@@ -177,17 +177,22 @@ export function PanelRoundPage() {
                   <div className="transcript" style={{ maxHeight: 200, marginTop: 8 }}>{c.content}</div>
                 </details>
                 <div style={{ display: 'grid', gap: 6 }}>
-                  {c.votes.map((v) => (
+                  {c.votes.map((v) => {
+                    const seatMeta = map.seats.find((s) => s.id === v.seatId);
+                    const downWeighted = seatMeta !== undefined && seatMeta.weight < 1;
+                    return (
                     <div key={v.seatId} className="between" style={{ gap: 12 }}>
                       <span className="tiny" style={{ flex: '0 0 220px', fontWeight: v.seatName === c.dissenter ? 650 : 400 }}>
                         {v.seatName}
+                        {downWeighted ? ` (down-weighted x${seatMeta.weight})` : ''}
                       </span>
                       <span className={`verdict v-${v.verdict === 'pass' ? 'pass' : v.verdict === 'fail' ? 'fail' : 'mid'}`}>
                         {v.verdict}
                       </span>
                       <span className="tiny" style={{ flex: 1 }}>{v.reason}</span>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}

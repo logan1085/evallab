@@ -110,7 +110,7 @@ export interface PanelCaseView {
 
 export interface PanelMapView {
   round: { id: string; name: string; status: string };
-  seats: { id: string; name: string; family: string; model: string; objective: string }[];
+  seats: { id: string; name: string; family: string; model: string; objective: string; weight: number }[];
   cases: PanelCaseView[];
   counts: { settled: number; personaDriven: number; contested: number; blindSpots: number };
   agreement: { observed: number; alpha: number | null; ac1: number | null };
