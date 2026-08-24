@@ -23,6 +23,7 @@ import {
   type Seat,
 } from '../shared/panel.js';
 import { DrafterError } from './drafter.js';
+import { OPENROUTER_MODELS, openrouterJson, openrouterKey } from './openrouter.js';
 
 export interface SeatVerdict {
   verdict: 'pass' | 'recoverable' | 'fail';
@@ -48,14 +49,43 @@ const ANTHROPIC_PANEL_MODEL = process.env.GR_PANEL_MODEL_ANTHROPIC ?? 'claude-ha
 const OPENAI_PANEL_MODEL = process.env.GR_PANEL_MODEL_OPENAI ?? 'gpt-5-mini';
 const GOOGLE_PANEL_MODEL = process.env.GR_PANEL_MODEL_GOOGLE ?? 'gemini-2.5-flash';
 
-/** Families with a key present, in preference order. Offline fills to one. */
+/**
+ * Families with a key present, in preference order. A direct provider key
+ * wins its family; OPENROUTER_API_KEY fills every family that has no direct
+ * key, which is how one key yields the three-family spread the product wants.
+ * Offline fills to one only when nothing real is available.
+ */
 export function availableFamilies(): FamilyAdapter[] {
   const out: FamilyAdapter[] = [];
   if (process.env.ANTHROPIC_API_KEY) out.push(anthropicAdapter());
   if (process.env.OPENAI_API_KEY) out.push(openaiAdapter());
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) out.push(googleAdapter());
+  if (openrouterKey()) {
+    for (const family of ['anthropic', 'openai', 'google'] as const) {
+      if (!out.some((a) => a.family === family)) out.push(openrouterAdapter(family));
+    }
+  }
   if (out.length === 0) out.push(offlineAdapter());
   return out;
+}
+
+function openrouterAdapter(family: 'anthropic' | 'openai' | 'google'): FamilyAdapter {
+  const model = OPENROUTER_MODELS[family]!;
+  return {
+    family,
+    model,
+    real: true,
+    async score(req) {
+      const parsed = await openrouterJson<unknown>({
+        model: req.seat.model.includes('/') ? req.seat.model : model,
+        system: buildSeatSystemPrompt(req.seat, req.rubricMarkdown),
+        user: `Case: ${req.caseTitle}\n\n${req.caseContent}`,
+        schema: SEAT_VERDICT_SCHEMA,
+        maxTokens: 300,
+      });
+      return normalizeVerdict(parsed);
+    },
+  };
 }
 
 export function adapterFor(family: string): FamilyAdapter {
@@ -247,6 +277,22 @@ export function resolvePanelWriter(): PanelWriter {
           .map((b) => b.text)
           .join('');
         const parsed = JSON.parse(text) as { seats: { name: string; objective: string; failsFor: string }[] };
+        return parsed.seats.slice(0, count);
+      },
+    };
+  }
+  if (openrouterKey()) {
+    return {
+      id: 'openrouter',
+      real: true,
+      async write(description, count) {
+        const parsed = await openrouterJson<{ seats: { name: string; objective: string; failsFor: string }[] }>({
+          model: OPENROUTER_MODELS.anthropic!,
+          system: buildPanelSystemPrompt(),
+          user: buildPanelUserPrompt(description, count),
+          schema: panelJsonSchema(count),
+          maxTokens: 4096,
+        });
         return parsed.seats.slice(0, count);
       },
     };

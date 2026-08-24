@@ -19,6 +19,7 @@ import {
   type ScenarioRequest,
 } from '../shared/scenarios.js';
 import { DrafterError } from './drafter.js';
+import { OPENROUTER_MODELS, openrouterJson, openrouterKey } from './openrouter.js';
 
 export const DEFAULT_SCENARIO_MODEL = 'claude-opus-5';
 
@@ -32,7 +33,29 @@ export interface ScenarioProvider {
 
 export function resolveScenarist(model = process.env.GR_DRAFT_MODEL ?? DEFAULT_SCENARIO_MODEL): ScenarioProvider {
   if (process.env.ANTHROPIC_API_KEY) return anthropicScenarist(model);
+  if (openrouterKey()) return openrouterScenarist();
   return offlineScenarist();
+}
+
+/** One OpenRouter key makes the arrival real: scenarios written, not stubbed. */
+function openrouterScenarist(): ScenarioProvider {
+  const model = OPENROUTER_MODELS.anthropic!;
+  return {
+    id: 'openrouter',
+    model,
+    real: true,
+    async write(req) {
+      const count = clampScenarioCount(req.count);
+      const parsed = await openrouterJson<unknown>({
+        model,
+        system: buildScenarioSystemPrompt(),
+        user: buildScenarioUserPrompt(req),
+        schema: scenarioJsonSchema(count),
+        maxTokens: 8192,
+      });
+      return normalizeScenarios(parsed, count);
+    },
+  };
 }
 
 function anthropicScenarist(model: string): ScenarioProvider {

@@ -33,6 +33,16 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
+## Keys
+
+Set **`OPENROUTER_API_KEY`** and the whole product is real with one key: the
+panel seats spread across Anthropic, OpenAI, and Google models through
+OpenRouter, and scenario and panel generation run on a real model too. Direct
+provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) take
+precedence for their family when present, so OpenRouter is a default, never a
+lock-in. With no keys at all the loop still runs against a deterministic
+simulation that is labeled simulated on every surface.
+
 ## Deploying it
 
 Frontend and API both run on Vercel; the data lives in Postgres. There is no
