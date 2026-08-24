@@ -720,7 +720,9 @@ export function createApp(db: DB) {
     });
 
     let graded = 0;
-    await mapLimit(shuffled, 4, async (item) => {
+    // Concurrency 6: a full 30-case seat is five waves, roughly 30 seconds at
+    // real-model latency, comfortably inside the 60 second function ceiling.
+    await mapLimit(shuffled, 6, async (item) => {
       const trace = await store.getTrace(db, item.traceId);
       if (!trace) return;
       const verdict = await adapter.score({
