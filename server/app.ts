@@ -19,6 +19,7 @@ import { parseImport } from './import.js';
 import { JudgeError, mapLimit, resolveProvider } from './judge.js';
 import { DrafterError, resolveDrafter } from './drafter.js';
 import { resolveScenarist } from './scenarist.js';
+import { adapterFor, availableFamilies, resolvePanelWriter } from './panelists.js';
 import {
   ABSTAIN,
   DEFAULT_SCALE,
@@ -41,7 +42,11 @@ import {
   renderRubricMarkdown,
   splitsOf,
   type Project,
+  gwetAC1,
+  krippendorffAlpha,
 } from '../shared/index.js';
+import { ARCHETYPES, REQUIRED_SEAT, archetype } from '../shared/panel.js';
+import { groundEvidence, patchIsGrounded, readCase, type SeatVote } from '../shared/panelmap.js';
 
 interface ProjectRequest extends Request {
   project: Project;
@@ -495,6 +500,642 @@ export function createApp(db: DB) {
       cases: set.cases,
       unanswered: set.unanswered,
       judgeSystemPrompt: rubric ? buildJudgeSystemPrompt(rubric) : null,
+    });
+  });
+
+  /* ---- The panel --------------------------------------------------------- */
+
+  /**
+   * Generate the panel: project-specific seats from the writer, spread across
+   * available model families, plus the literalist, which is seated
+   * structurally rather than left to a model to propose. Idempotent: an
+   * existing panel is returned, never silently regenerated over user edits.
+   */
+  api.post('/projects/:slug/panel', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const existing = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    if (existing.length > 0) {
+      return res.json({ seats: existing, families: availableFamilies().map((f) => f.family), generated: false });
+    }
+
+    const families = availableFamilies();
+    const writer = resolvePanelWriter();
+    let proposed: { name: string; objective: string; failsFor: string }[];
+    try {
+      proposed = await writer.write(project.description || project.name, 5);
+    } catch {
+      proposed = await resolvePanelWriter().write('', 5);
+    }
+
+    const lit = archetype(REQUIRED_SEAT)!;
+    const seatSpecs = [
+      { name: lit.name, objective: lit.objective, failsFor: lit.failsFor, archetypeId: lit.id, origin: 'archetype' as const },
+      ...proposed
+        .filter((p) => !p.name.toLowerCase().includes('literalist'))
+        .map((p) => ({ ...p, archetypeId: null, origin: 'generated' as const })),
+    ];
+
+    const seats = [];
+    for (const [i, spec] of seatSpecs.entries()) {
+      const fam = families[i % families.length]!;
+      seats.push(
+        await store.insertGrader(db, {
+          projectId: project.id,
+          name: spec.name,
+          kind: 'panelist',
+          objective: spec.objective,
+          failsFor: spec.failsFor,
+          model: fam.model,
+          family: fam.family,
+          origin: spec.origin,
+          archetypeId: spec.archetypeId,
+        }),
+      );
+    }
+    res.status(201).json({
+      seats,
+      families: families.map((f) => f.family),
+      familiesShort: Math.max(0, 3 - new Set(families.filter((f) => f.real).map((f) => f.family)).size),
+      generated: true,
+      real: writer.real,
+    });
+  });
+
+  api.get('/projects/:slug/panel/archetypes', requireProject, async (_req, res) => {
+    res.json({ archetypes: ARCHETYPES });
+  });
+
+  /** Add a seat: from the archetype library, or authored. Logged as signal. */
+  api.post('/projects/:slug/panel/seats', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z
+      .object({
+        archetypeId: z.string().optional(),
+        name: z.string().min(1).max(80).optional(),
+        objective: z.string().max(300).optional(),
+        failsFor: z.string().max(300).optional(),
+        note: z.string().max(300).default(''),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'A seat needs an archetype id, or a name with an objective.' });
+
+    let spec: { name: string; objective: string; failsFor: string; archetypeId: string | null; origin: 'archetype' | 'user' };
+    if (body.data.archetypeId) {
+      const a = archetype(body.data.archetypeId);
+      if (!a) return res.status(404).json({ error: 'No such archetype in the library.' });
+      spec = { name: a.name, objective: a.objective, failsFor: a.failsFor, archetypeId: a.id, origin: 'archetype' };
+    } else if (body.data.name && body.data.objective && body.data.failsFor) {
+      spec = { name: body.data.name, objective: body.data.objective, failsFor: body.data.failsFor, archetypeId: null, origin: 'user' };
+    } else {
+      return res.status(400).json({ error: 'A seat needs an archetype id, or a name, an objective, and a failure trigger.' });
+    }
+
+    const fams = availableFamilies();
+    const existing = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    const fam = fams[existing.length % fams.length]!;
+    const seat = await store.insertGrader(db, {
+      projectId: project.id,
+      name: spec.name,
+      kind: 'panelist',
+      objective: spec.objective,
+      failsFor: spec.failsFor,
+      model: fam.model,
+      family: fam.family,
+      origin: spec.origin,
+      archetypeId: spec.archetypeId,
+    });
+    await store.recordPanelEdit(db, {
+      projectId: project.id,
+      seatName: seat.name,
+      action: 'add',
+      after: `${seat.objective} / ${seat.failsFor}`,
+      note: body.data.note,
+    });
+    res.status(201).json({ seat });
+  });
+
+  api.patch('/projects/:slug/panel/seats/:seatId', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z
+      .object({
+        name: z.string().min(1).max(80).optional(),
+        objective: z.string().min(1).max(300).optional(),
+        failsFor: z.string().min(1).max(300).optional(),
+        note: z.string().max(300).default(''),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'Nothing to change.' });
+
+    const before = await store.getGrader(db, req.params.seatId!);
+    if (!before || before.projectId !== project.id || before.kind !== 'panelist') {
+      return res.status(404).json({ error: 'No such seat.' });
+    }
+    const seat = await store.updateSeat(db, project.id, req.params.seatId!, body.data);
+    await store.recordPanelEdit(db, {
+      projectId: project.id,
+      seatName: before.name,
+      action: 'rewrite',
+      before: `${before.name}: ${before.objective} / ${before.failsFor}`,
+      after: `${seat!.name}: ${seat!.objective} / ${seat!.failsFor}`,
+      note: body.data.note,
+    });
+    res.json({ seat });
+  });
+
+  api.delete('/projects/:slug/panel/seats/:seatId', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const before = await store.getGrader(db, req.params.seatId!);
+    if (!before || before.projectId !== project.id || before.kind !== 'panelist') {
+      return res.status(404).json({ error: 'No such seat.' });
+    }
+    await store.recordPanelEdit(db, {
+      projectId: project.id,
+      seatName: before.name,
+      action: 'delete',
+      before: `${before.objective} / ${before.failsFor}`,
+      note: typeof req.query.note === 'string' ? req.query.note : '',
+    });
+    await store.deleteSeat(db, project.id, req.params.seatId!);
+    res.status(204).end();
+  });
+
+  /**
+   * A panel round: every seat grades every case, blind. Cases are capped at 30
+   * and all count; there is no held-out arm here, because the owner's ten
+   * (below) is what keeps the panel honest instead.
+   */
+  api.post('/projects/:slug/panel-rounds', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    if (seats.length < 3) {
+      return res.status(400).json({ error: 'A panel needs at least three seats before it can grade. Generate or add seats first.' });
+    }
+    const rubric = await store.currentRubric(db, project.id);
+    if (!rubric) return res.status(400).json({ error: 'This project has no rubric to grade against.' });
+    const traces = (await store.listTraces(db, project.id)).slice(0, 30);
+    if (traces.length < 2) return res.status(400).json({ error: 'Add or generate at least two cases first.' });
+
+    const { round } = await store.createRound(db, {
+      projectId: project.id,
+      rubricVersionId: rubric.id,
+      name: '',
+      strategy: 'random',
+      seed: newId(),
+      samplingNote: `Panel round: ${seats.length} seats over ${traces.length} cases, every seat grading every case, blind.`,
+      sourceRoundId: null,
+      calibration: traces.map((t) => t.id),
+      heldout: [],
+    });
+    res.status(201).json({ round, seats: seats.map((s) => ({ id: s.id, name: s.name })), cases: traces.length });
+  });
+
+  /**
+   * Run one seat over every case in the round, inline and batched. The client
+   * calls this once per seat, which is what makes per-seat progress real
+   * rather than reported. When the last seat finishes, the round closes
+   * itself: a panel does not linger the way a human round must.
+   */
+  api.post('/rounds/:roundId/panel-run', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status === 'closed') return res.status(409).json({ error: 'This round has already closed.' });
+
+    const body = z.object({ seatId: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'Which seat runs?' });
+    const seat = await store.getGrader(db, body.data.seatId);
+    if (!seat || seat.projectId !== round.projectId || seat.kind !== 'panelist') {
+      return res.status(404).json({ error: 'No such seat on this panel.' });
+    }
+
+    const rubric = await store.getRubric(db, round.rubricVersionId);
+    const rubricMarkdown = rubric ? renderRubricMarkdown(rubric) : '';
+    const adapter = adapterFor(seat.family);
+    const items = await store.listItems(db, round.id);
+
+    // Case order shuffled per seat (position bias): a cheap deterministic
+    // shuffle keyed on the seat id.
+    const shuffled = [...items].sort((a, b) => {
+      const ha = `${seat.id}|${a.id}`.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
+      const hb = `${seat.id}|${b.id}`.split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7);
+      return ha - hb;
+    });
+
+    let graded = 0;
+    await mapLimit(shuffled, 4, async (item) => {
+      const trace = await store.getTrace(db, item.traceId);
+      if (!trace) return;
+      const verdict = await adapter.score({
+        seat,
+        rubricMarkdown,
+        caseId: item.traceId,
+        caseTitle: trace.title,
+        caseContent: trace.content,
+      });
+      await store.submitGrade(db, {
+        itemId: item.id,
+        graderId: seat.id,
+        verdict: verdict.verdict,
+        note: verdict.reason,
+      });
+      graded++;
+    });
+
+    // Close the round once every seat has graded every item.
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const progress = await store.roundProgress(db, round.id);
+    const complete = seats.every((s) => (progress.find((p) => p.graderId === s.id)?.done ?? 0) >= items.length);
+    if (complete) await store.closeRound(db, round.id);
+
+    res.json({ seat: seat.name, graded, simulated: !adapter.real, closed: complete });
+  });
+
+  /**
+   * The disagreement map. Settled, persona-driven, contested, blind spot, per
+   * case, with the agreement numbers that are honest under skew: AC1 next to
+   * alpha, never alpha alone.
+   */
+  api.get('/rounds/:roundId/map', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') {
+      return res.status(409).json({ error: 'The panel is still grading. The map appears when every seat has finished.' });
+    }
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatById = new Map(seats.map((s) => [s.id, s]));
+    const items = await store.listItems(db, round.id);
+    const grades = await store.allGradesForRound(db, round.id);
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) {
+      if (!seatById.has(g.graderId)) continue;
+      byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+    }
+
+    const userVerdicts = await store.listUserVerdicts(db, round.id);
+    const checked = new Set(userVerdicts.map((v) => v.itemId));
+
+    const cases = [];
+    const units: string[][] = [];
+    for (const item of items) {
+      const trace = await store.getTrace(db, item.traceId);
+      const votes: SeatVote[] = (byItem.get(item.id) ?? []).map((g) => ({
+        seatId: g.graderId,
+        seatName: seatById.get(g.graderId)?.name ?? 'unknown seat',
+        verdict: g.verdict,
+        reason: g.note,
+      }));
+      const reading = readCase(item.id, votes);
+      units.push(votes.map((v) => v.verdict));
+      cases.push({
+        itemId: item.id,
+        traceId: item.traceId,
+        title: trace?.title ?? 'Missing case',
+        content: trace?.content ?? '',
+        votes,
+        pattern: reading.pattern,
+        dissenter: reading.dissenter,
+        provisional: reading.provisional && !checked.has(item.id),
+        checkedByOwner: checked.has(item.id),
+      });
+    }
+
+    const categories = (await store.getRubric(db, round.rubricVersionId))?.scale.map((l) => l.id) ?? ['fail', 'recoverable', 'pass'];
+    const counts = {
+      settled: cases.filter((c) => c.pattern === 'settled').length,
+      personaDriven: cases.filter((c) => c.pattern === 'persona-driven').length,
+      contested: cases.filter((c) => c.pattern === 'contested').length,
+      blindSpots: cases.filter((c) => c.pattern === 'blind-spot').length,
+    };
+    res.json({
+      round: { id: round.id, name: round.name, status: round.status },
+      seats: seats.map((s) => ({ id: s.id, name: s.name, family: s.family, model: s.model, objective: s.objective })),
+      cases,
+      counts,
+      agreement: {
+        observed: units.length ? units.filter((u) => new Set(u.filter((v) => v !== ABSTAIN)).size === 1).length / units.length : 0,
+        alpha: krippendorffAlpha(units, categories, 'nominal'),
+        ac1: gwetAC1(units, categories),
+      },
+      simulated: !availableFamilies().some((f) => f.real),
+    });
+  });
+
+  /**
+   * The rubric diff: propose sentences mined from contested and persona-driven
+   * cases. The grounding gate is structural: a patch that cannot quote at
+   * least two verdict reasons verbatim is dropped, and the drop is counted in
+   * the response, because plausible ungrounded rubric language is the exact
+   * failure this product exists to prevent.
+   */
+  api.post('/rounds/:roundId/patches', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Patches are mined from a finished round.' });
+
+    const existing = await store.listPatches(db, round.id);
+    if (existing.length > 0) return res.json({ patches: existing, dropped: 0, regenerated: false });
+
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatById = new Map(seats.map((s) => [s.id, s]));
+    const items = await store.listItems(db, round.id);
+    const grades = await store.allGradesForRound(db, round.id);
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) {
+      if (!seatById.has(g.graderId)) continue;
+      byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+    }
+
+    const reasonIndex = new Map<string, string>();
+    interface Disputed {
+      itemId: string;
+      title: string;
+      dissenter: ReturnType<typeof seatById.get> | null;
+      votes: SeatVote[];
+    }
+    const disputed: Disputed[] = [];
+    let contestedTotal = 0;
+    for (const item of items) {
+      const votes: SeatVote[] = (byItem.get(item.id) ?? []).map((g) => ({
+        seatId: g.graderId,
+        seatName: seatById.get(g.graderId)?.name ?? 'unknown',
+        verdict: g.verdict,
+        reason: g.note,
+      }));
+      for (const v of votes) reasonIndex.set(`${item.id}|${v.seatName}`, v.reason);
+      const reading = readCase(item.id, votes);
+      if (reading.pattern === 'persona-driven' || reading.pattern === 'contested') {
+        contestedTotal++;
+        const trace = await store.getTrace(db, item.traceId);
+        disputed.push({
+          itemId: item.id,
+          title: trace?.title ?? 'Case',
+          dissenter: reading.dissenter ? seats.find((s) => s.name === reading.dissenter) : null,
+          votes,
+        });
+      }
+    }
+
+    // Group persona-driven cases by the dissenting seat; each group proposes
+    // the concrete clause that seat's stake implies, quoting the room.
+    const byDissenter = new Map<string, Disputed[]>();
+    const freeContested: Disputed[] = [];
+    for (const d of disputed) {
+      if (d.dissenter) byDissenter.set(d.dissenter.id, [...(byDissenter.get(d.dissenter.id) ?? []), d]);
+      else freeContested.push(d);
+    }
+
+    let dropped = 0;
+    const stored = [];
+
+    for (const [seatId, group] of byDissenter) {
+      const seat = seatById.get(seatId)!;
+      const dissents = group.flatMap((g) => g.votes.filter((v) => v.seatId === seatId).map((v) => ({ itemId: g.itemId, seat: v.seatName, quote: v.reason })));
+      const others = group.flatMap((g) => g.votes.filter((v) => v.seatId !== seatId).slice(0, 1).map((v) => ({ itemId: g.itemId, seat: v.seatName, quote: v.reason })));
+      const evidence = groundEvidence([...dissents, ...others], reasonIndex).slice(0, 4);
+      if (!patchIsGrounded(evidence)) {
+        dropped++;
+        continue;
+      }
+      const text = `Decide ${seat.name.toLowerCase()}'s stake on purpose: ${seat.failsFor.replace(/^Fails /, 'an answer that ').replace(/\.$/, '')} is at most recoverable, or say explicitly that this does not count against an answer.`;
+      stored.push(
+        await store.insertPatch(db, {
+          projectId: round.projectId,
+          roundId: round.id,
+          text,
+          evidence,
+          seatsSided: [seat.name],
+          projectedLift: contestedTotal === 0 ? null : group.length / contestedTotal,
+        }),
+      );
+    }
+
+    if (freeContested.length >= 2) {
+      const evidence = groundEvidence(
+        freeContested.slice(0, 2).map((g) => ({ itemId: g.itemId, seat: g.votes[0]!.seatName, quote: g.votes[0]!.reason })),
+        reasonIndex,
+      );
+      if (patchIsGrounded(evidence)) {
+        stored.push(
+          await store.insertPatch(db, {
+            projectId: round.projectId,
+            roundId: round.id,
+            text: `The rubric does not decide cases like "${freeContested[0]!.title}". Add one sentence saying which stake wins there, then re-run the panel on the contested cases.`,
+            evidence,
+            seatsSided: [],
+            projectedLift: contestedTotal === 0 ? null : freeContested.length / contestedTotal,
+          }),
+        );
+      } else {
+        dropped++;
+      }
+    }
+
+    res.status(201).json({ patches: stored, dropped, contestedTotal, regenerated: true });
+  });
+
+  api.get('/rounds/:roundId/patches', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    res.json({ patches: await store.listPatches(db, round.id) });
+  });
+
+  /** Accept writes rubric v(n+1) with the patch as a criterion; reject records the decision. */
+  api.patch('/rounds/:roundId/patches/:patchId', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const body = z
+      .object({ action: z.enum(['accept', 'reject']), text: z.string().min(10).max(600).optional() })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'accept or reject, with optional edited text.' });
+
+    const patch = await store.getPatch(db, req.params.patchId!);
+    if (!patch || patch.roundId !== round.id) return res.status(404).json({ error: 'No such patch on this round.' });
+    if (patch.status !== 'proposed') return res.status(409).json({ error: `This patch was already ${patch.status}.` });
+
+    if (body.data.action === 'reject') {
+      await store.setPatchStatus(db, patch.id, 'rejected', null);
+      return res.json({ patch: { ...patch, status: 'rejected' } });
+    }
+
+    const current = await store.currentRubric(db, round.projectId);
+    if (!current) return res.status(400).json({ error: 'No rubric to patch.' });
+    const text = body.data.text ?? patch.text;
+    const next = await store.createRubricVersion(db, {
+      projectId: round.projectId,
+      name: current.name,
+      preamble: current.preamble,
+      scale: current.scale,
+      criteria: [
+        ...current.criteria,
+        { id: newId(), title: 'From the panel', body: text },
+      ],
+      parentVersionId: current.id,
+    });
+    await store.setPatchStatus(db, patch.id, 'accepted', next.id);
+    res.json({ patch: { ...patch, status: 'accepted', resolvedRubricVersionId: next.id }, rubric: next });
+  });
+
+  /**
+   * The owner's ten: four contested, four settled, two from the rest, drawn
+   * from the round for the user to grade themselves. Blind: no votes ride
+   * along. This step is mandatory in the product because a panel can be
+   * confidently wrong together, and the false settles it surfaces are the one
+   * output only a human can produce.
+   */
+  api.get('/rounds/:roundId/self-check', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Grade your ten after the panel finishes.' });
+
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const items = await store.listItems(db, round.id);
+    const grades = (await store.allGradesForRound(db, round.id)).filter((g) => seatIds.has(g.graderId));
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+
+    const readings = items.map((item) => ({
+      item,
+      reading: readCase(
+        item.id,
+        (byItem.get(item.id) ?? []).map((g) => ({ seatId: g.graderId, seatName: g.graderId, verdict: g.verdict, reason: g.note })),
+      ),
+    }));
+    const pick = (patterns: string[], n: number, taken: Set<string>) =>
+      readings
+        .filter((r) => patterns.includes(r.reading.pattern) && !taken.has(r.item.id))
+        .slice(0, n)
+        .map((r) => r.item);
+
+    const taken = new Set<string>();
+    const chosen = [];
+    for (const item of pick(['contested', 'persona-driven'], 4, taken)) { taken.add(item.id); chosen.push(item); }
+    for (const item of pick(['settled'], 4, taken)) { taken.add(item.id); chosen.push(item); }
+    for (const item of pick(['blind-spot', 'settled', 'contested', 'persona-driven'], 2, taken)) { taken.add(item.id); chosen.push(item); }
+
+    const existing = new Map((await store.listUserVerdicts(db, round.id)).map((v) => [v.itemId, v]));
+    const cases = [];
+    for (const item of chosen) {
+      const trace = await store.getTrace(db, item.traceId);
+      cases.push({
+        itemId: item.id,
+        title: trace?.title ?? 'Case',
+        content: trace?.content ?? '',
+        myVerdict: existing.get(item.id)?.verdict ?? null,
+        myReason: existing.get(item.id)?.reason ?? '',
+      });
+    }
+    res.json({ cases, done: cases.filter((c) => c.myVerdict).length });
+  });
+
+  api.post('/rounds/:roundId/self-check', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Grade your ten after the panel finishes.' });
+    const body = z
+      .object({ itemId: z.string().min(1), verdict: z.enum(['pass', 'recoverable', 'fail']), reason: z.string().max(600).default('') })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'A call needs an item and a verdict.' });
+    const item = await store.getItem(db, body.data.itemId);
+    if (!item || item.roundId !== round.id) return res.status(404).json({ error: 'No such case in this round.' });
+    await store.saveUserVerdict(db, { roundId: round.id, itemId: body.data.itemId, verdict: body.data.verdict, reason: body.data.reason });
+    res.json({ ok: true });
+  });
+
+  /**
+   * Who speaks for you, and where the panel was confidently wrong. False
+   * settles are the headline: every one is a rubric clause the panel could
+   * never have found, because it lives in the owner's head or their business.
+   */
+  api.get('/rounds/:roundId/alignment', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const userVerdicts = await store.listUserVerdicts(db, round.id);
+    if (userVerdicts.length === 0) return res.json({ graded: 0, seats: [], falseSettles: [] });
+
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const grades = (await store.allGradesForRound(db, round.id)).filter((g) => seatIds.has(g.graderId));
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+
+    const perSeat = seats.map((seat) => {
+      let agree = 0;
+      let total = 0;
+      for (const uv of userVerdicts) {
+        const g = (byItem.get(uv.itemId) ?? []).find((x) => x.graderId === seat.id);
+        if (!g) continue;
+        total++;
+        if (g.verdict === uv.verdict) agree++;
+      }
+      return { seatId: seat.id, name: seat.name, family: seat.family, agree, total, rate: total ? agree / total : null };
+    });
+
+    const falseSettles = [];
+    for (const uv of userVerdicts) {
+      const votes = (byItem.get(uv.itemId) ?? []);
+      const distinct = new Set(votes.map((v) => v.verdict));
+      if (votes.length >= 2 && distinct.size === 1 && !distinct.has(uv.verdict)) {
+        const item = await store.getItem(db, uv.itemId);
+        const trace = item ? await store.getTrace(db, item.traceId) : null;
+        falseSettles.push({
+          itemId: uv.itemId,
+          title: trace?.title ?? 'Case',
+          panelVerdict: votes[0]!.verdict,
+          yourVerdict: uv.verdict,
+          yourReason: uv.reason,
+        });
+      }
+    }
+    res.json({ graded: userVerdicts.length, seats: perSeat, falseSettles });
+  });
+
+  /**
+   * The export bundle: files, not a dashboard. Rubric, golden set, judge
+   * prompt, panel config with its edit provenance, and a re-run script.
+   */
+  api.get('/rounds/:roundId/bundle', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Export a finished round.' });
+    const project = (req as ProjectRequest).project;
+    const rubric = await store.getRubric(db, round.rubricVersionId);
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const items = await store.listItems(db, round.id);
+    const grades = (await store.allGradesForRound(db, round.id)).filter((g) => seatIds.has(g.graderId));
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+    const checked = new Map((await store.listUserVerdicts(db, round.id)).map((v) => [v.itemId, v]));
+
+    const golden = [];
+    for (const item of items) {
+      const votes = (byItem.get(item.id) ?? []).map((g) => ({
+        seatId: g.graderId, seatName: g.graderId, verdict: g.verdict, reason: g.note,
+      }));
+      const reading = readCase(item.id, votes);
+      if (reading.pattern !== 'settled') continue;
+      const uv = checked.get(item.id);
+      if (uv && uv.verdict !== votes[0]!.verdict) continue; // a false settle is not golden
+      const trace = await store.getTrace(db, item.traceId);
+      if (!trace) continue;
+      golden.push({
+        input: trace.content,
+        expected: votes[0]!.verdict,
+        title: trace.title,
+        basis: uv ? 'panel-settled, owner-checked' : 'panel-settled, provisional',
+      });
+    }
+
+    res.json({
+      project: { name: project.name, slug: project.slug },
+      rubricMarkdown: rubric ? renderRubricMarkdown(rubric) : '',
+      goldenJsonl: golden.map((g) => JSON.stringify(g)).join('\n'),
+      judgeSystemPrompt: rubric ? buildJudgeSystemPrompt(rubric) : '',
+      panel: seats.map((s) => ({
+        name: s.name, objective: s.objective, failsFor: s.failsFor, model: s.model, family: s.family, origin: s.origin,
+      })),
+      panelEdits: await store.listPanelEdits(db, round.projectId),
+      rerunScript: [
+        '#!/usr/bin/env bash',
+        '# Re-run this eval: same panel, same rubric version, fresh verdicts.',
+        '# Set GR_BASE_URL to your deployment and GR_TOKEN to the project key.',
+        `ROUND=$(curl -s -X POST "$GR_BASE_URL/api/projects/${project.slug}/panel-rounds" -H "x-gr-token: $GR_TOKEN" | sed -n 's/.*"id":"\\([^"]*\\)".*/\\1/p' | head -1)`,
+        'for SEAT in ' + seats.map((s) => s.id).join(' ') + '; do',
+        `  curl -s -X POST "$GR_BASE_URL/api/rounds/$ROUND/panel-run" -H "x-gr-token: $GR_TOKEN" -H "content-type: application/json" -d "{\\"seatId\\":\\"$SEAT\\"}" > /dev/null`,
+        'done',
+        `curl -s "$GR_BASE_URL/api/rounds/$ROUND/map" -H "x-gr-token: $GR_TOKEN"`,
+      ].join('\n'),
     });
   });
 

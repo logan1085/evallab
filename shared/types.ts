@@ -20,7 +20,7 @@ export const ABSTAIN = 'abstain';
 
 export const DEFAULT_SCALE: VerdictLevel[] = [
   { id: 'fail', label: 'fail', rank: 0 },
-  { id: 'partial', label: 'partial', rank: 1 },
+  { id: 'recoverable', label: 'recoverable', rank: 1 },
   { id: 'pass', label: 'pass', rank: 2 },
 ];
 
@@ -198,10 +198,23 @@ export interface RoundItem {
   position: number;
 }
 
+export type GraderKind = 'human' | 'panelist' | 'owner';
+
 export interface Grader {
   id: string;
   projectId: string;
   name: string;
+  /** 'human' is a person; 'panelist' is a model wearing a perspective; 'owner' is the user checking the panel. */
+  kind: GraderKind;
+  /** Panelist seats only; empty strings for humans. */
+  objective: string;
+  failsFor: string;
+  model: string;
+  family: string;
+  origin: string;
+  archetypeId: string | null;
+  weight: number;
+  sameFamilyAsSut: boolean;
   createdAt: string;
 }
 

@@ -262,3 +262,55 @@ export function coverageStats(
     clauseCoverage: items.length === 0 ? 0 : clauseCoveredItemIds.size / items.length,
   };
 }
+
+/**
+ * Gwet's AC1, reported alongside alpha rather than instead of it.
+ *
+ * With the skewed pass rates typical of a working system (most cases pass),
+ * Krippendorff's alpha collapses toward zero even when the room agrees on
+ * nearly everything, because chance agreement is estimated from the skewed
+ * marginals themselves. AC1 estimates chance from the probability that a
+ * rater classifies a unit at random, which stays honest under skew. A tool
+ * that sells agreement measurement cannot ship only the misleading number.
+ *
+ * Reference: Gwet (2008), "Computing inter-rater reliability and its variance
+ * in the presence of high agreement." Worked examples in tests.
+ */
+export function gwetAC1(units: Unit[], categories: string[]): number | null {
+  const usable = units.filter((u) => u.filter((v) => v !== ABSTAIN).length >= 2);
+  if (usable.length < MIN_UNITS_FOR_ALPHA) return null;
+
+  const q = categories.length;
+  if (q < 2) return null;
+
+  // Observed agreement, pairwise within units (same construction as p_a).
+  let pa = 0;
+  // Category prevalence pi_k: average share of ratings landing in category k.
+  const prevalence = new Map<string, number>(categories.map((c) => [c, 0]));
+  let totalRatings = 0;
+
+  for (const unit of usable) {
+    const values = unit.filter((v) => v !== ABSTAIN);
+    const n = values.length;
+    let agreeing = 0;
+    for (const cat of categories) {
+      const k = values.filter((v) => v === cat).length;
+      agreeing += k * (k - 1);
+      prevalence.set(cat, (prevalence.get(cat) ?? 0) + k);
+    }
+    pa += agreeing / (n * (n - 1));
+    totalRatings += n;
+  }
+  pa /= usable.length;
+
+  // Chance agreement per Gwet: pe = (1 / (q - 1)) * sum_k pi_k (1 - pi_k).
+  let pe = 0;
+  for (const cat of categories) {
+    const pik = (prevalence.get(cat) ?? 0) / totalRatings;
+    pe += pik * (1 - pik);
+  }
+  pe /= q - 1;
+
+  if (pe >= 1) return null;
+  return (pa - pe) / (1 - pe);
+}

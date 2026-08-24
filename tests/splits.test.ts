@@ -13,16 +13,16 @@ describe('classify', () => {
   });
 
   it('separates an adjacent split from a polar one by ordinal distance', () => {
-    expect(classify(['pass', 'partial'], DEFAULT_SCALE)).toMatchObject({ kind: 'adjacent', spread: 1 });
+    expect(classify(['pass', 'recoverable'], DEFAULT_SCALE)).toMatchObject({ kind: 'adjacent', spread: 1 });
     expect(classify(['pass', 'fail'], DEFAULT_SCALE)).toMatchObject({ kind: 'polar', spread: 2 });
   });
 
   it('calls a three-way disagreement scattered', () => {
-    expect(classify(['pass', 'partial', 'fail'], DEFAULT_SCALE)).toMatchObject({ kind: 'scattered', spread: 2 });
+    expect(classify(['pass', 'recoverable', 'fail'], DEFAULT_SCALE)).toMatchObject({ kind: 'scattered', spread: 2 });
   });
 
   it('orders the distinct verdicts by rank, highest first', () => {
-    expect(classify(['fail', 'pass', 'partial'], DEFAULT_SCALE).distinct).toEqual(['pass', 'partial', 'fail']);
+    expect(classify(['fail', 'pass', 'recoverable'], DEFAULT_SCALE).distinct).toEqual(['pass', 'recoverable', 'fail']);
   });
 });
 
@@ -38,7 +38,7 @@ describe('split report ordering', () => {
   it('puts the widest gaps first and unanimous rows last', () => {
     const items: ItemVerdicts[] = [
       { itemId: 'i0', byGrader: { a: 'pass', b: 'pass' } },
-      { itemId: 'i1', byGrader: { a: 'pass', b: 'partial' } },
+      { itemId: 'i1', byGrader: { a: 'pass', b: 'recoverable' } },
       { itemId: 'i2', byGrader: { a: 'pass', b: 'fail' } },
     ];
     const rows = buildSplitReport(items, contexts(3), DEFAULT_SCALE);
@@ -50,7 +50,7 @@ describe('split report ordering', () => {
     ctx.set('i0', { ...ctx.get('i0')!, resolved: true });
     const items: ItemVerdicts[] = [
       { itemId: 'i0', byGrader: { a: 'pass', b: 'fail' } },
-      { itemId: 'i1', byGrader: { a: 'pass', b: 'partial' } },
+      { itemId: 'i1', byGrader: { a: 'pass', b: 'recoverable' } },
     ];
     const rows = buildSplitReport(items, ctx, DEFAULT_SCALE);
     expect(rows[0]!.itemId).toBe('i1');
@@ -60,7 +60,7 @@ describe('split report ordering', () => {
   it('is a total order — sorting twice is stable', () => {
     const items: ItemVerdicts[] = Array.from({ length: 6 }, (_, i) => ({
       itemId: `i${i}`,
-      byGrader: { a: 'pass', b: i % 2 === 0 ? 'fail' : 'partial' },
+      byGrader: { a: 'pass', b: i % 2 === 0 ? 'fail' : 'recoverable' },
     }));
     const rows = buildSplitReport(items, contexts(6), DEFAULT_SCALE);
     expect([...rows].sort(compareSeverity).map((r) => r.itemId)).toEqual(rows.map((r) => r.itemId));
@@ -72,7 +72,7 @@ describe('clusterSplits', () => {
     const rows = [
       row('i0', ['pass', 'fail'], 'polar'),
       row('i1', ['pass', 'fail'], 'polar'),
-      row('i2', ['pass', 'partial'], 'adjacent'),
+      row('i2', ['pass', 'recoverable'], 'adjacent'),
       row('i3', [], 'unanimous'),
     ];
     const clusters = clusterSplits(rows);

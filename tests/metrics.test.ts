@@ -3,12 +3,13 @@ import {
   agreementStats,
   bootstrapCI,
   coverageStats,
+  gwetAC1,
   krippendorffAlpha,
   observedAgreement,
 } from '@shared/metrics.js';
 import { ABSTAIN, DEFAULT_SCALE, type ItemVerdicts } from '@shared/types.js';
 
-const CATS = ['fail', 'partial', 'pass'];
+const CATS = ['fail', 'recoverable', 'pass'];
 
 function items(rows: Record<string, string>[]): ItemVerdicts[] {
   return rows.map((byGrader, i) => ({ itemId: `i${i}`, byGrader }));
@@ -20,7 +21,7 @@ describe('observedAgreement', () => {
   });
 
   it('is 0 when no pair ever matches', () => {
-    expect(observedAgreement([['pass', 'fail'], ['partial', 'pass']])).toBe(0);
+    expect(observedAgreement([['pass', 'fail'], ['recoverable', 'pass']])).toBe(0);
   });
 
   it('weights each unit equally regardless of how many raters saw it', () => {
@@ -42,7 +43,7 @@ describe('krippendorffAlpha', () => {
       ['fail', 'fail', 'fail'],
       ['pass', 'pass', 'pass'],
       ['fail', 'fail', 'fail'],
-      ['partial', 'partial', 'partial'],
+      ['recoverable', 'recoverable', 'recoverable'],
     ];
     expect(krippendorffAlpha(units, CATS, 'nominal')).toBeCloseTo(1, 10);
   });
@@ -64,11 +65,11 @@ describe('krippendorffAlpha', () => {
     const base = [
       ['pass', 'pass'],
       ['fail', 'fail'],
-      ['partial', 'partial'],
+      ['recoverable', 'recoverable'],
       ['pass', 'pass'],
       ['fail', 'fail'],
     ];
-    const near = krippendorffAlpha([...base, ['pass', 'partial']], CATS, 'ordinal')!;
+    const near = krippendorffAlpha([...base, ['pass', 'recoverable']], CATS, 'ordinal')!;
     const far = krippendorffAlpha([...base, ['pass', 'fail']], CATS, 'ordinal')!;
     expect(near).toBeGreaterThan(far);
   });
@@ -79,20 +80,20 @@ describe('krippendorffAlpha', () => {
     // Marginals must be unbalanced for this to bite: with equal category counts
     // the ordinal metric is accidentally permutation-invariant too.
     const units = [
-      ['pass', 'partial'],
+      ['pass', 'recoverable'],
       ['pass', 'pass'],
       ['pass', 'pass'],
       ['pass', 'fail'],
-      ['partial', 'fail'],
+      ['recoverable', 'fail'],
       ['fail', 'fail'],
     ];
     const forward = krippendorffAlpha(units, CATS, 'nominal')!;
     const reversed = krippendorffAlpha(units, [...CATS].reverse(), 'nominal')!;
     expect(forward).toBeCloseTo(reversed, 10);
 
-    // Moving 'partial' off the middle of the scale changes what counts as a near miss.
+    // Moving 'recoverable' off the middle of the scale changes what counts as a near miss.
     const ordForward = krippendorffAlpha(units, CATS, 'ordinal')!;
-    const ordShuffled = krippendorffAlpha(units, ['partial', 'fail', 'pass'], 'ordinal')!;
+    const ordShuffled = krippendorffAlpha(units, ['recoverable', 'fail', 'pass'], 'ordinal')!;
     expect(ordForward).toBeGreaterThan(ordShuffled);
   });
 
@@ -102,7 +103,7 @@ describe('krippendorffAlpha', () => {
       ['fail', 'fail'],
       ['pass', 'pass', 'pass', 'pass'],
       ['fail', 'fail', 'fail'],
-      ['partial', 'partial'],
+      ['recoverable', 'recoverable'],
     ];
     expect(krippendorffAlpha(ragged, CATS, 'nominal')).toBeCloseTo(1, 10);
   });
@@ -123,10 +124,10 @@ describe('bootstrapCI', () => {
       ['pass', 'fail'],
       ['fail', 'fail'],
       ['pass', 'pass'],
-      ['partial', 'pass'],
+      ['recoverable', 'pass'],
       ['fail', 'fail'],
       ['pass', 'pass'],
-      ['fail', 'partial'],
+      ['fail', 'recoverable'],
       ['pass', 'pass'],
       ['fail', 'fail'],
     ];
@@ -172,7 +173,7 @@ describe('agreementStats', () => {
         { a: 'pass', b: 'pass', c: 'pass' },
         { a: 'pass', b: 'fail', c: 'pass' },
         { a: 'fail', b: 'fail', c: 'fail' },
-        { a: 'partial', b: 'fail', c: 'pass' },
+        { a: 'recoverable', b: 'fail', c: 'pass' },
         { a: 'pass', b: 'fail', c: 'fail' },
         { a: 'fail', b: 'fail', c: 'fail' },
       ]),
@@ -232,5 +233,48 @@ describe('coverageStats', () => {
   it('reports clause coverage over items', () => {
     const cov = coverageStats(items([{ a: 'pass' }, { a: 'fail' }]), ['a'], new Set(['i0']));
     expect(cov.clauseCoverage).toBeCloseTo(1 / 2, 10);
+  });
+});
+
+describe("Gwet's AC1", () => {
+  // The reason AC1 ships: a skewed but agreeing room. Nine units where both
+  // raters say pass, one where they split. Alpha reads this near zero because
+  // the marginals are one-sided; AC1 reads it as the high agreement it is.
+  it('stays high under skewed prevalence where alpha collapses', () => {
+    const units: string[][] = [
+      ...Array.from({ length: 9 }, () => ['pass', 'pass']),
+      ['pass', 'fail'],
+    ];
+    const cats = ['fail', 'recoverable', 'pass'];
+    const ac1 = gwetAC1(units, cats)!;
+    const alpha = krippendorffAlpha(units, cats, 'nominal')!;
+    expect(ac1).toBeGreaterThan(0.8);
+    expect(alpha).toBeLessThan(0.5);
+    expect(ac1).toBeGreaterThan(alpha);
+  });
+
+  it('is 1 under perfect agreement and null below the minimum unit count', () => {
+    const perfect = Array.from({ length: 6 }, () => ['pass', 'pass', 'pass']);
+    expect(gwetAC1(perfect, ['fail', 'pass'])).toBeCloseTo(1, 10);
+    expect(gwetAC1([['pass', 'pass']], ['fail', 'pass'])).toBeNull();
+  });
+
+  it('worked example: two raters, mixed table', () => {
+    // 4 units: agree pass, agree pass, agree fail, split. pa = 3/4.
+    // Ratings: 8 total; pass 5/8, fail 3/8.
+    // pe = (1/(q-1)) * [.625*.375 + .375*.625] = 0.46875 with q=2... use q=2.
+    const units = [
+      ['pass', 'pass'],
+      ['pass', 'pass'],
+      ['fail', 'fail'],
+      ['pass', 'fail'],
+    ];
+    // Need >= 5 units for the gate; duplicate the agreeing rows proportionally.
+    const scaled = [...units, ['pass', 'pass'], ['fail', 'fail']];
+    const ac1 = gwetAC1(scaled, ['fail', 'pass'])!;
+    // pa = 5/6; pi_pass = 7/12, pi_fail = 5/12;
+    // pe = (7/12)(5/12) + (5/12)(7/12) = 70/144 = 0.48611
+    // ac1 = (0.83333 - 0.48611) / (1 - 0.48611) = 0.67567...
+    expect(ac1).toBeCloseTo(0.6757, 3);
   });
 });

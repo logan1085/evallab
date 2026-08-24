@@ -21,6 +21,9 @@ const EXPECTED_TABLES = [
   'grades',
   'resolutions',
   'judge_runs',
+  'panel_edits',
+  'patches',
+  'user_verdicts',
   'judge_verdicts',
 ];
 

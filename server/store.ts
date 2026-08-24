@@ -105,12 +105,97 @@ export async function upsertGrader(db: DB, projectId: string, name: string): Pro
   const existing = await db.get('SELECT * FROM graders WHERE project_id = ? AND name = ?', projectId, trimmed) as Row | undefined;
   if (existing) return toGrader(existing);
 
-  const grader: Grader = { id: newId(), projectId, name: trimmed, createdAt: now() };
-  await db.run('INSERT INTO graders (id, project_id, name, created_at) VALUES (?, ?, ?, ?)', grader.id,
-    grader.projectId,
-    grader.name,
-    grader.createdAt,);
+  return insertGrader(db, { projectId, name: trimmed, kind: 'human' });
+}
+
+/** All graders are seats; a human is a seat with no model behind it. */
+export async function insertGrader(
+  db: DB,
+  seat: {
+    projectId: string;
+    name: string;
+    kind: Grader['kind'];
+    objective?: string;
+    failsFor?: string;
+    model?: string;
+    family?: string;
+    origin?: string;
+    archetypeId?: string | null;
+    weight?: number;
+    sameFamilyAsSut?: boolean;
+  },
+): Promise<Grader> {
+  const grader: Grader = {
+    id: newId(),
+    projectId: seat.projectId,
+    name: seat.name,
+    kind: seat.kind,
+    objective: seat.objective ?? '',
+    failsFor: seat.failsFor ?? '',
+    model: seat.model ?? '',
+    family: seat.family ?? '',
+    origin: seat.origin ?? 'user',
+    archetypeId: seat.archetypeId ?? null,
+    weight: seat.weight ?? 1,
+    sameFamilyAsSut: seat.sameFamilyAsSut ?? false,
+    createdAt: now(),
+  };
+  await db.run(
+    `INSERT INTO graders (id, project_id, name, kind, objective, fails_for, model, family, origin, archetype_id, weight, same_family_as_sut, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    grader.id, grader.projectId, grader.name, grader.kind, grader.objective, grader.failsFor,
+    grader.model, grader.family, grader.origin, grader.archetypeId, grader.weight,
+    grader.sameFamilyAsSut, grader.createdAt,
+  );
   return grader;
+}
+
+export async function updateSeat(
+  db: DB,
+  projectId: string,
+  seatId: string,
+  fields: { name?: string; objective?: string; failsFor?: string; model?: string; family?: string },
+): Promise<Grader | null> {
+  const existing = await getGrader(db, seatId);
+  if (!existing || existing.projectId !== projectId) return null;
+  await db.run(
+    'UPDATE graders SET name = ?, objective = ?, fails_for = ?, model = ?, family = ?, origin = ? WHERE id = ?',
+    fields.name ?? existing.name,
+    fields.objective ?? existing.objective,
+    fields.failsFor ?? existing.failsFor,
+    fields.model ?? existing.model,
+    fields.family ?? existing.family,
+    'user',
+    seatId,
+  );
+  return getGrader(db, seatId);
+}
+
+export async function deleteSeat(db: DB, projectId: string, seatId: string): Promise<boolean> {
+  const res = await db.run("DELETE FROM graders WHERE id = ? AND project_id = ? AND kind = 'panelist'", seatId, projectId);
+  return Number(res.changes) > 0;
+}
+
+export async function recordPanelEdit(
+  db: DB,
+  edit: { projectId: string; seatName: string; action: string; before?: string; after?: string; note?: string },
+): Promise<void> {
+  await db.run(
+    'INSERT INTO panel_edits (id, project_id, seat_name, action, before, after, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    newId(), edit.projectId, edit.seatName, edit.action, edit.before ?? '', edit.after ?? '', edit.note ?? '', now(),
+  );
+}
+
+export async function listPanelEdits(db: DB, projectId: string) {
+  return (await db.all('SELECT * FROM panel_edits WHERE project_id = ? ORDER BY created_at', projectId) as Row[]).map((row) => ({
+    id: str(row.id),
+    seatName: str(row.seat_name),
+    action: str(row.action),
+    before: str(row.before),
+    after: str(row.after),
+    note: str(row.note),
+    createdAt: str(row.created_at),
+  }));
 }
 
 export async function listGraders(db: DB, projectId: string): Promise<Grader[]> {
@@ -125,7 +210,21 @@ export async function getGrader(db: DB, id: string): Promise<Grader | null> {
 }
 
 function toGrader(row: Row): Grader {
-  return { id: str(row.id), projectId: str(row.project_id), name: str(row.name), createdAt: str(row.created_at) };
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    name: str(row.name),
+    kind: (str(row.kind ?? 'human') as Grader['kind']) || 'human',
+    objective: str(row.objective ?? ''),
+    failsFor: str(row.fails_for ?? ''),
+    model: str(row.model ?? ''),
+    family: str(row.family ?? ''),
+    origin: str(row.origin ?? 'user'),
+    archetypeId: row.archetype_id == null ? null : str(row.archetype_id),
+    weight: Number(row.weight ?? 1),
+    sameFamilyAsSut: Boolean(row.same_family_as_sut),
+    createdAt: str(row.created_at),
+  };
 }
 
 /* ---- Traces ------------------------------------------------------------- */
@@ -778,5 +877,95 @@ export async function judgeVerdicts(db: DB, runId: string) {
     itemId: str(row.item_id),
     verdict: str(row.verdict),
     rationale: str(row.rationale),
+  }));
+}
+
+
+/* ---- Patches (proposed rubric sentences) --------------------------------- */
+
+export interface PatchRecord {
+  id: string;
+  projectId: string;
+  roundId: string;
+  text: string;
+  /** [{ caseId, seat, quote }] verbatim reasons this patch quotes. */
+  evidence: { itemId: string; seat: string; quote: string }[];
+  seatsSided: string[];
+  projectedLift: number | null;
+  status: 'proposed' | 'accepted' | 'rejected';
+  resolvedRubricVersionId: string | null;
+  createdAt: string;
+}
+
+export async function insertPatch(
+  db: DB,
+  patch: Omit<PatchRecord, 'id' | 'createdAt' | 'status' | 'resolvedRubricVersionId'>,
+): Promise<PatchRecord> {
+  const record: PatchRecord = {
+    ...patch,
+    id: newId(),
+    status: 'proposed',
+    resolvedRubricVersionId: null,
+    createdAt: now(),
+  };
+  await db.run(
+    'INSERT INTO patches (id, project_id, round_id, text, evidence, seats_sided, projected_lift, status, resolved_rubric_version_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    record.id, record.projectId, record.roundId, record.text, JSON.stringify(record.evidence),
+    JSON.stringify(record.seatsSided), record.projectedLift, record.status, null, record.createdAt,
+  );
+  return record;
+}
+
+export async function listPatches(db: DB, roundId: string): Promise<PatchRecord[]> {
+  return (await db.all('SELECT * FROM patches WHERE round_id = ? ORDER BY created_at', roundId) as Row[]).map(toPatch);
+}
+
+export async function getPatch(db: DB, id: string): Promise<PatchRecord | null> {
+  const row = await db.get('SELECT * FROM patches WHERE id = ?', id) as Row | undefined;
+  return row ? toPatch(row) : null;
+}
+
+export async function setPatchStatus(
+  db: DB,
+  id: string,
+  status: 'accepted' | 'rejected',
+  resolvedRubricVersionId: string | null,
+): Promise<void> {
+  await db.run('UPDATE patches SET status = ?, resolved_rubric_version_id = ? WHERE id = ?', status, resolvedRubricVersionId, id);
+}
+
+function toPatch(row: Row): PatchRecord {
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    roundId: str(row.round_id),
+    text: str(row.text),
+    evidence: parseJson(row.evidence, []),
+    seatsSided: parseJson(row.seats_sided, []),
+    projectedLift: row.projected_lift == null ? null : Number(row.projected_lift),
+    status: str(row.status) as PatchRecord['status'],
+    resolvedRubricVersionId: row.resolved_rubric_version_id == null ? null : str(row.resolved_rubric_version_id),
+    createdAt: str(row.created_at),
+  };
+}
+
+/* ---- The owner's ten ------------------------------------------------------ */
+
+export async function saveUserVerdict(
+  db: DB,
+  args: { roundId: string; itemId: string; verdict: string; reason: string },
+): Promise<void> {
+  await db.run(
+    `INSERT INTO user_verdicts (id, round_id, item_id, verdict, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (round_id, item_id) DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason`,
+    newId(), args.roundId, args.itemId, args.verdict, args.reason, now(),
+  );
+}
+
+export async function listUserVerdicts(db: DB, roundId: string) {
+  return (await db.all('SELECT * FROM user_verdicts WHERE round_id = ? ORDER BY created_at', roundId) as Row[]).map((row) => ({
+    itemId: str(row.item_id),
+    verdict: str(row.verdict),
+    reason: str(row.reason),
   }));
 }

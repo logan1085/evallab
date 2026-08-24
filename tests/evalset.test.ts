@@ -47,7 +47,7 @@ describe('what becomes a test case', () => {
 
   it('a resolution turns a split into a case, carrying the sentence the team wrote', () => {
     const resolution: Resolution = {
-      id: 'res1', itemId: 'i2', agreedVerdict: 'partial',
+      id: 'res1', itemId: 'i2', agreedVerdict: 'recoverable',
       clauseText: 'Stopping early counts as partial when the gap is named.',
       rationale: 'Settled in the review meeting.', clauseId: null, resolvedBy: 'Ana', createdAt: '',
     };
@@ -59,7 +59,7 @@ describe('what becomes a test case', () => {
       grades: [],
       embargoed: new Set(),
     });
-    expect(set.cases[0]).toMatchObject({ expected: 'partial', basis: 'resolved' });
+    expect(set.cases[0]).toMatchObject({ expected: 'recoverable', basis: 'resolved' });
     expect(set.cases[0]!.evidence).toContain('Stopping early counts as partial when the gap is named.');
   });
 

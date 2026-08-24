@@ -73,7 +73,7 @@ describe('the anthropic drafter', () => {
         JSON.stringify({
           name: 'Refund rubric',
           preamble: 'Decide whether the refund was handled.',
-          scale: [{ label: 'fail' }, { label: 'partial' }, { label: 'pass' }],
+          scale: [{ label: 'fail' }, { label: 'recoverable' }, { label: 'pass' }],
           criteria: [{ title: 'Names the amount', body: 'The agent states the refunded amount.' }],
           openQuestions: [{ question: 'Is an escalation a pass?', why: 'Only one example escalates.' }],
         }),

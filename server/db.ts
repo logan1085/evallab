@@ -44,9 +44,40 @@ CREATE TABLE IF NOT EXISTS graders (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
+  -- A grader is a seat at the table. kind 'human' is a person; 'panelist' is
+  -- a model wearing a perspective; 'owner' is the user grading their ten.
+  -- The blind-round machinery treats all three identically, which is the point.
+  kind        TEXT NOT NULL DEFAULT 'human',
+  objective   TEXT NOT NULL DEFAULT '',
+  fails_for   TEXT NOT NULL DEFAULT '',
+  model       TEXT NOT NULL DEFAULT '',
+  family      TEXT NOT NULL DEFAULT '',
+  origin      TEXT NOT NULL DEFAULT 'user',
+  archetype_id TEXT,
+  weight      REAL NOT NULL DEFAULT 1,
+  same_family_as_sut BOOLEAN NOT NULL DEFAULT FALSE,
   created_at  TEXT NOT NULL,
   UNIQUE (project_id, name)
 );
+
+/*
+ * Every edit to the panel is a statement about what good means, made before a
+ * single case is graded. Deleting the cost seat says tokens are not quality
+ * here. These are first-class records: they feed the rubric diff and ship in
+ * the export as the panel's provenance.
+ */
+CREATE TABLE IF NOT EXISTS panel_edits (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  seat_name   TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  before      TEXT NOT NULL DEFAULT '',
+  after       TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+
+
 
 CREATE TABLE IF NOT EXISTS traces (
   id          TEXT PRIMARY KEY,
@@ -182,12 +213,54 @@ CREATE INDEX IF NOT EXISTS idx_judge_verdicts_run ON judge_verdicts(run_id);
  * instance for any request.
  */
 const MIGRATIONS = `
+/*
+ * A proposed rubric sentence, mined from contested cases. The grounding rule
+ * is structural: a patch stores the verbatim reasons it quotes, and a patch
+ * that cannot quote at least two never reaches this table.
+ */
+CREATE TABLE IF NOT EXISTS patches (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  round_id    TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  text        TEXT NOT NULL,
+  evidence    TEXT NOT NULL DEFAULT '[]',
+  seats_sided TEXT NOT NULL DEFAULT '[]',
+  projected_lift REAL,
+  status      TEXT NOT NULL DEFAULT 'proposed',
+  resolved_rubric_version_id TEXT,
+  created_at  TEXT NOT NULL
+);
+
+/*
+ * The ten cases the user grades themselves, after the round closes. Kept apart
+ * from grades so the closed-round guard (nobody grades after seeing results)
+ * still holds for the panel while the owner checks it.
+ */
+CREATE TABLE IF NOT EXISTS user_verdicts (
+  id          TEXT PRIMARY KEY,
+  round_id    TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  item_id     TEXT NOT NULL REFERENCES round_items(id) ON DELETE CASCADE,
+  verdict     TEXT NOT NULL,
+  reason      TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  UNIQUE (round_id, item_id)
+);
+
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE projects        ADD COLUMN IF NOT EXISTS description    TEXT NOT NULL DEFAULT '';
 ALTER TABLE traces          ADD COLUMN IF NOT EXISTS expected_verdict TEXT;
 ALTER TABLE traces          ADD COLUMN IF NOT EXISTS expected_reason  TEXT NOT NULL DEFAULT '';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS kind         TEXT NOT NULL DEFAULT 'human';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS objective    TEXT NOT NULL DEFAULT '';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS fails_for    TEXT NOT NULL DEFAULT '';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS model        TEXT NOT NULL DEFAULT '';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS family       TEXT NOT NULL DEFAULT '';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS origin       TEXT NOT NULL DEFAULT 'user';
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS archetype_id TEXT;
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS weight       REAL NOT NULL DEFAULT 1;
+ALTER TABLE graders         ADD COLUMN IF NOT EXISTS same_family_as_sut BOOLEAN NOT NULL DEFAULT FALSE;
 `;
 
 /** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */
