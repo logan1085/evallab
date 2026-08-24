@@ -199,7 +199,7 @@ export async function listPanelEdits(db: DB, projectId: string) {
 }
 
 export async function listGraders(db: DB, projectId: string): Promise<Grader[]> {
-  return (await db.all('SELECT * FROM graders WHERE project_id = ? ORDER BY created_at', projectId) as Row[]).map(
+  return (await db.all('SELECT * FROM graders WHERE project_id = ? ORDER BY created_at, id', projectId) as Row[]).map(
     toGrader,
   );
 }

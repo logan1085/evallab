@@ -49,14 +49,21 @@ function useDarkPage() {
   }, []);
 }
 
-/** Beats of the pinned sequence: the call lands, the test case appears, the punchline. */
-const BEATS = 3;
+const SEAT_VOTES = [
+  { who: 'The impatient user', chip: 'pass', chipClass: 'pass', said: 'The answer is up front. Nothing buried.' },
+  { who: 'The support lead', chip: 'recoverable', chipClass: 'partial', said: 'It hands work back. That is a follow-up ticket.' },
+  { who: 'The literalist', chip: 'fail', chipClass: 'fail', said: 'The rubric never says what partial completion counts as.' },
+] as const;
+
+/** Beats of the pinned sequence: three seats vote, then the punchline. */
+const BEATS = SEAT_VOTES.length + 1;
 
 const CAPTIONS = [
-  'Scroll. Read it the way a grader would.',
-  'Your call: naming the gap honestly is exactly what you want.',
-  <>And that is <b>a line your eval platform can run.</b></>,
-  <>And that is <b>a line your eval platform can run.</b></>,
+  'Scroll. The panel grades blind: no seat sees another seat\u2019s verdict.',
+  'The impatient user is satisfied.',
+  'The support lead sees a ticket.',
+  <>And the literalist finds it: <b>the rubric never decided this case.</b></>,
+  <>And the literalist finds it: <b>the rubric never decided this case.</b></>,
 ] as const;
 
 /**
@@ -111,9 +118,11 @@ function PinnedPoll() {
       <div className="l-stage">
         <div className="l-wrap">
           <div className="l-stage-head">
-            <span className="l-stage-title">One scenario, one call</span>
+            <span className="l-stage-title">One case, three stakes</span>
             <div className="l-tally" aria-hidden="true">
-              <span className="n-pass"><b>{beat >= 2 ? 1 : 0}</b> in the eval set</span>
+              <span className="n-pass"><b>{beat >= 1 ? 1 : 0}</b> pass</span>
+              <span className="n-partial"><b>{beat >= 2 ? 1 : 0}</b> recoverable</span>
+              <span className="n-fail"><b>{beat >= 3 ? 1 : 0}</b> fail</span>
             </div>
           </div>
 
@@ -128,25 +137,22 @@ function PinnedPoll() {
             </div>
 
             <div className="l-verdicts">
-              <div className="l-verdict" data-on={beat >= 1 ? '' : undefined}>
-                <div>
-                  <div className="l-who">Your call</div>
-                  <div className="l-said">It named exactly what it did not do. That is the behaviour I want.</div>
+              {SEAT_VOTES.map((v, i) => (
+                <div key={v.who} className="l-verdict" data-on={beat >= i + 1 ? '' : undefined}>
+                  <div>
+                    <div className="l-who">{v.who}</div>
+                    <div className="l-said">{v.said}</div>
+                  </div>
+                  <span className={`l-chip ${v.chipClass}`}>{v.chip}</span>
                 </div>
-                <span className="l-chip pass">pass</span>
-              </div>
-
-              <div className="l-json" data-on={beat >= 2 ? '' : undefined}>
-                <div className="l-trace-label">evalset.jsonl</div>
-                {'{"input": "Migrate the remaining twelve…", "expected": "pass", "why": "Named the gap honestly"}'}
-              </div>
+              ))}
             </div>
           </div>
 
           <p className="l-stage-foot">{CAPTIONS[beat]}</p>
           <p className="l-stage-punch" data-on={beat >= BEATS ? '' : undefined}>
-            You just wrote a test case. The rest of your eval set works the same way: your scenarios, your bar,
-            your words.
+            Where the panel splits is where your rubric is silent. The sentence it was missing is the product; the
+            score is the by-product.
           </p>
         </div>
       </div>
@@ -270,9 +276,9 @@ export function Home() {
 
   return (
     <main className="landing">
-      <nav className="l-nav" aria-label="Tacit">
+      <nav className="l-nav" aria-label="The Grading Room">
         <div className="l-wrap">
-          <span className="l-nav-mark">Tacit</span>
+          <span className="l-nav-mark">The Grading Room</span>
           <button
             className="l-nav-cta"
             onClick={() => document.getElementById('start')?.scrollIntoView({ behavior: 'smooth' })}
@@ -285,14 +291,14 @@ export function Home() {
       <section className="l-hero">
         <div className="l-wrap">
           <div className="l-name" data-reveal>
-            Tacit
+            The Grading Room
           </div>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            Write your own evals. <span className="l-mute">Not a vendor&rsquo;s.</span>
+            You can&rsquo;t recruit five experts. <span className="l-mute">Summon them.</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
-            Describe what your AI does. Tacit writes the hard scenarios, you say what should happen, and out comes
-            an eval set your AI is held to.
+            A panel of models with conflicting stakes grades your outputs blind. Where they split, your rubric is
+            silent. You leave with the missing sentence and an eval you own.
           </p>
           <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '180ms' }}>
             <button
@@ -314,11 +320,12 @@ export function Home() {
       <section className="l-section l-section--intro" id="how">
         <div className="l-wrap">
           <h2 className="l-h2" data-reveal>
-            Say what should happen. <span className="l-mute">It becomes a test.</span>
+            Disagreement is the signal.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '80ms' }}>
-            Tacit writes concrete scenarios: the clear cases, the boundary cases, the ones nobody imagined. You make
-            the call on each one, and your reasoning travels with it.
+            Each seat is a stake: one line of what it optimizes for, one line of what it fails an answer for. The
+            literalist grades only what the rubric says. Where the literalist and everyone else split, your rubric
+            is missing a sentence.
           </p>
         </div>
       </section>
@@ -331,8 +338,8 @@ export function Home() {
             Set up your company.
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
-            No form and no sign-up. Answer three questions, and you leave with scenarios written for your company.
-            Your project link is the only credential.
+            No form, no sign-up, no reviewers to schedule. Answer three questions and you leave with a rubric, a
+            case set, and a seated panel. Twenty minutes to an eval you own.
           </p>
 
           <ArrivalChat onError={setError} />
@@ -343,8 +350,8 @@ export function Home() {
 
       <div className="l-wrap">
         <div className="l-foot">
-          <span>Tacit</span>
-          <span>Write your own evals: your scenarios, your bar, your words.</span>
+          <span>The Grading Room</span>
+          <span>The rubric diff is the product. The score is the by-product.</span>
         </div>
       </div>
     </main>

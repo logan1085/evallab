@@ -153,7 +153,10 @@ export function offlineAdapter(): FamilyAdapter {
     model: 'simulated',
     real: false,
     async score(req) {
-      const h = hash(`${req.seat.name}|${req.caseId}`);
+      // Keyed on the title, not the id: ids are random per project, and a
+      // simulated panel must produce the identical round twice or the spec's
+      // own stability metric would read noise as instability.
+      const h = hash(`${req.seat.name}|${req.caseTitle}`);
       const text = req.caseContent.toLowerCase();
       const persona = `${req.seat.name} ${req.seat.objective} ${req.seat.failsFor}`.toLowerCase();
 

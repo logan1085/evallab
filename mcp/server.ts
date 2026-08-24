@@ -1,5 +1,5 @@
 /**
- * Tacit as a tool an agent can operate.
+ * The Grading Room as a tool an agent can operate.
  *
  * An agent is a real user of this product. It can read a company's policies,
  * pull transcripts, draft a rubric, open a round and read the report — all of

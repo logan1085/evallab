@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams, useSearchParams } from 'react-route
 import { recallKey, rememberKey } from './api';
 import { Home } from './pages/Home';
 import { ProjectPage } from './pages/Project';
+import { PanelRoundPage } from './pages/PanelRound';
 import { Masthead } from './ui';
 
 export function App() {
@@ -14,6 +15,14 @@ export function App() {
         element={
           <KeyGate>
             <ProjectPage />
+          </KeyGate>
+        }
+      />
+      <Route
+        path="/p/:slug/round/:roundId"
+        element={
+          <KeyGate>
+            <PanelRoundPage />
           </KeyGate>
         }
       />

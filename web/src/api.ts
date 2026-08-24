@@ -88,6 +88,43 @@ export interface RoundSummary extends Round {
   rubricVersion: number | null;
 }
 
+export interface SeatVoteView {
+  seatId: string;
+  seatName: string;
+  verdict: string;
+  reason: string;
+}
+
+export interface PanelCaseView {
+  itemId: string;
+  traceId: string;
+  title: string;
+  content: string;
+  votes: SeatVoteView[];
+  pattern: 'settled' | 'persona-driven' | 'contested' | 'blind-spot';
+  dissenter: string | null;
+  provisional: boolean;
+  checkedByOwner: boolean;
+}
+
+export interface PanelMapView {
+  round: { id: string; name: string; status: string };
+  seats: { id: string; name: string; family: string; model: string; objective: string }[];
+  cases: PanelCaseView[];
+  counts: { settled: number; personaDriven: number; contested: number; blindSpots: number };
+  agreement: { observed: number; alpha: number | null; ac1: number | null };
+  simulated: boolean;
+}
+
+export interface PatchView {
+  id: string;
+  text: string;
+  evidence: { itemId: string; seat: string; quote: string }[];
+  seatsSided: string[];
+  projectedLift: number | null;
+  status: 'proposed' | 'accepted' | 'rejected';
+}
+
 export interface ProjectView {
   project: Project;
   rubric: RubricVersion | null;
@@ -287,6 +324,89 @@ export const api = {
 
   evalsetUrl: (roundId: string, token: string) =>
     `/api/rounds/${roundId}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
+
+  generatePanel: (slug: string, token: string) =>
+    call<{ seats: Grader[]; families: string[]; familiesShort?: number; generated: boolean; real?: boolean }>(
+      `/projects/${slug}/panel`,
+      { method: 'POST', token },
+    ),
+
+  archetypes: (slug: string, token: string) =>
+    call<{ archetypes: { id: string; name: string; objective: string; failsFor: string }[] }>(
+      `/projects/${slug}/panel/archetypes`,
+      { token },
+    ),
+
+  addSeat: (
+    slug: string,
+    token: string,
+    body: { archetypeId?: string; name?: string; objective?: string; failsFor?: string; note?: string },
+  ) => call<{ seat: Grader }>(`/projects/${slug}/panel/seats`, { method: 'POST', token, body: json(body) }),
+
+  updateSeat: (
+    slug: string,
+    token: string,
+    seatId: string,
+    body: { name?: string; objective?: string; failsFor?: string; note?: string },
+  ) => call<{ seat: Grader }>(`/projects/${slug}/panel/seats/${seatId}`, { method: 'PATCH', token, body: json(body) }),
+
+  deleteSeat: (slug: string, token: string, seatId: string) =>
+    call<void>(`/projects/${slug}/panel/seats/${seatId}`, { method: 'DELETE', token }),
+
+  createPanelRound: (slug: string, token: string) =>
+    call<{ round: { id: string }; seats: { id: string; name: string }[]; cases: number }>(
+      `/projects/${slug}/panel-rounds`,
+      { method: 'POST', token },
+    ),
+
+  runSeat: (roundId: string, token: string, seatId: string) =>
+    call<{ seat: string; graded: number; simulated: boolean; closed: boolean }>(`/rounds/${roundId}/panel-run`, {
+      method: 'POST',
+      token,
+      body: json({ seatId }),
+    }),
+
+  panelMap: (roundId: string, token: string) => call<PanelMapView>(`/rounds/${roundId}/map`, { token }),
+
+  minePatches: (roundId: string, token: string) =>
+    call<{ patches: PatchView[]; dropped: number; contestedTotal?: number }>(`/rounds/${roundId}/patches`, {
+      method: 'POST',
+      token,
+    }),
+
+  decidePatch: (roundId: string, token: string, patchId: string, action: 'accept' | 'reject', text?: string) =>
+    call<{ patch: PatchView; rubric?: RubricVersion }>(`/rounds/${roundId}/patches/${patchId}`, {
+      method: 'PATCH',
+      token,
+      body: json({ action, text }),
+    }),
+
+  selfCheck: (roundId: string, token: string) =>
+    call<{ cases: { itemId: string; title: string; content: string; myVerdict: string | null; myReason: string }[]; done: number }>(
+      `/rounds/${roundId}/self-check`,
+      { token },
+    ),
+
+  submitSelfCheck: (roundId: string, token: string, body: { itemId: string; verdict: string; reason: string }) =>
+    call<{ ok: true }>(`/rounds/${roundId}/self-check`, { method: 'POST', token, body: json(body) }),
+
+  alignment: (roundId: string, token: string) =>
+    call<{
+      graded: number;
+      seats: { seatId: string; name: string; family: string; agree: number; total: number; rate: number | null }[];
+      falseSettles: { itemId: string; title: string; panelVerdict: string; yourVerdict: string; yourReason: string }[];
+    }>(`/rounds/${roundId}/alignment`, { token }),
+
+  bundle: (roundId: string, token: string) =>
+    call<{
+      project: { name: string; slug: string };
+      rubricMarkdown: string;
+      goldenJsonl: string;
+      judgeSystemPrompt: string;
+      panel: unknown[];
+      panelEdits: unknown[];
+      rerunScript: string;
+    }>(`/rounds/${roundId}/bundle`, { token }),
 
   setExpected: (slug: string, token: string, traceId: string, body: { verdict: string | null; reason: string }) =>
     call<{ trace: Trace }>(`/projects/${slug}/traces/${traceId}/expected`, { method: 'PATCH', token, body: json(body) }),

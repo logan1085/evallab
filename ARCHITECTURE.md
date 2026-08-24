@@ -1,5 +1,16 @@
 # Where this is going
 
+**Pivot four, the synthetic panel (spec v2).** The graders are models wearing
+perspectives: a seat is a model, a perspective, and a stake, stored as a
+grader of kind panelist, which is why the blind-round machinery needed no
+changes to serve it. The flow is create (rubric, cases, panel, all editable),
+run (every seat grades every case, blind, self-closing), read the map
+(settled-but-provisional, persona-driven, contested, blind spots), mine the
+diff (clauses gated on quoting two verdict reasons verbatim), grade your ten
+(who speaks for you, false settles), export the bundle. Human seats return
+later as a mode, which is what pivot one built and pivot three parked.
+
+
 **Pivot three, recorded.** The polls are off the stage. The launch product is
 single-player: describe your AI, scenarios are written, you make the call on
 each (verdict plus a written reason), and the eval set exports with your

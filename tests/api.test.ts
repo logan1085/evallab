@@ -677,7 +677,7 @@ describe('operating documents', () => {
 
     const docs = (await auth(request(app).get(`/api/projects/${project.slug}/documents`)).expect(200)).body.documents;
     expect(docs).toHaveLength(2);
-    expect(docs.map((d: { kind: string }) => d.kind)).toEqual(['policy', 'sop']);
+    expect(docs.map((d: { kind: string }) => d.kind).sort()).toEqual(['policy', 'sop']);
 
     // The whole reason documents live in their own table: a policy in someone's
     // grading queue is nonsense, and the trace count must not move.

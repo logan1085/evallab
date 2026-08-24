@@ -1,25 +1,37 @@
-# Tacit
+# The Grading Room
 
-Extract your company's experience into evals.
+You cannot recruit five domain experts to argue about your outputs. You can
+summon them.
 
-Describe what your AI does. Tacit writes the hard scenarios (the clear cases,
-the boundary cases, the ones your documents never imagined), you say what
-should happen on each one, and out comes an eval set: a `.jsonl` your eval
-platform can run today, where every test case carries your own reasoning,
-plus a judge prompt built from your standards.
+Describe what you are building. The Grading Room drafts a rubric, writes the
+hard cases, and seats a panel of models with conflicting stakes: the impatient
+user, the safety reviewer, the domain stickler, the support lead, and always
+the literalist, who grades only what the rubric says and refuses to fill gaps
+with judgment. The panel grades blind. Where it splits, your rubric is silent,
+and the product's output is not the score: it is the sentence your rubric was
+missing, quoted verbatim from the room, plus a golden set and a judge prompt
+you own and can re-run forever.
 
-A blind team-polling mode (rounds, agreement measurement, held-out arms,
-disagreement resolution) is built, tested, and dormant: it lives in the HTTP
-API and the MCP server but is not surfaced in the product while the launch
-focus is the single-player tool.
+Then you grade ten cases yourself. Where you disagree with a unanimous panel
+is a rubric clause no panel could have found, because it lives in your head or
+your business. That list ships with the bundle, and nothing you overruled ever
+exports as golden.
+
+Every seat is editable before anything runs, and every edit is recorded as
+signal about what good means for your project. Without model API keys the
+whole loop runs against a deterministic simulation that is labeled simulated
+on every surface: the flow is real, the verdicts are not, and the product says
+so instead of pretending.
+
+Verdicts are pass, recoverable, fail. Agreement reports Gwet's AC1 beside
+Krippendorff's alpha, because under the skewed pass rates of a working system
+alpha collapses toward zero and reads as no agreement while the room agrees on
+nearly everything.
 
 ```
 npm install
-npm run seed     # demo project: 12 transcripts, 3 graders, round 1 already graded
 npm run dev      # http://localhost:5173
 ```
-
-`npm run seed` prints a shared link. Open it.
 
 ## Deploying it
 

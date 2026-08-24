@@ -64,7 +64,7 @@ export function Masthead({
     <header className="masthead">
       <div className="stamp">
         <span>
-          <b>Tacit</b>
+          <b>The Grading Room</b>
         </span>
         {crumbs.map((crumb, i) =>
           typeof crumb === 'string' ? (

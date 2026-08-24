@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
 import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
 import { api, recallKey, type DraftResponse, type ProjectView } from '../api';
@@ -27,8 +27,7 @@ export function ProjectPage() {
 
   const link = `${window.location.origin}/p/${data.project.slug}?k=${data.project.token}`;
   const traces = tracesQ.data?.traces ?? [];
-  const answered = traces.filter((t) => t.expectedVerdict).length;
-  const scale = [...(data.rubric?.scale ?? [])].sort((a, b) => b.rank - a.rank);
+  const seats = data.graders.filter((g) => g.kind === 'panelist');
   const refresh = () => {
     tracesQ.reload();
     reload();
@@ -39,7 +38,7 @@ export function ProjectPage() {
       <Masthead
         crumbs={[{ label: 'Home', to: '/' }, data.project.name]}
         title={data.project.name}
-        standfirst={`${traces.length} scenario${traces.length === 1 ? '' : 's'} · ${answered} answered`}
+        standfirst={`${traces.length} case${traces.length === 1 ? '' : 's'} · panel of ${seats.length} · standards v${data.rubric?.version ?? 1}`}
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
@@ -61,35 +60,11 @@ export function ProjectPage() {
         </div>
       </div>
 
-      {/* The deliverable, and the one number that matters on this page. */}
-      <div className="panel">
-        <div className="between">
-          <div>
-            <h3 style={{ margin: 0 }}>Your eval set</h3>
-            <p className="note" style={{ margin: '6px 0 0' }}>
-              {answered === 0
-                ? 'Answer your first scenario below and this becomes downloadable.'
-                : `${answered} test case${answered === 1 ? '' : 's'} ready, each carrying your reasoning. Unanswered scenarios stay out.`}
-            </p>
-          </div>
-          <div className="shrink">
-            {answered > 0 ? (
-              <a className="btn" href={api.soloEvalsetUrl(slug!, token)} download>
-                Download (.jsonl)
-              </a>
-            ) : (
-              <button disabled title="Answer a scenario first">
-                Download (.jsonl)
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      <PanelSection slug={slug!} token={token} seats={seats} caseCount={traces.length} onChange={reload} onError={setError} />
 
       <TracesTab
         slug={slug!}
         token={token}
-        scale={scale}
         traces={traces}
         loading={tracesQ.loading}
         onChange={refresh}
@@ -106,6 +81,226 @@ export function ProjectPage() {
         <RubricTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} />
       </details>
     </main>
+  );
+}
+
+/* ---- The panel ----------------------------------------------------------- */
+
+/**
+ * The seats, shown before anything runs, every one editable. Opacity here
+ * would be fatal: the user has to be able to say "that seat is not a real
+ * stakeholder for me" and delete it, and every edit is captured as signal.
+ */
+function PanelSection({
+  slug,
+  token,
+  seats,
+  caseCount,
+  onChange,
+  onError,
+}: {
+  slug: string;
+  token: string;
+  seats: ProjectView['graders'];
+  caseCount: number;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ name: '', objective: '', failsFor: '' });
+  const [adding, setAdding] = useState(false);
+  const [archetypes, setArchetypes] = useState<{ id: string; name: string; objective: string; failsFor: string }[]>([]);
+  const navigate = useNavigate();
+
+  async function generate() {
+    setBusy('generate');
+    try {
+      await api.generatePanel(slug, token);
+      onChange();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not seat the panel.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function run() {
+    setBusy('run');
+    try {
+      const res = await api.createPanelRound(slug, token);
+      navigate(`/p/${slug}/round/${res.round.id}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not start the round.');
+      setBusy(null);
+    }
+  }
+
+  async function loadArchetypes() {
+    setAdding(true);
+    if (archetypes.length === 0) {
+      try {
+        setArchetypes((await api.archetypes(slug, token)).archetypes);
+      } catch (err) {
+        onError(err instanceof Error ? err.message : 'Could not load the library.');
+      }
+    }
+  }
+
+  if (seats.length === 0) {
+    return (
+      <div className="panel">
+        <div className="between">
+          <div>
+            <h3 style={{ margin: 0 }}>Your panel</h3>
+            <p className="note" style={{ margin: '6px 0 0' }}>
+              Five perspectives with conflicting stakes, generated for your project, plus the literalist, who grades
+              only what the rubric says. Where the literalist and everyone else split, your rubric is missing a
+              sentence.
+            </p>
+          </div>
+          <div className="shrink">
+            <button onClick={generate} disabled={busy !== null}>
+              {busy === 'generate' ? 'Seating…' : 'Seat the panel'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel">
+      <div className="between">
+        <div>
+          <h3 style={{ margin: 0 }}>Your panel</h3>
+          <p className="note" style={{ margin: '6px 0 0' }}>
+            Every seat is editable, and every edit counts as signal about what good means for you. Deleting the cost
+            seat says tokens are not quality here.
+          </p>
+        </div>
+        <div className="shrink">
+          <button onClick={run} disabled={busy !== null || caseCount < 2 || seats.length < 3}>
+            {busy === 'run' ? 'Starting…' : 'Run the panel'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 12, marginTop: 14 }}>
+        {seats.map((seat) => (
+          <div key={seat.id} style={{ background: 'var(--sunk)', borderRadius: 14, padding: '14px 16px' }}>
+            {editing === seat.id ? (
+              <>
+                <input
+                  value={draft.name}
+                  onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                  aria-label="Seat name"
+                  style={{ marginBottom: 6, width: '100%' }}
+                />
+                <textarea
+                  rows={2}
+                  value={draft.objective}
+                  onChange={(e) => setDraft((d) => ({ ...d, objective: e.target.value }))}
+                  aria-label="What this seat optimizes for"
+                  style={{ marginBottom: 6, width: '100%' }}
+                />
+                <textarea
+                  rows={2}
+                  value={draft.failsFor}
+                  onChange={(e) => setDraft((d) => ({ ...d, failsFor: e.target.value }))}
+                  aria-label="What it fails an answer for"
+                  style={{ marginBottom: 6, width: '100%' }}
+                />
+                <button
+                  className="tiny-btn"
+                  onClick={async () => {
+                    try {
+                      await api.updateSeat(slug, token, seat.id, draft);
+                      setEditing(null);
+                      onChange();
+                    } catch (err) {
+                      onError(err instanceof Error ? err.message : 'Could not save the seat.');
+                    }
+                  }}
+                >
+                  Save
+                </button>{' '}
+                <button className="ghost tiny-btn" onClick={() => setEditing(null)}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="between">
+                  <strong style={{ fontSize: 15 }}>{seat.name}</strong>
+                  <span className="tiny shrink">{seat.family === 'offline' ? 'simulated' : seat.family}</span>
+                </div>
+                <p className="tiny" style={{ margin: '6px 0 0' }}>{seat.objective}</p>
+                <p className="tiny" style={{ margin: '4px 0 8px', opacity: 0.75 }}>{seat.failsFor}</p>
+                <button
+                  className="ghost tiny-btn"
+                  onClick={() => {
+                    setEditing(seat.id);
+                    setDraft({ name: seat.name, objective: seat.objective, failsFor: seat.failsFor });
+                  }}
+                >
+                  edit
+                </button>{' '}
+                <button
+                  className="ghost tiny-btn"
+                  onClick={async () => {
+                    try {
+                      await api.deleteSeat(slug, token, seat.id);
+                      onChange();
+                    } catch (err) {
+                      onError(err instanceof Error ? err.message : 'Could not remove the seat.');
+                    }
+                  }}
+                >
+                  remove
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {adding ? (
+        <div style={{ marginTop: 12 }}>
+          <span className="metric-k">From the library</span>
+          <div className="pill-row" style={{ marginTop: 8 }}>
+            {archetypes
+              .filter((a) => !seats.some((s) => s.archetypeId === a.id))
+              .map((a) => (
+                <button
+                  key={a.id}
+                  className="pill"
+                  title={`${a.objective} ${a.failsFor}`}
+                  onClick={async () => {
+                    try {
+                      await api.addSeat(slug, token, { archetypeId: a.id });
+                      onChange();
+                    } catch (err) {
+                      onError(err instanceof Error ? err.message : 'Could not add the seat.');
+                    }
+                  }}
+                >
+                  {a.name}
+                </button>
+              ))}
+          </div>
+          <button className="ghost tiny-btn" style={{ marginTop: 8 }} onClick={() => setAdding(false)}>
+            done
+          </button>
+        </div>
+      ) : (
+        <p style={{ margin: '12px 0 0' }}>
+          <button className="ghost tiny-btn" onClick={loadArchetypes}>
+            add a seat
+          </button>
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -330,7 +525,6 @@ function ScenarioWriter({
 function TracesTab({
   slug,
   token,
-  scale,
   traces,
   loading,
   onChange,
@@ -338,35 +532,17 @@ function TracesTab({
 }: {
   slug: string;
   token: string;
-  scale: VerdictLevel[];
   traces: Trace[];
   loading: boolean;
   onChange: () => void;
   onError: (m: string) => void;
 }) {
-  const [reasons, setReasons] = useState<Record<string, string>>({});
   const [format, setFormat] = useState<'paste' | 'jsonl' | 'csv'>('paste');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const stubScenarios = traces.filter((t) => t.meta?.generated === true && t.meta?.real === false).length;
-  const reasonFor = (t: Trace) => reasons[t.id] ?? t.expectedReason;
-
-  async function save(trace: Trace, verdict: string | null) {
-    try {
-      await api.setExpected(slug, token, trace.id, { verdict, reason: reasonFor(trace) });
-      onChange();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not save that call.');
-    }
-  }
-
-  async function saveReason(trace: Trace) {
-    if (!trace.expectedVerdict) return;
-    if (reasonFor(trace) === trace.expectedReason) return;
-    await save(trace, trace.expectedVerdict);
-  }
 
   async function importTraces(e: React.FormEvent) {
     e.preventDefault();
@@ -411,11 +587,7 @@ function TracesTab({
               <div className="panel" key={trace.id}>
                 <div className="between" style={{ marginBottom: 8 }}>
                   <h3 style={{ margin: 0 }}>{trace.title}</h3>
-                  <span className="tiny shrink">
-                    {trace.expectedVerdict
-                      ? `answered · ${sourceLabel(trace.source)}`
-                      : sourceLabel(trace.source)}
-                  </span>
+                  <span className="tiny shrink">{sourceLabel(trace.source)}</span>
                 </div>
                 {probe ? (
                   <p className="tiny" style={{ marginTop: 0 }}>
@@ -423,33 +595,6 @@ function TracesTab({
                   </p>
                 ) : null}
                 <div className="transcript" style={{ maxHeight: 220 }}>{trace.content}</div>
-
-                <span className="metric-k" style={{ display: 'block', marginTop: 14 }}>
-                  What should happen here?
-                </span>
-                <div className="verdict-picker" style={{ marginTop: 8 }}>
-                  {scale.map((level) => (
-                    <button
-                      key={level.id}
-                      className={trace.expectedVerdict === level.id ? 'selected' : ''}
-                      onClick={() => save(trace, trace.expectedVerdict === level.id ? null : level.id)}
-                    >
-                      {level.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="field" style={{ marginTop: 12, marginBottom: 0 }}>
-                  <label htmlFor={`why-${trace.id}`}>Why? Your words go on the test case.</label>
-                  <textarea
-                    id={`why-${trace.id}`}
-                    rows={2}
-                    value={reasonFor(trace)}
-                    placeholder="Because naming the gap honestly is the behaviour we want."
-                    onChange={(e) => setReasons((r) => ({ ...r, [trace.id]: e.target.value }))}
-                    onBlur={() => saveReason(trace)}
-                  />
-                </div>
 
                 <p className="tiny" style={{ margin: '10px 0 0' }}>
                   <button
