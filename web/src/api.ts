@@ -396,7 +396,19 @@ export const api = {
       graded: number;
       seats: { seatId: string; name: string; family: string; agree: number; total: number; rate: number | null }[];
       falseSettles: { itemId: string; title: string; panelVerdict: string; yourVerdict: string; yourReason: string }[];
+      falseSettleRate: number | null;
+      settledChecked: number;
+      humanCeiling: number;
     }>(`/rounds/${roundId}/alignment`, { token }),
+
+  reweight: (roundId: string, token: string) =>
+    call<{ changes: { seat: string; from: number; to: number }[] }>(`/rounds/${roundId}/reweight`, {
+      method: 'POST',
+      token,
+    }),
+
+  falseSettlePatch: (roundId: string, token: string, itemId: string) =>
+    call<{ patch: PatchView }>(`/rounds/${roundId}/false-settle-patch`, { method: 'POST', token, body: json({ itemId }) }),
 
   bundle: (roundId: string, token: string) =>
     call<{

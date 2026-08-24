@@ -355,6 +355,29 @@ function SelfCheckSection({
       {alignment && alignment.graded > 0 ? (
         <>
           <h3>Who speaks for you</h3>
+          <p className="note">
+            Benchmarked against the 81 percent that expert humans reach with each other, never against 100. A seat
+            near the ceiling speaks for you about as well as another person could.
+          </p>
+          <p style={{ margin: '0 0 12px' }}>
+            <button
+              className="ghost"
+              onClick={async () => {
+                try {
+                  const res = await api.reweight(roundId, token);
+                  onError(
+                    res.changes.length === 0
+                      ? 'No weights changed: the panel already matches your taste.'
+                      : `Reweighted: ${res.changes.map((c) => `${c.seat} ${c.from} to ${c.to}`).join(', ')}. Applies to future rounds; history keeps its weights.`,
+                  );
+                } catch (err) {
+                  onError(err instanceof Error ? err.message : 'Could not reweight.');
+                }
+              }}
+            >
+              Reweight the panel toward the seats that share your taste
+            </button>
+          </p>
           <div className="scroll-x">
             <table>
               <thead>
@@ -386,7 +409,22 @@ function SelfCheckSection({
                 <p style={{ margin: '6px 0 0' }}>
                   The whole panel said {f.panelVerdict}; you said {f.yourVerdict}.
                   {f.yourReason ? ` Your reason: “${f.yourReason}”` : ''} This is a rubric sentence only you could
-                  have written. Add it to your standards.
+                  have written.
+                </p>
+                <p style={{ margin: '10px 0 0' }}>
+                  <button
+                    className="ghost tiny-btn"
+                    onClick={async () => {
+                      try {
+                        await api.falseSettlePatch(roundId, token, f.itemId);
+                        onError('Turned into a proposed patch. Find it in the missing-sentences list above.');
+                      } catch (err) {
+                        onError(err instanceof Error ? err.message : 'Could not make the patch.');
+                      }
+                    }}
+                  >
+                    Make it a rubric patch
+                  </button>
                 </p>
               </div>
             ))

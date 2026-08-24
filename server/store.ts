@@ -378,6 +378,7 @@ export async function createRubricVersion(
     openQuestions?: DraftQuestion[];
     conflicts?: DraftConflict[];
     draftedFrom?: DraftProvenance | null;
+    changelog?: string;
   },
 ): Promise<RubricVersion> {
   const maxRow = await db.get('SELECT COALESCE(MAX(version), 0) AS v FROM rubric_versions WHERE project_id = ?', args.projectId) as Row;
@@ -400,8 +401,8 @@ export async function createRubricVersion(
   };
 
   await db.run(`INSERT INTO rubric_versions
-       (id, project_id, version, parent_version_id, name, preamble, scale, criteria, open_questions, conflicts, drafted_from, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, rubric.id,
+       (id, project_id, version, parent_version_id, name, preamble, scale, criteria, open_questions, conflicts, drafted_from, changelog, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, rubric.id,
     rubric.projectId,
     rubric.version,
     rubric.parentVersionId,
@@ -412,6 +413,7 @@ export async function createRubricVersion(
     JSON.stringify(rubric.openQuestions),
     JSON.stringify(rubric.conflicts),
     rubric.draftedFrom ? JSON.stringify(rubric.draftedFrom) : null,
+    args.changelog ?? '',
     rubric.createdAt,);
 
   const clauses = args.clauses ?? [];
@@ -1089,4 +1091,9 @@ export async function outputLengthsByGrader(db: DB, roundId: string) {
     verdict: str(r.verdict),
     outputLength: Number(r.output_length ?? 0),
   }));
+}
+
+
+export async function setRoundFalseSettleRate(db: DB, roundId: string, rate: number | null): Promise<void> {
+  await db.run('UPDATE rounds SET false_settle_rate = ? WHERE id = ?', rate, roundId);
 }

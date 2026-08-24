@@ -1013,6 +1013,25 @@ export function createApp(db: DB) {
       else freeContested.push(d);
     }
 
+    // Projected lift is a real recomputation, not an estimate: rebuild the
+    // verdict units with the patch's covered cases decided the way the patch
+    // decides them, and diff the agreement statistic (AC1, the skew-honest
+    // one) against today's. A fixture pins that it moves when coverage moves.
+    const scale = (await store.getRubric(db, round.rubricVersionId))?.scale.map((l) => l.id) ?? ['fail', 'recoverable', 'pass'];
+    const allUnits: { itemId: string; unit: string[] }[] = [];
+    for (const item of items) {
+      allUnits.push({ itemId: item.id, unit: (byItem.get(item.id) ?? []).map((g) => g.verdict) });
+    }
+    const currentAC1 = gwetAC1(allUnits.map((u) => u.unit), scale);
+    const liftFor = (coveredItemIds: Set<string>, decidedVerdict: string): number | null => {
+      if (currentAC1 === null) return null;
+      const patched = allUnits.map((u) =>
+        coveredItemIds.has(u.itemId) ? u.unit.map(() => decidedVerdict) : u.unit,
+      );
+      const next = gwetAC1(patched, scale);
+      return next === null ? null : next - currentAC1;
+    };
+
     let dropped = 0;
     const stored = [];
 
@@ -1033,7 +1052,10 @@ export function createApp(db: DB) {
           text,
           evidence,
           seatsSided: [seat.name],
-          projectedLift: contestedTotal === 0 ? null : group.length / contestedTotal,
+          projectedLift: liftFor(
+            new Set(group.map((g) => g.itemId)),
+            group[0]!.votes.find((v) => v.seatId === seatId)?.verdict ?? 'recoverable',
+          ),
         }),
       );
     }
@@ -1051,11 +1073,48 @@ export function createApp(db: DB) {
             text: `The rubric does not decide cases like "${freeContested[0]!.title}". Add one sentence saying which stake wins there, then re-run the panel on the contested cases.`,
             evidence,
             seatsSided: [],
-            projectedLift: contestedTotal === 0 ? null : freeContested.length / contestedTotal,
+            projectedLift: liftFor(
+              new Set(freeContested.map((g) => g.itemId)),
+              freeContested[0]!.votes[0]?.verdict ?? 'pass',
+            ),
           }),
         );
       } else {
         dropped++;
+      }
+    }
+
+    // The deleted-seat signal: an edit is a statement, and a deleted seat
+    // whose stake keeps showing up in contested reasons is a flag that the
+    // user cut a stakeholder who mattered. Surfaced with that framing, under
+    // the same grounding gate as everything else.
+    const edits = await store.listPanelEdits(db, round.projectId);
+    for (const edit of edits.filter((e) => e.action === 'delete')) {
+      const stakeWords = edit.before
+        .toLowerCase()
+        .split(/\W+/)
+        .filter((w) => w.length > 5);
+      const hits: { itemId: string; seat: string; quote: string }[] = [];
+      for (const d of disputed) {
+        for (const v of d.votes) {
+          if (stakeWords.some((w) => v.reason.toLowerCase().includes(w))) {
+            hits.push({ itemId: d.itemId, seat: v.seatName, quote: v.reason });
+            break;
+          }
+        }
+      }
+      const evidence = groundEvidence(hits, reasonIndex).slice(0, 3);
+      if (evidence.length >= 2) {
+        stored.push(
+          await store.insertPatch(db, {
+            projectId: round.projectId,
+            roundId: round.id,
+            text: `You removed the seat "${edit.seatName}", but its stake keeps appearing in the room's contested reasons. Decide it on purpose: either write its rule into the rubric, or write down that it does not count.`,
+            evidence,
+            seatsSided: [edit.seatName],
+            projectedLift: null,
+          }),
+        );
       }
     }
 
@@ -1097,6 +1156,7 @@ export function createApp(db: DB) {
         { id: newId(), title: 'From the panel', body: text },
       ],
       parentVersionId: current.id,
+      changelog: `From ${round.name}: added "${text}"`,
     });
     await store.setPatchStatus(db, patch.id, 'accepted', next.id);
     res.json({ patch: { ...patch, status: 'accepted', resolvedRubricVersionId: next.id }, rubric: next });
@@ -1211,7 +1271,123 @@ export function createApp(db: DB) {
         });
       }
     }
-    res.json({ graded: userVerdicts.length, seats: perSeat, falseSettles });
+    // The product's honest headline number, recorded on the round: of the
+    // cases the panel unanimously settled and the owner checked, what share
+    // did the owner overrule?
+    const settledChecked = userVerdicts.filter((uv) => {
+      const votes = byItem.get(uv.itemId) ?? [];
+      return votes.length >= 2 && new Set(votes.map((v) => v.verdict)).size === 1;
+    }).length;
+    const falseSettleRate = settledChecked === 0 ? null : falseSettles.length / settledChecked;
+    await store.setRoundFalseSettleRate(db, round.id, falseSettleRate);
+
+    res.json({
+      graded: userVerdicts.length,
+      seats: perSeat,
+      falseSettles,
+      falseSettleRate,
+      settledChecked,
+      // Benchmarked against what expert humans reach with each other, never
+      // against 100 (MT-Bench: human-human expert agreement 81%).
+      humanCeiling: 0.81,
+    });
+  });
+
+  /**
+   * Reweight the panel toward the seats that share the owner's taste. Applied
+   * to future rounds only; historical rounds keep the weights they ran with,
+   * and every change lands in the panel's edit provenance.
+   */
+  api.post('/rounds/:roundId/reweight', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const userVerdicts = await store.listUserVerdicts(db, round.id);
+    if (userVerdicts.length === 0) {
+      return res.status(409).json({ error: 'Grade your ten first; reweighting without your verdicts would be circular.' });
+    }
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const grades = (await store.allGradesForRound(db, round.id)).filter((g) => seatIds.has(g.graderId));
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+
+    const changes = [];
+    for (const seat of seats) {
+      let agree = 0;
+      let total = 0;
+      for (const uv of userVerdicts) {
+        const g = (byItem.get(uv.itemId) ?? []).find((x) => x.graderId === seat.id);
+        if (!g) continue;
+        total++;
+        if (g.verdict === uv.verdict) agree++;
+      }
+      if (total === 0) continue;
+      const weight = Math.max(0.25, Math.round((agree / total) * 100) / 100);
+      if (weight !== seat.weight) {
+        await store.setSeatWeight(db, seat.id, weight);
+        await store.recordPanelEdit(db, {
+          projectId: round.projectId,
+          seatName: seat.name,
+          action: 'reweight',
+          before: `weight ${seat.weight}`,
+          after: `weight ${weight} (agreed with you on ${agree} of ${total})`,
+          note: 'Reweighted toward the seats that share your taste.',
+        });
+        changes.push({ seat: seat.name, from: seat.weight, to: weight });
+      }
+    }
+    res.json({ changes });
+  });
+
+  /**
+   * A false settle becomes a rubric patch in one click. The user's own reason
+   * is the first quote; the panel's unanimous reason is the second, so even
+   * this patch passes the grounding gate rather than being exempt from it.
+   */
+  api.post('/rounds/:roundId/false-settle-patch', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const body = z.object({ itemId: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'Which case?' });
+
+    const uv = (await store.listUserVerdicts(db, round.id)).find((v) => v.itemId === body.data.itemId);
+    if (!uv) return res.status(404).json({ error: 'You have not graded that case.' });
+    if (!uv.reason.trim() || uv.reason.trim().length < 12) {
+      return res.status(400).json({ error: 'Write a sentence of reason on your grade first; the patch quotes it verbatim.' });
+    }
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const seatById = new Map(seats.map((s) => [s.id, s]));
+    const votes = (await store.allGradesForRound(db, round.id)).filter(
+      (g) => g.itemId === body.data.itemId && seatIds.has(g.graderId),
+    );
+    const distinct = new Set(votes.map((v) => v.verdict));
+    if (votes.length < 2 || distinct.size !== 1 || distinct.has(uv.verdict)) {
+      return res.status(409).json({ error: 'That case is not a false settle: the panel did not unanimously disagree with you.' });
+    }
+    const item = await store.getItem(db, body.data.itemId);
+    const trace = item ? await store.getTrace(db, item.traceId) : null;
+    const reasonIndex = new Map<string, string>([
+      [`${body.data.itemId}|You`, uv.reason.trim()],
+      ...votes.map((v) => [`${body.data.itemId}|${seatById.get(v.graderId)?.name ?? 'seat'}`, v.note] as [string, string]),
+    ]);
+    const evidence = groundEvidence(
+      [
+        { itemId: body.data.itemId, seat: 'You', quote: uv.reason.trim() },
+        { itemId: body.data.itemId, seat: seatById.get(votes[0]!.graderId)?.name ?? 'seat', quote: votes[0]!.note },
+      ],
+      reasonIndex,
+    );
+    if (!patchIsGrounded(evidence)) {
+      return res.status(400).json({ error: 'Could not ground this patch in the recorded reasons.' });
+    }
+    const patch = await store.insertPatch(db, {
+      projectId: round.projectId,
+      roundId: round.id,
+      text: `Cases like "${trace?.title ?? 'this one'}" are ${uv.verdict}, not ${votes[0]!.verdict}, because: ${uv.reason.trim()} The panel could not have known this; it is your business, so it belongs in the rubric.`,
+      evidence,
+      seatsSided: ['You'],
+      projectedLift: null,
+    });
+    res.status(201).json({ patch });
   });
 
   /**

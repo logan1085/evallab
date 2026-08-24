@@ -97,7 +97,9 @@ describe('the synthetic panel', () => {
       expect(c.provisional).toBe(true);
     }
 
-    // 5. Patches: grounded in verbatim quotes or not shown.
+    // 5. Patches: grounded in verbatim quotes or not shown, and lift is a
+    // real recomputation of AC1, not a coverage ratio: a diff, so it can be
+    // negative or positive, but it is always a number when AC1 exists.
     const mined = (await auth(request(app).post(`/api/rounds/${created.round.id}/patches`)).expect(201)).body;
     for (const p of mined.patches) {
       expect(p.evidence.length).toBeGreaterThanOrEqual(2);
@@ -105,6 +107,20 @@ describe('the synthetic panel', () => {
         const c = map.cases.find((x: { itemId: string }) => x.itemId === e.itemId);
         const vote = c.votes.find((v: { seatName: string }) => v.seatName === e.seat);
         expect(vote.reason).toContain(e.quote);
+      }
+      if (p.projectedLift !== null) {
+        expect(typeof p.projectedLift).toBe('number');
+        expect(Math.abs(p.projectedLift)).toBeLessThanOrEqual(2);
+      }
+    }
+    // Theater splits never become patches: no patch may cover a theater case
+    // as a persona patch (deleted-seat and contested framing are separate).
+    const theaterItems = new Set(
+      map.cases.filter((c: { theater: boolean }) => c.theater).map((c: { itemId: string }) => c.itemId),
+    );
+    for (const p of mined.patches.filter((x: { seatsSided: string[] }) => x.seatsSided.length === 1 && x.seatsSided[0] !== 'You')) {
+      if (p.text.startsWith('Decide ')) {
+        for (const e of p.evidence) expect(theaterItems.has(e.itemId)).toBe(false);
       }
     }
 
@@ -134,9 +150,29 @@ describe('the synthetic panel', () => {
     const alignment = (await auth(request(app).get(`/api/rounds/${created.round.id}/alignment`)).expect(200)).body;
     expect(alignment.graded).toBe(check.cases.length);
     expect(alignment.seats.length).toBe(5);
+    expect(alignment.humanCeiling).toBe(0.81);
     if (settledCase && check.cases.some((c: { itemId: string }) => c.itemId === settledCase.itemId)) {
       expect(alignment.falseSettles.length).toBeGreaterThanOrEqual(1);
       expect(alignment.falseSettles[0].yourReason).toBe('My business says otherwise.');
+      expect(alignment.falseSettleRate).toBeGreaterThan(0);
+
+      // One click turns the false settle into a grounded patch quoting the
+      // owner's own reason.
+      const fsPatch = (
+        await auth(request(app).post(`/api/rounds/${created.round.id}/false-settle-patch`))
+          .send({ itemId: alignment.falseSettles[0].itemId })
+          .expect(201)
+      ).body.patch;
+      expect(fsPatch.text).toContain('My business says otherwise.');
+      expect(fsPatch.evidence.some((e: { seat: string }) => e.seat === 'You')).toBe(true);
+    }
+
+    // Reweighting moves seat weights toward who speaks for the owner, and
+    // records every change as provenance.
+    const reweight = (await auth(request(app).post(`/api/rounds/${created.round.id}/reweight`)).expect(200)).body;
+    for (const change of reweight.changes) {
+      expect(change.to).toBeGreaterThanOrEqual(0.25);
+      expect(change.to).toBeLessThanOrEqual(1);
     }
 
     // 7. The bundle: files, and a false settle never ships as golden.
@@ -144,7 +180,12 @@ describe('the synthetic panel', () => {
     expect(bundle.rubricMarkdown.length).toBeGreaterThan(50);
     expect(bundle.judgeSystemPrompt.length).toBeGreaterThan(50);
     expect(bundle.panel.length).toBe(5);
-    expect(bundle.panelEdits.length).toBe(2); // the rewrite and the delete
+    // The rewrite, the delete, and the reweight actions above all land in
+    // the provenance the bundle ships.
+    expect(bundle.panelEdits.length).toBeGreaterThanOrEqual(2);
+    const actions = bundle.panelEdits.map((e: { action: string }) => e.action);
+    expect(actions).toContain('rewrite');
+    expect(actions).toContain('delete');
     expect(bundle.rerunScript).toContain('panel-run');
     for (const line of bundle.goldenJsonl.split('\n').filter(Boolean)) {
       const parsed = JSON.parse(line);
