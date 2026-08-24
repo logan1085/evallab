@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   agreementStats,
   bootstrapCI,
+  ac1Explained,
+  alphaExplained,
   coverageStats,
   gwetAC1,
+  gwetAC1Variance,
   krippendorffAlpha,
+  lengthPassCorrelation,
   observedAgreement,
 } from '@shared/metrics.js';
 import { ABSTAIN, DEFAULT_SCALE, type ItemVerdicts } from '@shared/types.js';
@@ -276,5 +280,57 @@ describe("Gwet's AC1", () => {
     // pe = (7/12)(5/12) + (5/12)(7/12) = 70/144 = 0.48611
     // ac1 = (0.83333 - 0.48611) / (1 - 0.48611) = 0.67567...
     expect(ac1).toBeCloseTo(0.6757, 3);
+  });
+});
+
+describe("AC1's variance (Gwet 2008)", () => {
+  it('matches a fully hand-derived example to four decimals', () => {
+    // Six units, two raters, q=2: five (pass,pass) and one (pass,fail).
+    // pa=5/6; prevalence pass 11/12, fail 1/12; pe=22/144=0.152778;
+    // AC1=0.803279. Item linearizations: agreeing items 1.032249, the split
+    // -0.341573 (arithmetic in the review notes); their mean recovers AC1,
+    // and v = (1/30)[5(0.228970)^2 + (1.144852)^2] = 0.052427.
+    const units = [...Array.from({ length: 5 }, () => ['pass', 'pass']), ['pass', 'fail']];
+    const v = gwetAC1Variance(units, ['fail', 'pass'])!;
+    expect(v).toBeCloseTo(0.0524, 4);
+  });
+
+  it('shrinks with more data and is null below the unit gate', () => {
+    const base = [...Array.from({ length: 5 }, () => ['pass', 'pass']), ['pass', 'fail']];
+    const more = [...base, ...base, ...base, ...base];
+    expect(gwetAC1Variance(more, ['fail', 'pass'])!).toBeLessThan(gwetAC1Variance(base, ['fail', 'pass'])!);
+    expect(gwetAC1Variance([['pass', 'pass']], ['fail', 'pass'])).toBeNull();
+  });
+});
+
+describe('the verbosity readout', () => {
+  it('sees a seat that rewards length', () => {
+    const pairs = [
+      { outputLength: 100, pass: false },
+      { outputLength: 200, pass: false },
+      { outputLength: 900, pass: true },
+      { outputLength: 1100, pass: true },
+    ];
+    expect(lengthPassCorrelation(pairs).value!).toBeGreaterThan(0.8);
+  });
+
+  it('says why when it cannot be computed', () => {
+    expect(lengthPassCorrelation([]).reason).toContain('fewer than four');
+    expect(
+      lengthPassCorrelation([
+        { outputLength: 5, pass: true },
+        { outputLength: 5, pass: false },
+        { outputLength: 5, pass: true },
+        { outputLength: 5, pass: false },
+      ]).reason,
+    ).toContain('same length');
+  });
+});
+
+describe('typed undefined statistics', () => {
+  it('returns the reason instead of NaN', () => {
+    expect(alphaExplained([['pass', 'pass']], CATS).reason).toContain('fewer than');
+    expect(ac1Explained([['pass', 'pass']], CATS).reason).toContain('fewer than');
+    expect(ac1Explained(Array.from({ length: 6 }, () => ['pass', 'pass', 'pass']), CATS).value).toBeCloseTo(1, 6);
   });
 });

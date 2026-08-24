@@ -103,6 +103,7 @@ export interface PanelCaseView {
   votes: SeatVoteView[];
   pattern: 'settled' | 'persona-driven' | 'contested' | 'blind-spot';
   dissenter: string | null;
+  theater: boolean;
   provisional: boolean;
   checkedByOwner: boolean;
 }

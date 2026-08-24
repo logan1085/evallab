@@ -47,7 +47,7 @@ import {
   krippendorffAlpha,
 } from '../shared/index.js';
 import { ARCHETYPES, REQUIRED_SEAT, archetype } from '../shared/panel.js';
-import { groundEvidence, patchIsGrounded, readCase, type SeatVote } from '../shared/panelmap.js';
+import { groundEvidence, isTheater, patchIsGrounded, readCase, type SeatVote } from '../shared/panelmap.js';
 
 interface ProjectRequest extends Request {
   project: Project;
@@ -857,6 +857,15 @@ export function createApp(db: DB) {
     }
     const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
     const seatById = new Map(seats.map((s) => [s.id, s]));
+    // Seats from the system-under-test's family are excluded from the pattern
+    // math by default (self-preference contaminates the obvious setup); the
+    // toggle shows what changes, it does not change the default.
+    const includeSameFamily = req.query.includeSameFamily === '1';
+    const scoringSeatIds = new Set(
+      seats.filter((s) => includeSameFamily || !s.sameFamilyAsSut).map((s) => s.id),
+    );
+    const literalistName =
+      seats.find((s) => s.archetypeId === 'literalist' || /literalist/i.test(s.name))?.name ?? null;
     const items = await store.listItems(db, round.id);
     const grades = await store.allGradesForRound(db, round.id);
     const byItem = new Map<string, typeof grades>();
@@ -878,8 +887,13 @@ export function createApp(db: DB) {
         verdict: g.verdict,
         reason: g.note,
       }));
-      const reading = readCase(item.id, votes);
-      units.push(votes.map((v) => v.verdict));
+      const scoringVotes = votes.filter((v) => scoringSeatIds.has(v.seatId));
+      const reading = readCase(item.id, scoringVotes);
+      const theater =
+        reading.pattern === 'persona-driven' && reading.dissenter
+          ? isTheater(scoringVotes, reading.dissenter, literalistName)
+          : false;
+      units.push(scoringVotes.map((v) => v.verdict));
       cases.push({
         itemId: item.id,
         traceId: item.traceId,
@@ -888,6 +902,7 @@ export function createApp(db: DB) {
         votes,
         pattern: reading.pattern,
         dissenter: reading.dissenter,
+        theater,
         provisional: reading.provisional && !checked.has(item.id),
         checkedByOwner: checked.has(item.id),
       });
@@ -913,8 +928,11 @@ export function createApp(db: DB) {
         model: s.model,
         objective: s.objective,
         weight: s.weight,
+        sameFamilyAsSut: s.sameFamilyAsSut,
+        excludedFromSettled: !scoringSeatIds.has(s.id),
         selfConsistency: consistencyBySeat.get(s.id) ?? null,
       })),
+      includeSameFamily,
       cases,
       counts,
       agreement: {
@@ -968,6 +986,12 @@ export function createApp(db: DB) {
       }));
       for (const v of votes) reasonIndex.set(`${item.id}|${v.seatName}`, v.reason);
       const reading = readCase(item.id, votes);
+      const litName = seats.find((s) => s.archetypeId === 'literalist' || /literalist/i.test(s.name))?.name ?? null;
+      const theater =
+        reading.pattern === 'persona-driven' && reading.dissenter
+          ? isTheater(votes, reading.dissenter, litName)
+          : false;
+      if (theater) continue; // shown on the map, never mined into the rubric
       if (reading.pattern === 'persona-driven' || reading.pattern === 'contested') {
         contestedTotal++;
         const trace = await store.getTrace(db, item.traceId);

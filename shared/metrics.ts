@@ -314,3 +314,119 @@ export function gwetAC1(units: Unit[], categories: string[]): number | null {
   if (pe >= 1) return null;
   return (pa - pe) / (1 - pe);
 }
+
+/**
+ * Variance of Gwet's AC1, per Gwet (2008), "Computing inter-rater reliability
+ * and its variance in the presence of high agreement", Brit. J. Math. Stat.
+ * Psychol. 61: the linearized item-level estimator, no finite-population
+ * correction. Reported so an interval can sit next to the point estimate the
+ * same way alpha's bootstrap interval does.
+ */
+export function gwetAC1Variance(units: Unit[], categories: string[]): number | null {
+  const usable = units.filter((u) => u.filter((v) => v !== ABSTAIN).length >= 2);
+  const n = usable.length;
+  if (n < MIN_UNITS_FOR_ALPHA) return null;
+  const q = categories.length;
+  if (q < 2) return null;
+
+  // Prevalence pi_k as the mean of within-item shares, which is the paper's
+  // construction and what makes the linearization below exact.
+  const itemShares: Map<string, number>[] = [];
+  for (const unit of usable) {
+    const values = unit.filter((v) => v !== ABSTAIN);
+    const shares = new Map<string, number>();
+    for (const cat of categories) {
+      shares.set(cat, values.filter((v) => v === cat).length / values.length);
+    }
+    itemShares.push(shares);
+  }
+  const prevalence = new Map<string, number>();
+  for (const cat of categories) {
+    prevalence.set(cat, itemShares.reduce((s, m) => s + (m.get(cat) ?? 0), 0) / n);
+  }
+
+  let pe = 0;
+  for (const cat of categories) {
+    const pik = prevalence.get(cat)!;
+    pe += pik * (1 - pik);
+  }
+  pe /= q - 1;
+  if (pe >= 1) return null;
+
+  const paItems = usable.map((unit) => {
+    const values = unit.filter((v) => v !== ABSTAIN);
+    let agreeing = 0;
+    for (const cat of categories) {
+      const k = values.filter((v) => v === cat).length;
+      agreeing += k * (k - 1);
+    }
+    return agreeing / (values.length * (values.length - 1));
+  });
+  const pa = paItems.reduce((s, x) => s + x, 0) / n;
+  const ac1 = (pa - pe) / (1 - pe);
+
+  const starred = usable.map((unit, i) => {
+    let pei = 0;
+    for (const cat of categories) {
+      pei += (itemShares[i]!.get(cat) ?? 0) * (1 - prevalence.get(cat)!);
+    }
+    pei /= q - 1;
+    const ac1i = (paItems[i]! - pe) / (1 - pe);
+    return ac1i - 2 * (1 - ac1) * ((pei - pe) / (1 - pe));
+  });
+  const mean = starred.reduce((s, x) => s + x, 0) / n;
+  const variance = starred.reduce((s, x) => s + (x - mean) ** 2, 0) / (n * (n - 1));
+  return variance;
+}
+
+/**
+ * Pearson correlation between graded-output length and pass rate, per seat:
+ * the verbosity-bias readout. Positive and large means the seat rewards long
+ * outputs. Typed null when it cannot be computed, with the reason.
+ */
+export function lengthPassCorrelation(
+  pairs: { outputLength: number; pass: boolean }[],
+): { value: number | null; reason: string | null } {
+  if (pairs.length < 4) return { value: null, reason: 'fewer than four verdicts' };
+  const xs = pairs.map((p) => p.outputLength);
+  const ys: number[] = pairs.map((p) => (p.pass ? 1 : 0));
+  const mx = xs.reduce((s, x) => s + x, 0) / xs.length;
+  const my = ys.reduce((s, y) => s + y, 0) / ys.length;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < xs.length; i++) {
+    sxy += (xs[i]! - mx) * (ys[i]! - my);
+    sxx += (xs[i]! - mx) ** 2;
+    syy += (ys[i]! - my) ** 2;
+  }
+  if (sxx === 0) return { value: null, reason: 'every output has the same length' };
+  if (syy === 0) return { value: null, reason: 'every verdict is the same' };
+  return { value: sxy / Math.sqrt(sxx * syy), reason: null };
+}
+
+/** Typed wrappers: a statistic that cannot be computed says why, never NaN. */
+export function alphaExplained(
+  units: Unit[],
+  categories: string[],
+  metric: 'nominal' | 'ordinal' = 'nominal',
+): { value: number | null; reason: string | null } {
+  const usable = units.filter((u) => u.filter((v) => v !== ABSTAIN).length >= 2);
+  if (usable.length < MIN_UNITS_FOR_ALPHA) {
+    return { value: null, reason: `fewer than ${MIN_UNITS_FOR_ALPHA} comparable cases` };
+  }
+  const value = krippendorffAlpha(units, categories, metric);
+  return value === null ? { value: null, reason: 'agreement is undefined on this data' } : { value, reason: null };
+}
+
+export function ac1Explained(
+  units: Unit[],
+  categories: string[],
+): { value: number | null; reason: string | null } {
+  const usable = units.filter((u) => u.filter((v) => v !== ABSTAIN).length >= 2);
+  if (usable.length < MIN_UNITS_FOR_ALPHA) {
+    return { value: null, reason: `fewer than ${MIN_UNITS_FOR_ALPHA} comparable cases` };
+  }
+  const value = gwetAC1(units, categories);
+  return value === null ? { value: null, reason: 'agreement is undefined on this data' } : { value, reason: null };
+}

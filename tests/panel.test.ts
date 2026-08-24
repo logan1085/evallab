@@ -3,7 +3,7 @@
  * keeps proposed rubric language attached to what the seats actually said.
  */
 import { describe, expect, it } from 'vitest';
-import { readCase, reasonsCompatible, groundEvidence, patchIsGrounded, type SeatVote } from '../shared/panelmap.js';
+import { readCase, reasonsCompatible, groundEvidence, isTheater, patchIsGrounded, type SeatVote } from '../shared/panelmap.js';
 import { ARCHETYPES, REQUIRED_SEAT, archetype } from '../shared/panel.js';
 
 const vote = (seatName: string, verdict: string, reason: string): SeatVote => ({
@@ -106,5 +106,30 @@ describe('the archetype library', () => {
       expect(a.objective.length).toBeGreaterThan(10);
       expect(a.failsFor.length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe('the literalist test', () => {
+  const votes = (literalistVerdict: string, dissenterVerdict: string): SeatVote[] => [
+    vote('The literalist', literalistVerdict, 'By the letter.'),
+    vote('The impatient user', 'pass', 'Fast.'),
+    vote('The support lead', 'pass', 'Closed.'),
+    vote('The safety reviewer', dissenterVerdict, 'Risky.'),
+  ];
+
+  it('marks a split as theater when the rubric alone decided the case', () => {
+    expect(isTheater(votes('pass', 'fail'), 'The safety reviewer', 'The literalist')).toBe(true);
+  });
+
+  it('keeps a split the literalist corroborates', () => {
+    expect(isTheater(votes('fail', 'fail'), 'The safety reviewer', 'The literalist')).toBe(false);
+  });
+
+  it('a literalist dissent is never theater: it IS the instrument reading', () => {
+    expect(isTheater(votes('fail', 'pass'), 'The literalist', 'The literalist')).toBe(false);
+  });
+
+  it('no literalist seated means no theater verdicts at all', () => {
+    expect(isTheater(votes('pass', 'fail'), 'The safety reviewer', null)).toBe(false);
   });
 });

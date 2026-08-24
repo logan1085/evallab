@@ -166,7 +166,10 @@ export function PanelRoundPage() {
                   {c.pattern === 'settled' ? (
                     <span className="tiny shrink">{c.checkedByOwner ? 'checked by you' : 'provisional'}</span>
                   ) : c.dissenter ? (
-                    <span className="tiny shrink">dissenter: {c.dissenter}</span>
+                    <span className="tiny shrink">
+                      dissenter: {c.dissenter}
+                      {c.theater ? ' · theater: the rubric as written decided this, so it will not become a patch' : ''}
+                    </span>
                   ) : null}
                 </div>
                 <details style={{ margin: '8px 0' }}>

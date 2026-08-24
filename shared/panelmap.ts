@@ -128,3 +128,28 @@ export function groundEvidence(
 export function patchIsGrounded(evidence: PatchEvidence[]): boolean {
   return evidence.length >= 2 && new Set(evidence.map((e) => e.seat)).size >= 1 && new Set(evidence.map((e) => e.itemId)).size >= 1;
 }
+
+
+/**
+ * The literalist test, from the spec's honest-limits section: give a model an
+ * adversarial seat and it will find fault, because that is what you asked
+ * for. A persona-driven split becomes a rubric patch only if a careful reader
+ * of the rubric alone might have decided the case differently, and the
+ * literalist seat is that reader. If the literalist sided with the majority,
+ * the rubric as written decided the case, and the split is theater: shown,
+ * never mined.
+ */
+export function isTheater(
+  votes: SeatVote[],
+  dissenterName: string,
+  literalistName: string | null,
+): boolean {
+  if (!literalistName) return false;
+  if (dissenterName === literalistName) return false;
+  const literalist = votes.find((v) => v.seatName === literalistName);
+  const dissenter = votes.find((v) => v.seatName === dissenterName);
+  if (!literalist || !dissenter) return false;
+  // Sided with the dissenter: the rubric alone also failed to decide it.
+  if (literalist.verdict === dissenter.verdict) return false;
+  return true;
+}
