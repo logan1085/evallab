@@ -20,6 +20,7 @@ import { JudgeError, mapLimit, resolveProvider } from './judge.js';
 import { DrafterError, resolveDrafter } from './drafter.js';
 import { resolveScenarist } from './scenarist.js';
 import { adapterFor, availableFamilies, resolvePanelWriter } from './panelists.js';
+import { createSpendGuard } from './spend.js';
 import {
   ABSTAIN,
   DEFAULT_SCALE,
@@ -711,6 +712,17 @@ export function createApp(db: DB) {
     const adapter = adapterFor(seat.family);
     const items = await store.listItems(db, round.id);
 
+    // The gateway context for this seat: telemetry, the spend guard, and the
+    // user's own key when they sent one. The key lives in this request and
+    // nowhere else.
+    const byok = req.header('x-openrouter-key');
+    const gateway = {
+      ...(byok ? { apiKey: byok } : {}),
+      recorder: (a: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, a),
+      guard: createSpendGuard(db),
+      roundId: round.id,
+    };
+
     // Case order shuffled per seat (position bias): a cheap deterministic
     // shuffle keyed on the seat id.
     const shuffled = [...items].sort((a, b) => {
@@ -725,13 +737,41 @@ export function createApp(db: DB) {
     await mapLimit(shuffled, 6, async (item) => {
       const trace = await store.getTrace(db, item.traceId);
       if (!trace) return;
-      const verdict = await adapter.score({
-        seat,
-        rubricMarkdown,
-        caseId: item.traceId,
-        caseTitle: trace.title,
-        caseContent: trace.content,
-      });
+      const verdict = await adapter.score(
+        {
+          seat,
+          rubricMarkdown,
+          caseId: item.traceId,
+          caseTitle: trace.title,
+          caseContent: trace.content,
+        },
+        gateway,
+      );
+      if (!adapter.real) {
+        // The simulation records telemetry too, at zero cost, so the running
+        // cost machinery is exercised on every surface it will later report.
+        await store.recordModelCall(db, {
+          call_id: `sim_${item.id}_${seat.id}`,
+          attempt_no: 1,
+          caller_kind: 'grader',
+          round_id: round.id,
+          panelist_id: seat.id,
+          case_id: item.traceId,
+          pin_id: 'simulated',
+          model_family: 'offline',
+          openrouter_model_id: 'simulated',
+          provider_slug: null,
+          prompt_tokens: Math.ceil(trace.content.length / 4),
+          completion_tokens: 24,
+          total_tokens: Math.ceil(trace.content.length / 4) + 24,
+          cost_credits: 0,
+          upstream_inference_cost: null,
+          generation_id: null,
+          latency_ms: 0,
+          http_status: 200,
+          error_kind: null,
+        });
+      }
       await store.submitGrade(db, {
         itemId: item.id,
         graderId: seat.id,
@@ -747,7 +787,14 @@ export function createApp(db: DB) {
     const complete = seats.every((s) => (progress.find((p) => p.graderId === s.id)?.done ?? 0) >= items.length);
     if (complete) await store.closeRound(db, round.id);
 
-    res.json({ seat: seat.name, graded, simulated: !adapter.real, closed: complete });
+    const cost = await store.costForRound(db, round.id);
+    res.json({
+      seat: seat.name,
+      graded,
+      simulated: !adapter.real,
+      closed: complete,
+      cost: { totalCredits: cost.totalCredits, totalTokens: cost.totalTokens },
+    });
   });
 
   /**

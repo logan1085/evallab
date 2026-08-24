@@ -246,6 +246,39 @@ CREATE TABLE IF NOT EXISTS user_verdicts (
   UNIQUE (round_id, item_id)
 );
 
+/*
+ * One row per model-call attempt, retries and failures included, with the
+ * numbers read straight off the router's usage object and never recomputed.
+ * Nothing is rolled up: a round's spend is summed from these rows at read
+ * time, the same rule as agreement. No foreign keys on purpose: a call made
+ * while a round is being torn down still deserves its record.
+ */
+CREATE TABLE IF NOT EXISTS model_call (
+  id            TEXT PRIMARY KEY,
+  call_id       TEXT NOT NULL,
+  attempt_no    INTEGER NOT NULL,
+  caller_kind   TEXT NOT NULL,
+  round_id      TEXT,
+  panelist_id   TEXT,
+  case_id       TEXT,
+  pin_id        TEXT NOT NULL,
+  model_family  TEXT NOT NULL,
+  openrouter_model_id TEXT NOT NULL,
+  provider_slug TEXT,
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens  INTEGER NOT NULL DEFAULT 0,
+  cost_credits  DOUBLE PRECISION NOT NULL DEFAULT 0,
+  upstream_inference_cost DOUBLE PRECISION,
+  generation_id TEXT,
+  latency_ms    INTEGER NOT NULL DEFAULT 0,
+  http_status   INTEGER,
+  error_kind    TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_model_call_round ON model_call(round_id);
+CREATE INDEX IF NOT EXISTS idx_model_call_round_seat ON model_call(round_id, panelist_id);
+
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';

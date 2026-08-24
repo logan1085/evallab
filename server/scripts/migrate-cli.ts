@@ -24,6 +24,7 @@ const EXPECTED_TABLES = [
   'panel_edits',
   'patches',
   'user_verdicts',
+  'model_call',
   'judge_verdicts',
 ];
 

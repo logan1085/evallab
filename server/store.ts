@@ -969,3 +969,71 @@ export async function listUserVerdicts(db: DB, roundId: string) {
     reason: str(row.reason),
   }));
 }
+
+
+/* ---- Model-call telemetry ------------------------------------------------- */
+
+export async function recordModelCall(db: DB, a: {
+  call_id: string; attempt_no: number; caller_kind: string;
+  round_id: string | null; panelist_id: string | null; case_id: string | null;
+  pin_id: string; model_family: string; openrouter_model_id: string; provider_slug: string | null;
+  prompt_tokens: number; completion_tokens: number; total_tokens: number;
+  cost_credits: number; upstream_inference_cost: number | null; generation_id: string | null;
+  latency_ms: number; http_status: number | null; error_kind: string | null;
+}): Promise<void> {
+  await db.run(
+    `INSERT INTO model_call (id, call_id, attempt_no, caller_kind, round_id, panelist_id, case_id, pin_id, model_family,
+       openrouter_model_id, provider_slug, prompt_tokens, completion_tokens, total_tokens, cost_credits,
+       upstream_inference_cost, generation_id, latency_ms, http_status, error_kind, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    newId(), a.call_id, a.attempt_no, a.caller_kind, a.round_id, a.panelist_id, a.case_id, a.pin_id, a.model_family,
+    a.openrouter_model_id, a.provider_slug, a.prompt_tokens, a.completion_tokens, a.total_tokens, a.cost_credits,
+    a.upstream_inference_cost, a.generation_id, a.latency_ms, a.http_status, a.error_kind, now(),
+  );
+}
+
+export interface CostSummary {
+  totalCredits: number;
+  totalTokens: number;
+  byPin: { pinId: string; tokens: number; credits: number }[];
+  attempts: number;
+}
+
+function toCostSummary(rows: Row[]): CostSummary {
+  const byPin = new Map<string, { tokens: number; credits: number }>();
+  let credits = 0;
+  let tokens = 0;
+  for (const r of rows) {
+    credits += Number(r.cost_credits ?? 0);
+    tokens += Number(r.total_tokens ?? 0);
+    const key = str(r.pin_id);
+    const agg = byPin.get(key) ?? { tokens: 0, credits: 0 };
+    agg.tokens += Number(r.total_tokens ?? 0);
+    agg.credits += Number(r.cost_credits ?? 0);
+    byPin.set(key, agg);
+  }
+  return {
+    totalCredits: credits,
+    totalTokens: tokens,
+    byPin: [...byPin.entries()].map(([pinId, v]) => ({ pinId, ...v })),
+    attempts: rows.length,
+  };
+}
+
+export async function costForRound(db: DB, roundId: string): Promise<CostSummary> {
+  return toCostSummary(await db.all('SELECT * FROM model_call WHERE round_id = ?', roundId) as Row[]);
+}
+
+export async function costForPanelist(db: DB, roundId: string, panelistId: string): Promise<CostSummary> {
+  return toCostSummary(
+    await db.all('SELECT * FROM model_call WHERE round_id = ? AND panelist_id = ?', roundId, panelistId) as Row[],
+  );
+}
+
+export async function dailySpend(db: DB): Promise<number> {
+  const cutoff = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+  const row = await db.get(
+    'SELECT COALESCE(SUM(cost_credits), 0) AS c FROM model_call WHERE created_at >= ?', cutoff,
+  ) as Row;
+  return Number(row.c ?? 0);
+}

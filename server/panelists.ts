@@ -24,6 +24,8 @@ import {
 } from '../shared/panel.js';
 import { DrafterError } from './drafter.js';
 import { OPENROUTER_MODELS, openrouterJson, openrouterKey } from './openrouter.js';
+import { callModel, type GatewayOptions } from './gateway.js';
+import { pinsByFamily } from './pins.js';
 
 export interface SeatVerdict {
   verdict: 'pass' | 'recoverable' | 'fail';
@@ -42,7 +44,7 @@ export interface FamilyAdapter {
   family: string;
   model: string;
   real: boolean;
-  score(req: ScoreRequest): Promise<SeatVerdict>;
+  score(req: ScoreRequest, gateway?: GatewayOptions): Promise<SeatVerdict>;
 }
 
 const ANTHROPIC_PANEL_MODEL = process.env.GR_PANEL_MODEL_ANTHROPIC ?? 'claude-haiku-4-5-20251001';
@@ -70,20 +72,27 @@ export function availableFamilies(): FamilyAdapter[] {
 }
 
 function openrouterAdapter(family: 'anthropic' | 'openai' | 'google'): FamilyAdapter {
-  const model = OPENROUTER_MODELS[family]!;
+  const pin = pinsByFamily('small').get(family)!;
   return {
     family,
-    model,
+    model: pin.openrouter_model_id,
     real: true,
-    async score(req) {
-      const parsed = await openrouterJson<unknown>({
-        model: req.seat.model.includes('/') ? req.seat.model : model,
-        system: buildSeatSystemPrompt(req.seat, req.rubricMarkdown),
-        user: `Case: ${req.caseTitle}\n\n${req.caseContent}`,
-        schema: SEAT_VERDICT_SCHEMA,
-        maxTokens: 300,
-      });
-      return normalizeVerdict(parsed);
+    async score(req, gateway = {}) {
+      const result = await callModel(
+        {
+          pin_id: pin.pin_id,
+          messages: [
+            { role: 'system', content: buildSeatSystemPrompt(req.seat, req.rubricMarkdown) },
+            { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
+          ],
+          max_tokens: 300,
+          response_format: { type: 'json_schema', json_schema: { name: 'verdict', strict: true, schema: SEAT_VERDICT_SCHEMA } },
+          caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.caseId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
+        },
+        gateway,
+      );
+      if (result.error) throw new DrafterError('api', result.error.message);
+      return normalizeVerdict(JSON.parse(result.text));
     },
   };
 }
