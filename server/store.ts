@@ -33,7 +33,16 @@ import {
 type Row = Record<string, unknown>;
 
 const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
-const num = (v: unknown, fallback = 0): number => (typeof v === 'number' ? v : fallback);
+// Postgres drivers disagree on aggregates: BIGINT and NUMERIC can arrive as
+// strings. The driver normalizes them, and this coerces rather than zeroes as
+// a second line of defense, because "COUNT came back as text" must never read
+// as "nobody graded anything".
+const num = (v: unknown, fallback = 0): number => {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v);
+  return fallback;
+};
 const nullable = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
 function parseJson<T>(v: unknown, fallback: T): T {

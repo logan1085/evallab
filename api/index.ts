@@ -18,7 +18,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createApp } from '../server/app.js';
-import { openDb } from '../server/db.js';
+import { openDb, resolveConnection } from '../server/db.js';
 
 let cached: Promise<ReturnType<typeof createApp>> | null = null;
 
@@ -34,7 +34,25 @@ function app() {
   return cached;
 }
 
+/**
+ * The in-memory fallback that makes `npm run dev` work with nothing installed
+ * is a data-loss bug in production: each serverless instance gets its own
+ * empty database, so a project created on one instance does not exist on the
+ * next, and every secret link dies on reload. Refusing every write-path
+ * request with the fix spelled out beats losing someone's project silently.
+ * /api/health stays reachable so the misconfiguration is diagnosable.
+ */
+const NO_DB =
+  'This deployment has no database, so nothing can be saved. In Vercel: Storage, then Create Database, then Neon Postgres. That sets DATABASE_URL automatically; redeploy and this message goes away.';
+
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
+  const path = (req.url ?? '').split('?')[0] ?? '';
+  if (process.env.VERCEL && !resolveConnection().url && path !== '/api/health') {
+    res.statusCode = 503;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ error: NO_DB }));
+    return;
+  }
   try {
     (await app())(req, res);
   } catch (error) {

@@ -398,6 +398,13 @@ async function pgliteDb(): Promise<DB> {
 
 async function poolDb(connectionString: string): Promise<DB> {
   const pg = await import('pg');
+  // node-postgres hands back BIGINT (every COUNT, every SUM over integers) and
+  // NUMERIC as strings, because they can exceed 2^53. PGlite hands back
+  // numbers, so the difference only shows in production, where it once kept a
+  // finished round from ever reading as complete. Nothing in this schema
+  // counts past 2^53; parse them as numbers so both drivers agree.
+  pg.default.types.setTypeParser(20, (v: string) => Number(v));
+  pg.default.types.setTypeParser(1700, (v: string) => Number(v));
   const pool = new pg.default.Pool({
     connectionString,
     // Serverless functions open connections fast and hold them briefly; a

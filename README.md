@@ -373,5 +373,9 @@ Known limits of this version, stated rather than managed away:
 - Judge runs are capped at 16 items because they run inside the request. A
   queue is the fix and is not built.
 - The deployment has been verified against PGlite (real Postgres, compiled to
-  WASM) and through the serverless entry over HTTP, but not yet against a
-  hosted Neon database on Vercel itself.
+  WASM) and against a real Postgres 16 server over the `pg` pool driver: the
+  full browser journey, plus create-project, kill the server, reopen the
+  secret link in a fresh browser. Not yet against a hosted Neon database on
+  Vercel itself. A deployment without a connection string refuses every
+  request with instructions rather than running in-memory and losing data;
+  `/api/health` reports which database is live.

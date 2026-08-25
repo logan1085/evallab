@@ -33,24 +33,20 @@ await page.waitForURL('**/p/**', { timeout: 30000 });
 await page.waitForTimeout(800);
 ok('project created from the conversation', page.url().includes('/p/'));
 
-// 2. Cases written; the panel offered. Real mode is detected, not assumed:
-// with keys there is no placeholder notice and the cases are bespoke.
+// 2 and 3. Cases written and the panel already seated: the interview promises
+// a rubric, a case set, and a seated panel, and the create call delivers all
+// three. Real mode is detected, not assumed: with keys there is no placeholder
+// notice and the cases are bespoke.
 const body0 = await page.textContent('body');
 const simulated = body0.includes('Placeholder scenarios');
 console.log(simulated ? 'MODE simulated (no keys)' : 'MODE real (keys present)');
 ok('cases written', /\d+ cases/.test(body0));
 if (simulated) ok('placeholder notice without a key', body0.includes('Placeholder scenarios'));
 else ok('no placeholder notice with keys', !body0.includes('Placeholder scenarios'));
-ok('panel offered before anything runs', body0.includes('Seat the panel'));
-
-// 3. Seat the panel; the seats are readable and labeled simulated.
-await page.getByRole('button', { name: 'Seat the panel' }).click();
-await page.waitForTimeout(1200);
-const body1 = await page.textContent('body');
-ok('literalist seated', body1.includes('The literalist'));
-if (simulated) ok('seats labeled simulated without keys', body1.includes('simulated'));
-else ok('seats carry real families with keys', /anthropic|openai|google/.test(body1));
-ok('panel of six in standfirst', body1.includes('panel of 6'));
+ok('literalist seated on arrival', body0.includes('The literalist'));
+if (simulated) ok('seats labeled simulated without keys', body0.includes('simulated'));
+else ok('seats carry real families with keys', /anthropic|openai|google/.test(body0));
+ok('panel of six in standfirst', body0.includes('panel of 6'));
 await page.screenshot({ path: `${out}/journey-panel.png`, fullPage: true });
 
 // 4. Run the round; per-seat progress, then the map.

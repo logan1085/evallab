@@ -3,11 +3,18 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { createApp } from './app.js';
-import { openDb } from './db.js';
+import { openDb, resolveConnection } from './db.js';
 
 const port = Number(process.env.PORT ?? 8787);
+const conn = resolveConnection();
 const db = await openDb();
 const app = createApp(db);
+
+if (conn.url) {
+  console.log(`Postgres via ${conn.via}${conn.pooled ? ' (pooled)' : ''}.`);
+} else {
+  console.log('No DATABASE_URL set: using in-memory Postgres. Every project is lost when this process ends.');
+}
 
 // In production the built SPA is served from the same origin, so a shared link
 // is one URL with no CORS story to get wrong.

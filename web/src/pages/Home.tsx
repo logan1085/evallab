@@ -228,7 +228,7 @@ function ArrivalChat({ onError }: { onError: (m: string) => void }) {
       return;
     }
 
-    say('Good. Writing your scenarios now\u2026');
+    say('Good. Writing your scenarios and seating your panel now\u2026');
     setBusy(true);
     const limits = done[2]!.toLowerCase() === 'skip' ? '' : ` Hard limits: ${done[2]}`;
     try {

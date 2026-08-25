@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { DB } from './db.js';
-import { newId, newSlug, newToken } from './db.js';
+import { newId, newSlug, newToken, resolveConnection } from './db.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
@@ -80,11 +80,24 @@ export function createApp(db: DB) {
 
   const api = express.Router();
 
-  /** Liveness plus a real read, so a wedged database fails the check. */
+  /**
+   * Liveness plus a real read, so a wedged database fails the check — and an
+   * honest answer to "will anything I make here survive?". The in-memory
+   * fallback is a developer convenience; reporting it as healthy in production
+   * would be lying, so a deployed instance without Postgres reads not-ok.
+   */
   api.get('/health', async (_req, res) => {
+    const conn = resolveConnection();
+    const deployed = !!process.env.VERCEL;
     try {
       await db.get('SELECT 1 AS ok');
-      res.json({ ok: true, judge: resolveProvider().id });
+      res.status(conn.url || !deployed ? 200 : 503).json({
+        ok: !!conn.url || !deployed,
+        judge: resolveProvider().id,
+        database: conn.url
+          ? { driver: 'postgres', via: conn.via, pooled: conn.pooled }
+          : { driver: 'memory', warning: 'No Postgres connection string set. Data is lost when the process ends.' },
+      });
     } catch (error) {
       res.status(503).json({ ok: false, error: error instanceof Error ? error.message : 'database unavailable' });
     }
@@ -176,7 +189,16 @@ export function createApp(db: DB) {
       }
     }
 
-    res.status(201).json({ project, rubric, scenarioCount, scenariosReal });
+    // The landing page promises a seated panel, so the panel is seated here,
+    // not left as a button. Best-effort for the same reason scenarios are.
+    let seatCount = 0;
+    try {
+      seatCount = (await seatPanel(project)).seats.length;
+    } catch {
+      // The Seat-the-panel button on the project page covers this path.
+    }
+
+    res.status(201).json({ project, rubric, scenarioCount, scenariosReal, seatCount });
   });
 
   api.post('/projects/demo', async (req, res) => {
@@ -513,13 +535,13 @@ export function createApp(db: DB) {
    * structurally rather than left to a model to propose. Idempotent: an
    * existing panel is returned, never silently regenerated over user edits.
    */
-  api.post('/projects/:slug/panel', requireProject, async (req, res) => {
-    const project = (req as ProjectRequest).project;
-    const existing = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
-    if (existing.length > 0) {
-      return res.json({ seats: existing, families: availableFamilies().map((f) => f.family), generated: false });
-    }
-
+  /**
+   * Seat a fresh panel: project-specific seats from the writer, spread across
+   * available model families, plus the literalist, which is seated structurally
+   * rather than left to a model to propose. Callers must check for an existing
+   * panel first; this never regenerates over user edits.
+   */
+  async function seatPanel(project: Project) {
     const families = availableFamilies();
     const writer = resolvePanelWriter();
     let proposed: { name: string; objective: string; failsFor: string }[];
@@ -554,12 +576,23 @@ export function createApp(db: DB) {
         }),
       );
     }
+    return { seats, families, real: writer.real };
+  }
+
+  api.post('/projects/:slug/panel', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const existing = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    if (existing.length > 0) {
+      return res.json({ seats: existing, families: availableFamilies().map((f) => f.family), generated: false });
+    }
+
+    const { seats, families, real } = await seatPanel(project);
     res.status(201).json({
       seats,
       families: families.map((f) => f.family),
       familiesShort: Math.max(0, 3 - new Set(families.filter((f) => f.real).map((f) => f.family)).size),
       generated: true,
-      real: writer.real,
+      real,
     });
   });
 

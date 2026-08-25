@@ -19,14 +19,22 @@ export function ProjectPage() {
   const token = recallKey(slug!) ?? '';
   const [error, setError] = useState<string | null>(null);
 
-  const { data, loading, reload } = useAsync<ProjectView>(() => api.project(slug!, token), [slug, token]);
+  const { data, error: loadError, loading, reload } = useAsync<ProjectView>(() => api.project(slug!, token), [slug, token]);
   const tracesQ = useAsync<{ traces: Trace[] }>(() => api.traces(slug!, token), [slug, token]);
 
   if (loading && !data) return <main className="sheet"><Loading what="project" /></main>;
-  if (!data) return <main className="sheet"><ErrorBanner message="Could not load this project." /></main>;
+  if (!data) {
+    // The server's own message names the cause (bad key, missing database);
+    // a generic line here would hide the one sentence that explains the fix.
+    return <main className="sheet"><ErrorBanner message={loadError ?? 'Could not load this project.'} /></main>;
+  }
 
   const link = `${window.location.origin}/p/${data.project.slug}?k=${data.project.token}`;
   const traces = tracesQ.data?.traces ?? [];
+  // The masthead counts come from the project view, which is server-computed
+  // and loaded before this renders; waiting on the separate traces fetch here
+  // would flash "0 cases" over a project that has eight.
+  const caseCount = tracesQ.data ? traces.length : data.traceCount;
   const seats = data.graders.filter((g) => g.kind === 'panelist');
   const refresh = () => {
     tracesQ.reload();
@@ -38,7 +46,7 @@ export function ProjectPage() {
       <Masthead
         crumbs={[{ label: 'Home', to: '/' }, data.project.name]}
         title={data.project.name}
-        standfirst={`${traces.length} case${traces.length === 1 ? '' : 's'} · panel of ${seats.length} · standards v${data.rubric?.version ?? 1}`}
+        standfirst={`${caseCount} case${caseCount === 1 ? '' : 's'} · panel of ${seats.length} · standards v${data.rubric?.version ?? 1}`}
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
@@ -60,7 +68,7 @@ export function ProjectPage() {
         </div>
       </div>
 
-      <PanelSection slug={slug!} token={token} seats={seats} caseCount={traces.length} onChange={reload} onError={setError} />
+      <PanelSection slug={slug!} token={token} seats={seats} caseCount={caseCount} onChange={reload} onError={setError} />
 
       <TracesTab
         slug={slug!}
@@ -794,8 +802,8 @@ function DraftPanel({
 
       {traceCount === 0 && availableDocs.length === 0 ? (
         <div className="empty">
-          Add what you have already written down on the Operations tab, or some scenarios first. Standards
-          drafted from nothing are just a guess with formatting.
+          Add what you have already written down under &ldquo;Your documents&rdquo; below, or some scenarios
+          first. Standards drafted from nothing are just a guess with formatting.
         </div>
       ) : (
         <form onSubmit={requestDraft}>

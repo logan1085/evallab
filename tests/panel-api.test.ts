@@ -21,31 +21,32 @@ beforeEach(async () => {
 });
 
 async function makePanelProject() {
-  const { project } = (
+  const created = (
     await request(app).post('/api/projects').send({
       name: 'Panel test',
       description: 'A support agent that answers billing questions and can refund up to $50 without approval.',
     }).expect(201)
   ).body;
+  const project = created.project;
   const auth = (r: request.Test) => r.set('x-gr-token', project.token);
-  return { project, auth };
+  return { project, auth, created };
 }
 
 describe('the synthetic panel', () => {
   it('runs the whole loop: seats, blind round, map, patches, the ten, bundle', async () => {
-    const { project, auth } = await makePanelProject();
+    const { project, auth, created: intake } = await makePanelProject();
 
-    // 1. Panel generation: literalist seated structurally, offline labeled.
-    const panel = (await auth(request(app).post(`/api/projects/${project.slug}/panel`)).expect(201)).body;
-    expect(panel.real).toBe(false);
+    // 1. The panel is seated at creation: the landing page promises a seated
+    //    panel, so the create call delivers one. Literalist seated
+    //    structurally, first in order.
+    expect(intake.seatCount).toBe(6);
+    const panel = (await auth(request(app).post(`/api/projects/${project.slug}/panel`)).expect(200)).body;
+    // Idempotent: the seats already exist, so this returns them, never
+    //   regenerates over user edits.
+    expect(panel.generated).toBe(false);
     expect(panel.seats.length).toBe(6);
     expect(panel.seats[0].name).toBe('The literalist');
     expect(panel.seats.every((s: { kind: string }) => s.kind === 'panelist')).toBe(true);
-
-    // Idempotent: a second call returns the same panel, never regenerates.
-    const again = (await auth(request(app).post(`/api/projects/${project.slug}/panel`)).expect(200)).body;
-    expect(again.generated).toBe(false);
-    expect(again.seats.length).toBe(6);
 
     // 2. Panel edits are recorded as signal.
     const seatToEdit = panel.seats.find((s: { name: string }) => s.name.includes('safety'));
@@ -196,7 +197,6 @@ describe('the synthetic panel', () => {
 
   it('refuses a panel round with fewer than three seats', async () => {
     const { project, auth } = await makePanelProject();
-    await auth(request(app).post(`/api/projects/${project.slug}/panel`)).expect(201);
     const seats = (await auth(request(app).get(`/api/projects/${project.slug}`)).expect(200)).body.graders
       .filter((g: { kind: string }) => g.kind === 'panelist');
     for (const seat of seats.slice(0, 4)) {
