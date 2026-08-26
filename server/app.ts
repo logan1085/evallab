@@ -9,7 +9,7 @@
  * number fiction, so it is enforced structurally rather than by convention.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { DB } from './db.js';
@@ -49,6 +49,7 @@ import {
 } from '../shared/index.js';
 import { ARCHETYPES, REQUIRED_SEAT, archetype } from '../shared/panel.js';
 import { groundEvidence, isTheater, patchIsGrounded, readCase, type SeatVote } from '../shared/panelmap.js';
+import { renderApiDocs } from './apidocs.js';
 
 interface ProjectRequest extends Request {
   project: Project;
@@ -86,6 +87,13 @@ export function createApp(db: DB) {
    * fallback is a developer convenience; reporting it as healthy in production
    * would be lying, so a deployed instance without Postgres reads not-ok.
    */
+  /** The API documents itself; no key needed to read how to get one. */
+  api.get('/docs', (req, res) => {
+    const proto = req.header('x-forwarded-proto') ?? req.protocol;
+    // text/plain so a browser shows it inline instead of downloading a file.
+    res.type('text/plain; charset=utf-8').send(renderApiDocs(`${proto}://${req.get('host')}`));
+  });
+
   api.get('/health', async (_req, res) => {
     const conn = resolveConnection();
     const deployed = !!process.env.VERCEL;
@@ -105,15 +113,44 @@ export function createApp(db: DB) {
 
   /* ---- Project scoping -------------------------------------------------- */
 
+  const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
+
+  /** The credential, wherever the caller put it: Bearer, header, or link. */
+  function credentialOf(req: Request): string | null {
+    const bearer = req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
+    const raw = bearer ?? req.header('x-gr-token') ?? (typeof req.query.k === 'string' ? req.query.k : '');
+    const cred = raw.trim();
+    return cred === '' ? null : cred;
+  }
+
+  /**
+   * Three credentials open a project: the token from the secret link (which is
+   * also the master API key the create call returns), a minted `gr_` key, and
+   * nothing else. Missing reads as 401 with the fix; wrong reads as 403.
+   * Unknown and revoked keys are indistinguishable on purpose.
+   */
+  async function authorizeProject(req: Request, res: Response, project: Project): Promise<boolean> {
+    const cred = credentialOf(req);
+    if (!cred) {
+      res.status(401).json({
+        error:
+          'No API key. Send Authorization: Bearer <key> (mint one from the project page or POST /api/v1/projects/:slug/keys), or use the k parameter from your project link.',
+      });
+      return false;
+    }
+    if (cred === project.token) return true;
+    if (cred.startsWith('gr_') && (await store.projectIdForKeyHash(db, hashKey(cred))) === project.id) {
+      return true;
+    }
+    res.status(403).json({ error: 'That key does not open this project.' });
+    return false;
+  }
+
   async function requireProject(req: Request, res: Response, next: NextFunction) {
     const slug = req.params.slug!;
     const project = await store.getProjectBySlug(db, slug);
     if (!project) return res.status(404).json({ error: 'No project with that link.' });
-
-    const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
-    if (token !== project.token) {
-      return res.status(403).json({ error: 'This link is missing its key, or the key is wrong.' });
-    }
+    if (!(await authorizeProject(req, res, project))) return;
     (req as ProjectRequest).project = project;
     next();
   }
@@ -124,9 +161,7 @@ export function createApp(db: DB) {
     if (!round) return res.status(404).json({ error: 'No such poll.' });
     const project = await store.getProjectBySlug(db, await store.getProjectSlug(db, round.projectId) ?? '');
     if (!project) return res.status(404).json({ error: 'No such project.' });
-
-    const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
-    if (token !== project.token) return res.status(403).json({ error: 'Wrong or missing key.' });
+    if (!(await authorizeProject(req, res, project))) return;
 
     (req as ProjectRequest).project = project;
     (req as Request & { round: typeof round }).round = round;
@@ -226,6 +261,46 @@ export function createApp(db: DB) {
         })),
       ),
     });
+  });
+
+  /* ---- API keys ---------------------------------------------------------- */
+
+  /**
+   * Mint a key for /api/v1. The full key crosses the wire exactly once, here;
+   * the row keeps its hash and an 11-character prefix for the list view.
+   * Minting requires an existing credential, so a leaked slug alone mints
+   * nothing.
+   */
+  api.post('/projects/:slug/keys', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim().slice(0, 80) : 'unnamed key';
+    const key = `gr_${randomBytes(24).toString('hex')}`;
+    const record = await store.createApiKey(db, {
+      projectId: project.id,
+      name,
+      keyHash: hashKey(key),
+      prefix: key.slice(0, 11),
+    });
+    res.status(201).json({
+      key,
+      id: record.id,
+      name: record.name,
+      prefix: record.prefix,
+      createdAt: record.createdAt,
+      note: 'Store this key now. Only its hash is kept, so it cannot be shown again.',
+    });
+  });
+
+  api.get('/projects/:slug/keys', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    res.json({ keys: await store.listApiKeys(db, project.id) });
+  });
+
+  api.delete('/projects/:slug/keys/:keyId', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const revoked = await store.revokeApiKey(db, project.id, req.params.keyId!);
+    if (!revoked) return res.status(404).json({ error: 'No live key with that id on this project.' });
+    res.status(204).end();
   });
 
   /**
@@ -2287,6 +2362,10 @@ export function createApp(db: DB) {
     res.json({ runs, real: resolveProvider().real });
   });
 
+  // One router, two mounts. /api/v1 is the versioned surface agents build
+  // against; /api is what the bundled UI calls. Because they are literally
+  // the same router, a fix cannot land on one and miss the other.
+  app.use('/api/v1', api);
   app.use('/api', api);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

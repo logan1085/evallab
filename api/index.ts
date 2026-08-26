@@ -47,7 +47,10 @@ const NO_DB =
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   const path = (req.url ?? '').split('?')[0] ?? '';
-  if (process.env.VERCEL && !resolveConnection().url && path !== '/api/health') {
+  // Health and the docs stay readable without a database: one diagnoses the
+  // misconfiguration, the other never needed a database in the first place.
+  const readableAnyway = /^\/api(\/v1)?\/(health|docs)$/.test(path);
+  if (process.env.VERCEL && !resolveConnection().url && !readableAnyway) {
     res.statusCode = 503;
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ error: NO_DB }));

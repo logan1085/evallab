@@ -66,6 +66,22 @@ CREATE TABLE IF NOT EXISTS graders (
  * here. These are first-class records: they feed the rubric diff and ship in
  * the export as the panel's provenance.
  */
+/*
+ * Agent access to /api/v1. The key never lands in a row: only its SHA-256
+ * does, with a short prefix kept for the list view. Revocation is a timestamp
+ * so a dead key still tells its story.
+ */
+CREATE TABLE IF NOT EXISTS api_keys (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL DEFAULT '',
+  key_hash    TEXT NOT NULL UNIQUE,
+  prefix      TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  revoked_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_project ON api_keys (project_id);
+
 CREATE TABLE IF NOT EXISTS panel_edits (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

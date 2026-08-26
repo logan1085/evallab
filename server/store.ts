@@ -85,6 +85,77 @@ export async function getProjectBySlug(db: DB, slug: string): Promise<Project | 
   return row ? toProject(row) : null;
 }
 
+/* ---- API keys ------------------------------------------------------------ */
+
+export interface ApiKeyRecord {
+  id: string;
+  projectId: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+const toApiKey = (row: Row): ApiKeyRecord => ({
+  id: str(row.id),
+  projectId: str(row.project_id),
+  name: str(row.name),
+  prefix: str(row.prefix),
+  createdAt: str(row.created_at),
+  revokedAt: nullable(row.revoked_at),
+});
+
+export async function createApiKey(
+  db: DB,
+  args: { projectId: string; name: string; keyHash: string; prefix: string },
+): Promise<ApiKeyRecord> {
+  const record: ApiKeyRecord = {
+    id: newId(),
+    projectId: args.projectId,
+    name: args.name,
+    prefix: args.prefix,
+    createdAt: now(),
+    revokedAt: null,
+  };
+  await db.run(
+    'INSERT INTO api_keys (id, project_id, name, key_hash, prefix, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    record.id,
+    record.projectId,
+    record.name,
+    args.keyHash,
+    record.prefix,
+    record.createdAt,
+  );
+  return record;
+}
+
+export async function listApiKeys(db: DB, projectId: string): Promise<ApiKeyRecord[]> {
+  const rows = (await db.all(
+    'SELECT * FROM api_keys WHERE project_id = ? ORDER BY created_at, id',
+    projectId,
+  )) as Row[];
+  return rows.map(toApiKey);
+}
+
+/** The live key's project, or null: unknown and revoked read identically. */
+export async function projectIdForKeyHash(db: DB, keyHash: string): Promise<string | null> {
+  const row = (await db.get(
+    'SELECT project_id FROM api_keys WHERE key_hash = ? AND revoked_at IS NULL',
+    keyHash,
+  )) as Row | undefined;
+  return row ? str(row.project_id) : null;
+}
+
+export async function revokeApiKey(db: DB, projectId: string, keyId: string): Promise<boolean> {
+  const res = await db.run(
+    'UPDATE api_keys SET revoked_at = ? WHERE id = ? AND project_id = ? AND revoked_at IS NULL',
+    now(),
+    keyId,
+    projectId,
+  );
+  return res.changes > 0;
+}
+
 export async function getProjectById(db: DB, id: string): Promise<Project | null> {
   const row = await db.get('SELECT * FROM projects WHERE id = ?', id) as Row | undefined;
   return row ? toProject(row) : null;

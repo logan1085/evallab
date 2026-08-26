@@ -47,9 +47,9 @@ async function joinGrader(project: { slug: string; token: string }, name: string
 }
 
 describe('shared-link auth', () => {
-  it('rejects a request with no key', async () => {
+  it('rejects a request with no key as 401, so a missing credential reads differently from a wrong one', async () => {
     const { project } = await makeProject(1);
-    await request(app).get(`/api/projects/${project.slug}`).expect(403);
+    await request(app).get(`/api/projects/${project.slug}`).expect(401);
   });
 
   it('rejects a request with the wrong key', async () => {

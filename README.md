@@ -125,10 +125,20 @@ not built.
 
 ## An agent as the operator
 
-Agents are a first-class user here, not an afterthought. `mcp/server.ts` is an
-MCP server that lets Claude, or anything else that speaks MCP, run the whole
-loop: create a project, feed it your policies, translate them into a rubric,
-open a round, read the report, score a judge.
+Agents are a first-class user here, not an afterthought. The HTTP API is
+versioned at `/api/v1` and documents itself: `GET /api/v1/docs` returns the
+endpoint list with copy-pasteable curl examples. `/api/v1` and `/api` (what
+the bundled UI calls) are one Express router mounted twice, so the two
+surfaces cannot drift. Requests authenticate with `Authorization: Bearer
+<key>`, where the key is the project token the create call returns or a named
+key minted from the project page (or `POST /api/v1/projects/:slug/keys`);
+minted keys are stored hashed, shown once, and revocable one at a time. A
+request with no key gets 401, a wrong or revoked key 403.
+
+`mcp/server.ts` is an MCP server over that API. It lets Claude, or anything
+else that speaks MCP, run the whole loop: create a project, feed it your
+policies, translate them into a rubric, open a round, read the report, score
+a judge.
 
 ```
 npm run build:mcp

@@ -63,7 +63,9 @@ async function call<T>(path: string, init: RequestInit & { token?: string } = {}
   if (rest.body) headers['content-type'] = 'application/json';
   if (token) headers['x-gr-token'] = token;
 
-  const res = await fetch(`/api${path}`, { ...rest, headers });
+  // The UI speaks the same versioned surface agents do. /api/v1 and /api are
+  // one router server-side; calling v1 here keeps this client honest about it.
+  const res = await fetch(`/api/v1${path}`, { ...rest, headers });
   if (res.status === 204) return undefined as T;
 
   const contentType = res.headers.get('content-type') ?? '';
@@ -326,6 +328,18 @@ export const api = {
   evalsetUrl: (roundId: string, token: string) =>
     `/api/rounds/${roundId}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
 
+  mintKey: (slug: string, token: string, name: string) =>
+    call<{ key: string; id: string; name: string; prefix: string; createdAt: string; note: string }>(
+      `/projects/${slug}/keys`,
+      { method: 'POST', token, body: JSON.stringify({ name }) },
+    ),
+  listKeys: (slug: string, token: string) =>
+    call<{ keys: { id: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }[] }>(
+      `/projects/${slug}/keys`,
+      { token },
+    ),
+  revokeKey: (slug: string, token: string, keyId: string) =>
+    call<void>(`/projects/${slug}/keys/${keyId}`, { method: 'DELETE', token }),
   generatePanel: (slug: string, token: string) =>
     call<{ seats: Grader[]; families: string[]; familiesShort?: number; generated: boolean; real?: boolean }>(
       `/projects/${slug}/panel`,

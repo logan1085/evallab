@@ -294,7 +294,7 @@ export function Home() {
             The Grading Room
           </div>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
-            You can&rsquo;t recruit five experts. <span className="l-mute">Summon them.</span>
+            Simulate experts, <span className="l-mute">to create the perfect evaluation frameworks.</span>
           </h1>
           <p className="l-sub" data-reveal style={{ ['--d' as string]: '120ms' }}>
             A panel of models with conflicting stakes grades your outputs blind. Where they split, your rubric is
