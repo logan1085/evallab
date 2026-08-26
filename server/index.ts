@@ -25,7 +25,8 @@ const webDir = [resolve(here, 'web'), resolve(here, '..', 'dist', 'web')].find((
 
 if (webDir) {
   app.use(express.static(webDir));
-  app.get(/^(?!\/api\/).*/, (_req, res) => res.sendFile(join(webDir, 'index.html')));
+  // /s/* is the server-rendered Standards page, not the SPA.
+  app.get(/^(?!\/(?:api|s)\/).*/, (_req, res) => res.sendFile(join(webDir, 'index.html')));
 }
 
 const server = app.listen(port, () => {

@@ -253,11 +253,20 @@ export interface JudgeRunView {
 /* ---- Endpoints ---------------------------------------------------------- */
 
 export const api = {
-  createProject: (name: string, description = '') =>
-    call<{ project: Project; rubric: RubricVersion; scenarioCount: number; scenariosReal: boolean }>('/projects', {
+  createProject: (name: string, description = '', limits = '') =>
+    call<{ project: Project; rubric: RubricVersion; scenarioCount: number; scenariosReal: boolean; seatCount: number }>('/projects', {
       method: 'POST',
-      body: json({ name, description }),
+      body: json({ name, description, limits }),
     }),
+
+  saveEmail: (slug: string, token: string, email: string) =>
+    call<{ ok: boolean }>(`/projects/${slug}/email`, { method: 'POST', token, body: json({ email }) }),
+
+  writeStandards: (roundId: string, token: string) =>
+    call<{ rubric: RubricVersion; url: string; sentences: number; alreadyWritten: boolean }>(
+      `/rounds/${roundId}/standards`,
+      { method: 'POST', token },
+    ),
 
   createDemo: () =>
     call<{ slug: string; token: string; projectId: string; roundId: string }>('/projects/demo', {

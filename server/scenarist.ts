@@ -109,7 +109,7 @@ function anthropicScenarist(model: string): ScenarioProvider {
 }
 
 /** The situations nearly every operation meets, whatever it does. */
-function offlineScenarist(): ScenarioProvider {
+export function offlineScenarist(): ScenarioProvider {
   return {
     id: 'offline',
     model: 'offline',

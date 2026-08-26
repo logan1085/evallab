@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 import { recallKey, rememberKey } from './api';
 import { Home } from './pages/Home';
+import { SetupPage } from './pages/Setup';
 import { ProjectPage } from './pages/Project';
 import { PanelRoundPage } from './pages/PanelRound';
 import { Masthead } from './ui';
@@ -10,6 +11,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/setup" element={<SetupPage />} />
       <Route
         path="/p/:slug"
         element={

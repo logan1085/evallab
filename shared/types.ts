@@ -254,6 +254,10 @@ export interface Project {
   name: string;
   /** What the company is and what its AI is supposed to do — the seed everything grows from. */
   description: string;
+  /** Whether the Standards page at /s/<slug> is readable without the key. */
+  isPublic: boolean;
+  /** Optional, captured at setup so the link has somewhere to be re-sent. */
+  ownerEmail: string;
   createdAt: string;
 }
 

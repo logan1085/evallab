@@ -195,9 +195,13 @@ rules that cancel each other out. Same machinery, pointed somewhere new.
 
 It is a prototype and says so on the page. The MCP server underneath it is real.
 
-The page shares the landing page's design tokens by copy, and a test asserts the
-two never drift: "it matches the landing page" is the sort of claim that
-quietly stops being true.
+It is also a period piece: it was drawn in the product's earlier dark visual
+world, which the hearing-room design replaced. It is kept as a sketch of the
+idea, not as a live surface, and is no longer held to the current palette. The
+drift test that used to guard it now guards a copy that matters: the Standards
+page inlines its own CSS, so `tests/design-system.test.ts` asserts it and the
+app never disagree about the palette, the three type families, or the rule that
+the signal red belongs to splits alone.
 
 ## CI
 

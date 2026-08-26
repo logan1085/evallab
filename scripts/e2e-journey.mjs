@@ -1,6 +1,6 @@
-// The whole product, walked as a customer: the arrival conversation, the panel
-// seated, the blind round run, the map read, the diff mined, the ten graded,
-// the bundle offered. Run against a dev server:
+// The whole product, walked as a customer: the landing promise, the three
+// questions, the bench seating, the Room, the round, the spread, and the
+// Standards page at the end of the handoff. Run against a dev server:
 //   PORT=4188 npx tsx server/index.ts &   then   node scripts/e2e-journey.mjs
 // Requires the web bundle built (npm run build:web) and Playwright's chromium.
 import { chromium } from 'playwright';
@@ -16,81 +16,73 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const fails = [];
 const ok = (name, cond) => { console.log(`${cond ? 'PASS' : 'FAIL'} ${name}`); if (!cond) fails.push(name); };
 
-// 1. Arrive, in conversation.
+// 1. The landing: one promise, the demo, the artifact, the setup handoff.
 await page.goto(`${BASE}/`, { waitUntil: 'networkidle' });
-const chat = page.locator('.l-chat input');
+const landing = await page.textContent('body');
+ok('the promise is the headline', landing.includes('Five experts walk in.'));
+ok('the artifact is on the landing', landing.includes('Standards v2') && landing.includes('added after a split'));
+ok('the closer is full size, not a footer credit', landing.includes('The rubric diff is the product.'));
+ok('a real framework is one click away', (await page.locator('a[href="/s/example"]').count()) > 0);
+await page.screenshot({ path: `${out}/journey-1-landing.png`, fullPage: true });
+
+// 2. Setup: three questions to a seated panel.
+await page.getByRole('link', { name: 'Seat your panel' }).first().click();
+await page.waitForURL('**/setup');
 async function answer(text) {
-  await chat.fill(text);
-  await chat.press('Enter');
-  await page.waitForTimeout(600);
+  await page.getByLabel('Your answer').fill(text);
+  await page.getByRole('button', { name: 'Answer' }).click();
+  await page.waitForTimeout(300);
 }
-await page.locator('.l-chat').scrollIntoViewIfNeeded();
 await answer('Acme Outdoor');
 await answer('We sell outdoor gear online; our AI answers billing questions and can refund up to $50 without approval.');
-ok('interview asks about limits', (await page.textContent('.l-msgs')).includes('never do'));
 await answer('Never refund over $50 without human approval.');
+await page.waitForSelector('text=Your panel is seated.', { timeout: 60000 });
+await page.waitForTimeout(3500); // the bench fills one seat at a time
+const setupBody = await page.textContent('body');
+ok('the literalist is on the bench', setupBody.includes('The literalist'));
+ok('the link card says what it is', setupBody.includes('This link is the only way back to your project.'));
+await page.screenshot({ path: `${out}/journey-2-setup.png`, fullPage: true });
+
+// 3. The Room: numbered sections, the version stamp always visible.
+await page.getByRole('button', { name: 'Enter the Room' }).click();
 await page.waitForURL('**/p/**', { timeout: 30000 });
-await page.waitForTimeout(800);
-ok('project created from the conversation', page.url().includes('/p/'));
-
-// 2 and 3. Cases written and the panel already seated: the interview promises
-// a rubric, a case set, and a seated panel, and the create call delivers all
-// three. Real mode is detected, not assumed: with keys there is no placeholder
-// notice and the cases are bespoke.
-const body0 = await page.textContent('body');
-const simulated = body0.includes('Placeholder scenarios');
+await page.waitForTimeout(900);
+const room = await page.textContent('body');
+const simulated = room.includes('Placeholder scenarios');
 console.log(simulated ? 'MODE simulated (no keys)' : 'MODE real (keys present)');
-ok('cases written', /\d+ cases/.test(body0));
-if (simulated) ok('placeholder notice without a key', body0.includes('Placeholder scenarios'));
-else ok('no placeholder notice with keys', !body0.includes('Placeholder scenarios'));
-ok('literalist seated on arrival', body0.includes('The literalist'));
-if (simulated) ok('seats labeled simulated without keys', body0.includes('simulated'));
-else ok('seats carry real families with keys', /anthropic|openai|google/.test(body0));
-ok('panel of six in standfirst', body0.includes('panel of 6'));
-await page.screenshot({ path: `${out}/journey-panel.png`, fullPage: true });
+ok('version stamp in the header', room.includes('Standards v1'));
+ok('numbered sections: the panel, the cases', room.includes('The panel') && room.includes('The cases'));
+ok('cases written', /\d+ cases/.test(room));
+ok('run has a cost and time estimate', /~\d+ min/.test(room));
+await page.screenshot({ path: `${out}/journey-3-room.png`, fullPage: true });
 
-// 4. Run the round; per-seat progress, then the map.
-await page.getByRole('button', { name: 'Run the panel' }).click();
+// 4. Run the round; verdicts land per seat, then the spread.
+await page.getByRole('button', { name: 'Run the round' }).click();
 await page.waitForURL('**/round/**', { timeout: 30000 });
 // A real 6-seat round is ~36 model calls; give it room.
-await page.waitForSelector('text=/split on \\d+ of|agreed on everything/', { timeout: 240000 });
+await page.waitForSelector('text=/split|agreed on everything/', { timeout: 240000 });
+await page.waitForTimeout(700);
+const spread = await page.textContent('body');
+ok('the spread headline counts the splits', /split \d+ time|agreed on everything/.test(spread));
+if (simulated) ok('simulated verdicts say so', spread.includes('Simulated panel'));
+ok('agreement reported with AC1 beside alpha', spread.includes('AC1'));
+await page.screenshot({ path: `${out}/journey-4-spread.png`, fullPage: true });
+
+// 5. The handoff: write the next Standards and land on the document.
+const handoff = page.getByRole('button', { name: 'Write the next Standards' });
+ok('the handoff is offered', (await handoff.count()) === 1);
+await handoff.click();
+await page.waitForURL('**/s/**', { timeout: 60000 });
 await page.waitForTimeout(600);
-const mapText = await page.textContent('body');
-ok('map arrived after the run', /split on \d+ of \d+ cases|agreed on everything/.test(mapText));
-if (simulated) ok('simulated verdicts say so', mapText.includes('Simulated panel'));
-else ok('no simulated warning with keys', !mapText.includes('Simulated panel'));
-ok('agreement reported with AC1 beside alpha', mapText.includes('AC1'));
-
-// 5. Mine the rubric diff.
-await page.getByRole('button', { name: 'Propose the missing sentences' }).click();
-await page.waitForTimeout(900);
-const diffText = await page.textContent('body');
-const hasPatches = (await page.locator('#diff .panel').count()) > 0;
-ok('diff mined: patches or an honest nothing', hasPatches || diffText.includes('Nothing to propose'));
-if (hasPatches) {
-  ok('patches quote the room', (await page.locator('#diff .panel').first().textContent()).includes('“'));
-  await page.locator('#diff .panel').first().getByRole('button', { name: 'Add to my standards' }).click();
-  await page.waitForTimeout(700);
-  ok('accepting writes standards v2', (await page.textContent('#diff')).includes('v2'));
-}
-await page.screenshot({ path: `${out}/journey-map.png`, fullPage: true });
-
-// 6. The ten: grade everything offered, watch alignment appear.
-const tenCards = page.locator('#ten .panel');
-const tenCount = await tenCards.count();
-ok('the ten offered (sampled across patterns)', tenCount >= 4);
-for (let i = 0; i < tenCount; i++) {
-  await tenCards.nth(i).locator('.verdict-picker button', { hasText: 'pass' }).click();
-  await page.waitForTimeout(250);
-}
-await page.waitForSelector('text=Who speaks for you', { timeout: 15000 });
-const tenText = await page.textContent('#ten');
-ok('who-speaks-for-you table appears', tenText.includes('Who speaks for you'));
-ok('false settles reported honestly', tenText.includes('confidently wrong'));
-await page.screenshot({ path: `${out}/journey-ten.png`, fullPage: true });
-
-// 7. The bundle is offered.
-ok('export section present', (await page.textContent('body')).includes('Leave with files'));
+const standards = await page.textContent('body');
+ok('the Standards page is the deliverable', /Standards v\d+/.test(standards));
+ok('added sentences are tagged', standards.includes('added after a split'));
+ok('the evidence block quotes the room', standards.includes('Why you can trust it'));
+ok('the panel is on the page', standards.includes('The literalist'));
+ok('every shared framework is an ad', standards.includes('Seat your own panel'));
+ok('owner controls present', standards.includes('Publish it') || standards.includes('Make it private'));
+await page.screenshot({ path: `${out}/journey-5-standards.png`, fullPage: true });
 
 await browser.close();
 console.log(fails.length ? `FAILURES: ${fails.join(' | ')}` : 'ALL PASS');
+process.exit(fails.length ? 1 : 0);

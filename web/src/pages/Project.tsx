@@ -46,21 +46,23 @@ export function ProjectPage() {
       <Masthead
         crumbs={[{ label: 'Home', to: '/' }, data.project.name]}
         title={data.project.name}
-        standfirst={`${caseCount} case${caseCount === 1 ? '' : 's'} · panel of ${seats.length} · standards v${data.rubric?.version ?? 1}`}
+        standfirst={`Standards v${data.rubric?.version ?? 1} · panel of ${seats.length} · ${caseCount} case${caseCount === 1 ? '' : 's'} · Round ${data.rounds.length + 1} next`}
+        right={
+          (data.rubric?.version ?? 1) > 1 ? (
+            <a href={`/s/${data.project.slug}?k=${encodeURIComponent(data.project.token)}`}>Your Standards page</a>
+          ) : undefined
+        }
       />
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
       <div className="panel">
-        <div className="between">
+        <div className="between" style={{ alignItems: 'center' }}>
           <div style={{ flex: '1 1 340px', minWidth: 0 }}>
-            <span className="metric-k">Your project link</span>
+            <p style={{ margin: '0 0 6px', fontWeight: 550 }}>This link is your key. Keep it.</p>
             <div className="link-box">{link}</div>
-            <p className="tiny" style={{ margin: 0 }}>
-              Keep it somewhere safe. It is the only way back to this project.
-            </p>
           </div>
-          <div className="shrink stack">
+          <div className="shrink">
             <button className="ghost" onClick={() => navigator.clipboard?.writeText(link)}>
               Copy link
             </button>
@@ -89,109 +91,7 @@ export function ProjectPage() {
         <RubricTab view={data} slug={slug!} token={token} onChange={reload} onError={setError} />
       </details>
 
-      <details className="deep">
-        <summary>Agent access: the API and your keys</summary>
-        <ApiKeysSection slug={slug!} token={token} onError={setError} />
-      </details>
     </main>
-  );
-}
-
-/* ---- API keys ------------------------------------------------------------ */
-
-/**
- * The same product over curl. The project token already opens the API; this
- * section mints named keys that can be handed to an agent and revoked one at
- * a time. The full key is shown exactly once, because only its hash is kept.
- */
-function ApiKeysSection({ slug, token, onError }: { slug: string; token: string; onError: (m: string) => void }) {
-  const [name, setName] = useState('');
-  const [minted, setMinted] = useState<{ key: string; name: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const keysQ = useAsync<{ keys: { id: string; name: string; prefix: string; createdAt: string; revokedAt: string | null }[] }>(
-    () => api.listKeys(slug, token),
-    [slug, token],
-  );
-
-  async function mint(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      const res = await api.mintKey(slug, token, name.trim() || 'unnamed key');
-      setMinted({ key: res.key, name: res.name });
-      setName('');
-      keysQ.reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not mint a key.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function revoke(keyId: string) {
-    try {
-      await api.revokeKey(slug, token, keyId);
-      keysQ.reload();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not revoke that key.');
-    }
-  }
-
-  return (
-    <div className="panel">
-      <p className="tiny" style={{ marginTop: 0 }}>
-        Everything this page does is also an API at <code>/api/v1</code>. The docs, with curl examples, are at{' '}
-        <a href="/api/v1/docs" target="_blank" rel="noreferrer">/api/v1/docs</a>. Requests authenticate with{' '}
-        <code>Authorization: Bearer &lt;key&gt;</code>; a request without a key is refused.
-      </p>
-
-      <form onSubmit={mint} className="between" style={{ alignItems: 'flex-end' }}>
-        <div className="field" style={{ flex: '1 1 240px', margin: 0 }}>
-          <label htmlFor="key-name">Name a new key</label>
-          <input
-            id="key-name"
-            value={name}
-            placeholder="ci-agent"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <div className="shrink">
-          <button type="submit" className="ghost" disabled={busy}>
-            {busy ? 'Minting…' : 'Mint API key'}
-          </button>
-        </div>
-      </form>
-
-      {minted ? (
-        <div style={{ marginTop: 12 }}>
-          <span className="metric-k">{minted.name}: copy it now, it is shown once</span>
-          <div className="link-box">{minted.key}</div>
-          <button className="ghost" onClick={() => navigator.clipboard?.writeText(minted.key)}>
-            Copy key
-          </button>
-        </div>
-      ) : null}
-
-      {(keysQ.data?.keys.length ?? 0) > 0 ? (
-        <div className="stack" style={{ marginTop: 12 }}>
-          {keysQ.data!.keys.map((k) => (
-            <div key={k.id} className="between">
-              <span>
-                <b>{k.name}</b> <code>{k.prefix}…</code>
-                {k.revokedAt ? <span className="tiny"> revoked</span> : null}
-              </span>
-              {!k.revokedAt ? (
-                <button className="ghost" onClick={() => revoke(k.id)}>
-                  Revoke
-                </button>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="tiny">No keys minted yet. Your project link&rsquo;s key works too, but a minted key can be revoked without changing the link.</p>
-      )}
-    </div>
   );
 }
 
@@ -280,20 +180,28 @@ function PanelSection({
     );
   }
 
+  const simulatedPanel = seats.every((s) => s.family === 'offline' || s.model === 'simulated');
+  const roundEstimate = simulatedPanel ? '~2 min · free, simulated' : '~12 min · est. under $1';
+
   return (
     <div className="panel">
       <div className="between">
         <div>
-          <h3 style={{ margin: 0 }}>Your panel</h3>
-          <p className="note" style={{ margin: '6px 0 0' }}>
-            Every seat is editable, and every edit counts as signal about what good means for you. Deleting the cost
-            seat says tokens are not quality here.
+          <div className="sec-title">
+            <span className="no">1</span>
+            <h2>The panel</h2>
+          </div>
+          <p className="sec-sub" style={{ margin: '2px 0 0' }}>
+            Five perspectives with conflicting stakes, plus the literalist, who grades only what the rubric says.
+            Where the literalist and everyone else split, your rubric is missing a sentence. Every seat is editable;
+            every edit is signal.
           </p>
         </div>
-        <div className="shrink">
+        <div className="shrink" style={{ textAlign: 'right' }}>
           <button onClick={run} disabled={busy !== null || caseCount < 2 || seats.length < 3}>
-            {busy === 'run' ? 'Starting…' : 'Run the panel'}
+            {busy === 'run' ? 'Starting…' : 'Run the round'}
           </button>
+          <p className="mono tiny" style={{ margin: '6px 0 0' }}>{roundEstimate}</p>
         </div>
       </div>
 
@@ -304,9 +212,9 @@ function PanelSection({
           : ''}
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 12, marginTop: 14 }}>
+      <div style={{ marginTop: 14 }}>
         {seats.map((seat) => (
-          <div key={seat.id} style={{ background: 'var(--sunk)', borderRadius: 14, padding: '14px 16px' }}>
+          <div key={seat.id} className="seat-row" style={{ display: 'block' }}>
             {editing === seat.id ? (
               <>
                 <input
@@ -696,6 +604,14 @@ function TracesTab({
   return (
     <section className="rail-grid">
       <div className="col">
+        <div className="sec-title">
+          <span className="no">2</span>
+          <h2>The cases</h2>
+        </div>
+        <p className="sec-sub">
+          The clear cases, the boundary cases, and the ones your documents never imagined. Your own transcript is
+          the one that proves the product on your actual problem: paste one below.
+        </p>
         {stubScenarios > 0 ? (
           <div className="warn">
             <span className="metric-k">Placeholder scenarios</span>
@@ -750,7 +666,7 @@ function TracesTab({
         <ScenarioWriter slug={slug} token={token} onDone={onChange} onError={onError} />
 
         <details className="deep">
-          <summary>Bring in real conversations instead</summary>
+          <summary>Paste a real transcript</summary>
           <div className="panel" style={{ marginTop: 14 }}>
             <p className="tiny" style={{ marginTop: 0 }}>
               Already have transcripts of your AI at work? They make scenarios too. You judge what actually

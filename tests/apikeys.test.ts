@@ -139,3 +139,89 @@ describe('minted keys', () => {
     await request(app).get(`/api/v1/rounds/${created.round.id}`).expect(401);
   });
 });
+
+/**
+ * The launch loop: setup writes a framework from the owner's own words, a
+ * round's splits write the next version, and the Standards page is the thing
+ * they leave with.
+ */
+describe('the framework', () => {
+  it('starts as the owner\'s own hard limits, verbatim, not an empty preamble', async () => {
+    const created = (
+      await request(app).post('/api/v1/projects').send({
+        name: 'Limits',
+        description: 'A support agent that answers billing questions.',
+        limits: 'Never refund over $50 without human approval. Never promise a delivery date.',
+      }).expect(201)
+    ).body;
+    const bodies = created.rubric.criteria.map((c: { body: string }) => c.body);
+    expect(bodies).toEqual([
+      'Never refund over $50 without human approval.',
+      'Never promise a delivery date.',
+    ]);
+  });
+
+  it('refuses to turn "skip" into a rubric clause', async () => {
+    const created = (
+      await request(app).post('/api/v1/projects').send({
+        name: 'Skipped',
+        description: 'A support agent that answers billing questions.',
+        limits: 'skip',
+      }).expect(201)
+    ).body;
+    expect(created.rubric.criteria).toEqual([]);
+  });
+
+  it('writes the splits into one new version, and says so when there is nothing to write', async () => {
+    const project = await makeProject('Handoff');
+    const auth = `Bearer ${project.token}`;
+    const created = (
+      await request(app).post(`/api/v1/projects/${project.slug}/panel-rounds`).set('authorization', auth).expect(201)
+    ).body;
+    for (const seat of created.seats) {
+      await request(app)
+        .post(`/api/v1/rounds/${created.round.id}/panel-run`)
+        .set('authorization', auth)
+        .send({ seatId: seat.id })
+        .expect(200);
+    }
+
+    const written = (
+      await request(app).post(`/api/v1/rounds/${created.round.id}/standards`).set('authorization', auth).expect(201)
+    ).body;
+    expect(written.sentences).toBeGreaterThan(0);
+    expect(written.url).toBe(`/s/${project.slug}`);
+    expect(written.rubric.version).toBe(2);
+
+    // Idempotent: the same round does not keep minting versions.
+    const again = (
+      await request(app).post(`/api/v1/rounds/${created.round.id}/standards`).set('authorization', auth).expect(200)
+    ).body;
+    expect(again.alreadyWritten).toBe(true);
+    expect(again.rubric.version).toBe(2);
+  }, 30_000);
+
+  it('serves the Standards page publicly only once published', async () => {
+    const project = await makeProject('Shareable');
+    await request(app).get(`/s/${project.slug}`).expect(404);
+
+    // The owner's key opens it even while private.
+    const priv = await request(app).get(`/s/${project.slug}?k=${project.token}`).expect(200);
+    expect(priv.text).toContain('This page is private');
+
+    await request(app)
+      .post(`/api/v1/projects/${project.slug}/visibility`)
+      .set('authorization', `Bearer ${project.token}`)
+      .send({ public: true })
+      .expect(200);
+
+    const pub = await request(app).get(`/s/${project.slug}`).expect(200);
+    expect(pub.text).toContain('Standards v1');
+    expect(pub.text).toContain('Seat your own panel');
+    // A stranger never sees the owner's controls.
+    expect(pub.text).not.toContain('Publish it');
+    expect(pub.text).not.toContain(project.token);
+
+    await request(app).get(`/s/${project.slug}/og.svg`).expect(200).expect('content-type', /svg/);
+  });
+});

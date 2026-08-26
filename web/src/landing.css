@@ -1,530 +1,515 @@
 /*
- * The landing page, which is a different design world from the product.
- *
- * The app is a light grey instrument you operate for an hour. This is the page
- * you read once, so it gets the opposite treatment: pure black, full-bleed,
- * type at display sizes, and content that arrives as you scroll rather than all
- * at once. Committing to dark here is a choice, not an omission — the page
- * ignores the viewer's theme entirely, the way a product launch page does.
- *
- * No color. Black ground, titanium greys, white type — the page is
- * monochrome end to end, and anything that shines does it in silver. The
- * only hues anywhere are the verdict chips, because a vote's value is data
- * and data keeps its display colors regardless of the case around it.
+ * The landing: the same paper as the product. One promise, one demonstration,
+ * one artifact, one closer. High contrast; no gradients, no glass, no badges.
+ * The only red on the page is the split row in the demonstration.
  */
 
-:root {
-  --l-ground: #000000;
-  --l-raised: #121214;
-  --l-raised-2: #1b1b1e;
-  --l-text: #f5f5f7;
-  --l-text-2: #a1a1a6;
-  --l-text-3: #6e6e73;
-  --l-line: #232327;
-
-  --l-fail: #ff3b6b;
-  --l-partial: #ffb020;
-  --l-pass: #25d0a0;
-  --l-spectrum: linear-gradient(100deg, var(--l-fail) 0%, var(--l-partial) 48%, var(--l-pass) 100%);
-
-  --l-silver: linear-gradient(105deg, #ffffff 0%, #dedee3 45%, #86868b 100%);
-}
-
-/* The page owns the whole viewport, including the overscroll gutter. */
-html[data-page="landing"],
-html[data-page="landing"] body {
-  background: var(--l-ground);
+[data-page='landing'] {
+  background: var(--paper);
 }
 
 .landing {
-  background: var(--l-ground);
-  color: var(--l-text-2);
-  min-height: 100vh;
+  background: var(--paper);
+  color: var(--ink);
   font-family: var(--ui);
-  padding-bottom: 0;
-  /*
-   * No overflow-x here. Hiding horizontal overflow on the page root makes it a
-   * scroll container, which silently breaks `position: sticky` for every
-   * descendant — the pinned poll below stops pinning and plays to an empty
-   * viewport while the DOM updates correctly behind it. The one element that
-   * overflows is the hero bloom, so the hero clips itself instead.
-   */
 }
-
-.landing ::selection { background: rgba(245, 245, 247, 0.9); color: #000; }
 
 .l-wrap {
-  max-width: 1120px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 0 28px;
+  padding: 0 24px;
 }
 
-/* Reveal ------------------------------------------------------------------ */
+/* ---- Nav ---------------------------------------------------------------- */
 
-/*
- * Hidden only when motion is welcome. Under prefers-reduced-motion the rule
- * never applies, so every element is simply visible from the start rather than
- * depending on an observer that may never fire.
- */
-@media (prefers-reduced-motion: no-preference) {
-  .landing [data-reveal] {
-    opacity: 0;
-    transform: translateY(26px);
-    transition:
-      opacity 0.75s cubic-bezier(0.16, 1, 0.3, 1),
-      transform 0.75s cubic-bezier(0.16, 1, 0.3, 1);
-    transition-delay: var(--d, 0ms);
-  }
-  .landing [data-reveal][data-shown] {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* Local nav ---------------------------------------------------------------- */
-
-/*
- * The thin product-page bar: wordmark on the left, one action on the right,
- * frosted glass over whatever scrolls beneath it. It is fixed, not sticky, so
- * it cannot interfere with the pinned stage further down.
- */
 .l-nav {
-  position: fixed;
-  inset: 0 0 auto;
-  z-index: 20;
-  background: rgba(0, 0, 0, 0.72);
-  -webkit-backdrop-filter: saturate(1.8) blur(20px);
-  backdrop-filter: saturate(1.8) blur(20px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--hairline);
 }
+
 .l-nav .l-wrap {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  height: 48px;
-}
-.l-nav-mark {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--l-text);
-}
-.landing button.l-nav-cta {
-  font-family: var(--ui);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 13px;
-  border-radius: 999px;
-  border: none;
-  background: var(--l-text);
-  color: #000;
-  cursor: pointer;
-}
-.landing button.l-nav-cta:hover { background: #fff; }
-
-/* Hero -------------------------------------------------------------------- */
-
-/* Centred, the way a product introduces itself. Nothing behind the type: no
-   badge, no gradient, no glow. The headline carries the page or nothing does. */
-.l-hero {
-  position: relative;
-  min-height: 92vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 130px 0 80px;
-  isolation: isolate;
-  overflow: hidden;
-}
-.l-hero .l-wrap {
-  display: flex;
-  flex-direction: column;
   align-items: center;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
+.l-nav-mark {
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 500;
+}
+
+/* ---- Buttons ------------------------------------------------------------ */
+
+.l-primary {
+  display: inline-block;
+  font-family: var(--ui);
+  font-size: 15px;
+  font-weight: 500;
+  background: var(--ink);
+  color: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  padding: 11px 22px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.l-primary:hover {
+  opacity: 0.9;
+}
+
+.l-tlink {
+  font-family: var(--ui);
+  font-size: 15px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 11px 4px;
+}
+
+.l-tlink:hover {
+  color: var(--ink);
+}
+
+/* ---- Hero --------------------------------------------------------------- */
+
+.l-hero {
+  padding: 110px 0 90px;
   text-align: center;
 }
 
-.l-name {
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--l-text);
-  margin-bottom: 18px;
-}
-
-.landing h1.l-title {
-  font-family: var(--display);
-  font-size: clamp(48px, 8vw, 112px);
-  font-weight: 600;
-  letter-spacing: -0.04em;
-  line-height: 1.03;
-  color: var(--l-text);
-  margin: 0 0 22px;
-  max-width: 16ch;
+.l-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(44px, 7vw, 76px);
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+  margin: 0;
   text-wrap: balance;
 }
-
-/* The second phrase of a two-tone headline: same size, stepped back to grey. */
-.l-mute { color: var(--l-text-3); }
 
 .l-sub {
-  font-size: clamp(18px, 2.1vw, 24px);
-  line-height: 1.45;
-  font-weight: 480;
-  color: var(--l-text-2);
-  max-width: 44ch;
-  margin: 0 0 36px;
-  text-wrap: balance;
+  font-size: 18px;
+  line-height: 1.65;
+  color: var(--muted);
+  max-width: 560px;
+  margin: 26px auto 0;
+  text-wrap: pretty;
 }
 
-.l-cta-row { display: flex; gap: 26px; flex-wrap: wrap; align-items: center; }
+.l-sub b {
+  color: var(--ink);
+  font-weight: 600;
+}
 
-.landing button.l-primary,
-.landing .l-primary {
-  font-family: var(--ui);
-  font-size: 16px;
+.l-cta-row {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  align-items: center;
+  margin-top: 34px;
+  flex-wrap: wrap;
+}
+
+/* ---- Sections ----------------------------------------------------------- */
+
+.l-section {
+  border-top: 1px solid var(--hairline);
+  padding: 80px 0;
+}
+
+.l-eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+
+.l-h2 {
+  font-family: var(--serif);
   font-weight: 500;
-  padding: 12px 22px;
-  border-radius: 999px;
-  border: none;
-  background: var(--l-text);
-  color: #000;
-  cursor: pointer;
-  transition: background 0.18s ease;
-}
-.landing button.l-primary:hover:not(:disabled) { background: #ffffff; }
-.landing button.l-primary:disabled { background: var(--l-raised-2); color: var(--l-text-3); cursor: not-allowed; }
-
-/* The quiet alternative to the pill: a plain link with a chevron. */
-.landing button.l-tlink {
-  font-family: var(--ui);
-  font-size: 17px;
-  font-weight: 480;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--l-text);
-  cursor: pointer;
-}
-.landing button.l-tlink:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 4px; }
-.landing button.l-tlink:disabled { color: var(--l-text-3); cursor: default; }
-.l-tlink .chev { color: var(--l-text-3); margin-left: 2px; }
-
-/* Sections: separated by space, not rules. ---------------------------------- */
-
-.l-section { padding: 150px 0 0; }
-
-.landing h2.l-h2 {
-  font-family: var(--display);
-  font-size: clamp(30px, 4.4vw, 54px);
-  font-weight: 660;
-  letter-spacing: -0.032em;
-  line-height: 1.04;
-  color: var(--l-text);
-  margin: 0 0 20px;
-  max-width: 20ch;
+  font-size: clamp(30px, 4.5vw, 44px);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0;
   text-wrap: balance;
 }
 
 .l-lede {
-  font-size: clamp(16px, 1.7vw, 19px);
-  line-height: 1.6;
-  color: var(--l-text-2);
-  max-width: 56ch;
-  margin: 0;
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--muted);
+  max-width: 620px;
+  margin: 18px 0 0;
 }
 
-/* The disagreement demonstration, pinned ----------------------------------- */
+/* ---- The scroll demonstration ------------------------------------------- */
 
-/*
- * The scroller is tall; the stage inside it sticks. Scroll distance through
- * the scroller becomes votes landing on the scenario, so the reader runs the
- * poll with the same gesture they were already making. Same technique as the
- * direction-two prototype, and the same trap: nothing above this element may
- * hide overflow on the page root.
- */
-.l-scroller { position: relative; height: 380vh; }
+.l-scroller {
+  position: relative;
+  height: 260vh;
+  border-top: 1px solid var(--hairline);
+}
+
 .l-stage {
   position: sticky;
   top: 0;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  overflow: hidden;
+  align-items: center;
+  padding: 48px 0;
 }
 
 .l-stage-head {
   display: flex;
-  align-items: baseline;
   justify-content: space-between;
-  gap: 20px;
+  align-items: baseline;
+  gap: 16px;
   flex-wrap: wrap;
+  margin-bottom: 22px;
 }
+
 .l-stage-title {
-  font-family: var(--display);
-  font-size: clamp(20px, 2.6vw, 28px);
-  font-weight: 640;
-  letter-spacing: -0.024em;
-  color: var(--l-text);
+  font-family: var(--serif);
+  font-size: 26px;
 }
+
 .l-tally {
   display: flex;
   gap: 18px;
-  font-size: 13.5px;
-  color: var(--l-text-3);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.l-tally b {
+  color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-.l-tally b { font-weight: 600; font-variant-numeric: tabular-nums; }
-.l-tally .n-pass b { color: var(--l-pass); }
-.l-tally .n-partial b { color: var(--l-partial); }
-.l-tally .n-fail b { color: var(--l-fail); }
-
-/*
- * A vote that has not landed yet is a dimmed card with no chip — the person is
- * at their desk, still reading. The hidden states live inside the
- * no-preference guard so a reader with motion reduced sees the finished poll
- * without depending on a scroll listener.
- */
-@media (prefers-reduced-motion: no-preference) {
-  .l-demo--stage .l-verdict {
-    opacity: 0.3;
-    transition: opacity 0.45s ease;
-  }
-  .l-demo--stage .l-json {
-    opacity: 0.3;
-    transform: translateY(6px);
-    transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .l-demo--stage .l-verdict .l-chip {
-    opacity: 0;
-    transform: translateY(-3px);
-    transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .l-stage-punch {
-    opacity: 0;
-    transform: translateY(12px);
-    transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-}
-.l-demo--stage .l-verdict[data-on] { opacity: 1; }
-.l-demo--stage .l-verdict[data-on] .l-chip { opacity: 1; transform: none; }
-.l-demo--stage .l-json[data-on] { opacity: 1; transform: none; }
-.l-stage-punch[data-on] { opacity: 1; transform: none; }
-
-/* The deliverable, as it actually looks: one line of a .jsonl file. */
-.l-json {
-  background: var(--l-raised-2);
-  border-radius: 20px;
-  padding: 17px 22px;
-  font-family: var(--data);
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--l-pass);
-  word-break: break-all;
-}
-
-.l-stage-foot {
-  margin-top: 22px;
-  font-size: 14.5px;
-  color: var(--l-text-3);
-  min-height: 1.5em;
-}
-.l-stage-foot b { color: var(--l-text); font-weight: 560; }
-
-.l-stage-punch {
-  margin: 16px 0 0;
-  font-size: clamp(19px, 2.4vw, 26px);
-  font-weight: 600;
-  letter-spacing: -0.022em;
-  color: var(--l-text);
-  line-height: 1.3;
-  max-width: 44ch;
-}
-
-/* The intro that hands off into the pinned stage: a centred chapter head. */
-.l-section--intro { padding-bottom: 24px; text-align: center; }
-.landing .l-section--intro h2.l-h2 { margin-left: auto; margin-right: auto; }
-.l-section--intro .l-lede { margin-left: auto; margin-right: auto; }
 
 .l-demo {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  gap: 24px;
+  grid-template-columns: 1fr 1fr;
+  gap: 36px;
   align-items: start;
 }
-.l-demo--stage { margin-top: 30px; }
 
 .l-card {
-  background: var(--l-raised-2);
-  border-radius: 28px;
-  padding: 30px 32px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 18px 20px;
+  background: #fff;
 }
 
 .l-trace-label {
-  font-size: 12.5px;
+  font-family: var(--ui);
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: var(--l-text-3);
-  margin-bottom: 14px;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin-bottom: 10px;
 }
+
 .l-trace {
-  font-family: var(--data);
-  font-size: 13.5px;
+  font-family: var(--mono);
+  font-size: 13px;
   line-height: 1.7;
-  color: var(--l-text-2);
-  white-space: pre-wrap;
+  white-space: pre-line;
   margin: 0;
 }
-.l-trace b { color: var(--l-text); font-weight: 500; }
 
-.l-verdicts { display: flex; flex-direction: column; gap: 12px; }
+.l-verdicts {
+  display: flex;
+  flex-direction: column;
+}
 
 .l-verdict {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  background: var(--l-raised-2);
-  border-radius: 20px;
-  padding: 17px 22px;
-}
-.l-who { font-size: 15px; font-weight: 540; color: var(--l-text); }
-.l-said { font-size: 13px; color: var(--l-text-3); margin-top: 2px; }
-.l-chip {
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 14px;
-  border-radius: 999px;
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-.l-chip.pass { background: rgba(37, 208, 160, 0.14); color: var(--l-pass); }
-.l-chip.partial { background: rgba(255, 176, 32, 0.14); color: var(--l-partial); }
-.l-chip.fail { background: rgba(255, 59, 107, 0.14); color: var(--l-fail); }
-
-/* Closing ----------------------------------------------------------------- */
-
-.l-close {
-  padding: 170px 0 170px;
-  text-align: center;
-}
-/* Outranks the `.landing h2.l-h2` margin shorthand, which would win on
-   specificity and pin the heading left. */
-.landing .l-close h2.l-h2 { margin-left: auto; margin-right: auto; }
-.l-close .l-lede { margin: 0 auto 38px; }
-.l-close .l-cta-row { justify-content: center; }
-
-/* The arrival conversation ------------------------------------------------- */
-
-.l-chat {
-  margin: 34px auto 0;
-  max-width: 640px;
-  background: var(--l-raised);
-  border-radius: 28px;
-  padding: 20px;
-  text-align: left;
-}
-.l-msgs {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 170px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 4px;
-}
-.l-msg {
-  max-width: 85%;
-  padding: 11px 16px;
-  border-radius: 18px;
-  font-size: 15px;
-  line-height: 1.5;
-}
-.l-msg.a {
-  background: var(--l-raised-2);
-  color: var(--l-text-2);
-  align-self: flex-start;
-  border-bottom-left-radius: 6px;
-}
-.l-msg.u {
-  background: var(--l-text);
-  color: #000;
-  align-self: flex-end;
-  border-bottom-right-radius: 6px;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .l-msg {
-    animation: l-msg-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  @keyframes l-msg-in {
-    from { opacity: 0; transform: translateY(8px); }
-  }
-}
-.l-chat form { display: flex; gap: 10px; margin-top: 14px; }
-.l-chat input {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: var(--l-raised-2);
-  border: none;
-  color: var(--l-text);
-  border-radius: 999px;
-  padding: 13px 20px;
-  font-size: 15px;
-  font-family: var(--ui);
-}
-.l-chat input::placeholder { color: var(--l-text-3); }
-.l-chat input:focus { outline: none; box-shadow: 0 0 0 3px rgba(245, 245, 247, 0.22); }
-
-.landing button.l-link {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--l-text-2);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-}
-.landing button.l-link:hover:not(:disabled) { color: var(--l-text); }
-.landing button.l-link:disabled { cursor: default; color: var(--l-text-3); }
-
-.l-foot {
-  border-top: 1px solid var(--l-line);
-  padding: 30px 0 60px;
-  font-size: 13.5px;
-  color: var(--l-text-3);
-  display: flex;
-  gap: 18px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid var(--hairline);
+  padding: 14px 0;
 }
 
-.landing .error-banner {
-  background: rgba(255, 59, 107, 0.1);
-  border-color: rgba(255, 59, 107, 0.4);
-  color: var(--l-text);
-  max-width: 460px;
-  margin: 18px auto 0;
-  text-align: left;
-}
-
-@media (max-width: 860px) {
-  .l-demo { grid-template-columns: 1fr; }
-  .l-section { padding: 96px 0 0; }
-  .l-section--intro { padding-bottom: 16px; }
-  .l-hero { min-height: auto; padding: 90px 0 60px; }
-  /* Too little vertical room to pin honestly — the poll reads as a plain
-     section and the script shows every vote at once. */
-  .l-scroller { height: auto; }
-  .l-stage { position: static; height: auto; padding: 40px 0 84px; overflow: visible; }
+.l-verdict:first-child {
+  border-top: none;
 }
 
 /*
- * With motion reduced the sequence cannot be scroll-driven, so the stage stops
- * pinning and the finished poll is simply there — the reader gets the whole
- * disagreement immediately rather than a page that depends on a gesture.
+ * The not-yet-voted state is dimming, and dimming is motion's business: it
+ * only makes sense while the sequence is playing. Keeping it inside the
+ * no-preference guard means a reader with motion reduced, or with the script
+ * dead, sees the finished poll from CSS alone rather than three grey rows
+ * waiting on an observer that will never fire.
  */
+@media (prefers-reduced-motion: no-preference) {
+  .l-demo--stage .l-verdict {
+    opacity: 0.25;
+    transition: opacity 0.4s ease;
+  }
+
+  .l-demo--stage .l-verdict[data-on] {
+    opacity: 1;
+  }
+}
+
+/* The literalist's row is the split: the only red on the page. */
+.l-verdict[data-split][data-on] {
+  border-left: 3px solid var(--signal);
+  padding-left: 14px;
+}
+
+.l-who {
+  font-family: var(--serif);
+  font-size: 19px;
+}
+
+.l-said {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.l-chip {
+  font-family: var(--mono);
+  font-size: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.l-chip.pass {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.l-chip.partial {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.l-chip.fail {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+.l-stage-foot {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  margin: 20px 0 0;
+  min-height: 22px;
+}
+
+.l-stage-punch {
+  font-family: var(--serif);
+  font-size: clamp(22px, 3.2vw, 30px);
+  line-height: 1.3;
+  margin: 18px 0 0;
+  max-width: 700px;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  text-wrap: balance;
+}
+
+.l-stage-punch[data-on] {
+  opacity: 1;
+}
+
+/* ---- The artifact ------------------------------------------------------- */
+
+.l-artifact {
+  margin-top: 36px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: #fff;
+  padding: 34px 38px;
+  max-width: 640px;
+}
+
+.l-artifact .t {
+  font-family: var(--serif);
+  font-size: 30px;
+  text-align: center;
+}
+
+.l-artifact .s {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 18px;
+  text-align: center;
+  margin-top: 2px;
+}
+
+.l-artifact .stamp {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+  margin: 12px 0 22px;
+}
+
+.l-artifact .clause {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  border-left: 2px solid var(--hairline);
+  padding: 8px 0 8px 14px;
+  margin-bottom: 10px;
+}
+
+.l-artifact .clause.added {
+  border-left-color: var(--signal);
+}
+
+.l-artifact .clause .tag {
+  display: block;
+  font-size: 10.5px;
+  color: var(--signal);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.l-caption {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 14px;
+}
+
+/* ---- How it works ------------------------------------------------------- */
+
+.l-steps {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 30px 0 0;
+  max-width: 640px;
+}
+
+.l-steps li {
+  counter-increment: step;
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  border-top: 1px solid var(--hairline);
+  padding: 18px 0;
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1.4;
+}
+
+.l-steps li::before {
+  content: counter(step);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- Closer ------------------------------------------------------------- */
+
+.l-close {
+  border-top: 1px solid var(--hairline);
+  padding: 110px 0;
+  text-align: center;
+}
+
+.l-close .line {
+  font-family: var(--serif);
+  font-size: clamp(28px, 4.5vw, 46px);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  max-width: 760px;
+  margin: 0 auto;
+  text-wrap: balance;
+}
+
+.l-close .l-primary {
+  margin-top: 36px;
+}
+
+/* ---- Footer ------------------------------------------------------------- */
+
+.l-foot {
+  border-top: 1px solid var(--ink);
+  padding: 26px 0 60px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.l-foot .mark {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--ink);
+}
+
+/* ---- Reveal ------------------------------------------------------------- */
+
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.6s ease var(--d, 0ms), transform 0.6s ease var(--d, 0ms);
+}
+
+[data-reveal][data-shown] {
+  opacity: 1;
+  transform: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .l-scroller { height: auto; }
-  .l-stage { position: static; height: auto; padding: 40px 0 100px; overflow: visible; }
+  [data-reveal],
+  .l-verdict,
+  .l-stage-punch {
+    transition: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  /* A pinned stage with no scroll animation is just a tall empty gap: unpin
+     it so the section takes the room it actually needs. */
+  .l-scroller {
+    height: auto;
+  }
+
+  .l-stage {
+    position: static;
+    min-height: 0;
+  }
+}
+
+/* ---- Small screens ------------------------------------------------------ */
+
+@media (max-width: 860px) {
+  .l-scroller {
+    height: auto;
+  }
+
+  .l-stage {
+    position: static;
+    min-height: 0;
+  }
+
+  .l-demo {
+    grid-template-columns: 1fr;
+  }
+
+  .l-hero {
+    padding: 70px 0 60px;
+  }
 }

@@ -66,6 +66,8 @@ export async function createProject(
     token: args.token,
     name: args.name,
     description: args.description ?? '',
+    isPublic: false,
+    ownerEmail: '',
     createdAt: now(),
   };
   await db.run(
@@ -173,8 +175,25 @@ function toProject(row: Row): Project {
     token: str(row.token),
     name: str(row.name),
     description: str(row.description),
+    isPublic: row.is_public === true,
+    ownerEmail: str(row.owner_email),
     createdAt: str(row.created_at),
   };
+}
+
+export async function setProjectPublic(db: DB, projectId: string, isPublic: boolean): Promise<void> {
+  await db.run('UPDATE projects SET is_public = ? WHERE id = ?', isPublic, projectId);
+}
+
+export async function setOwnerEmail(db: DB, projectId: string, email: string): Promise<void> {
+  await db.run('UPDATE projects SET owner_email = ? WHERE id = ?', email, projectId);
+}
+
+/** The patches a given rubric version absorbed, evidence and all. */
+export async function patchesForVersion(db: DB, versionId: string): Promise<PatchRecord[]> {
+  return (
+    (await db.all('SELECT * FROM patches WHERE resolved_rubric_version_id = ? ORDER BY created_at', versionId)) as Row[]
+  ).map(toPatch);
 }
 
 /* ---- Graders ------------------------------------------------------------ */

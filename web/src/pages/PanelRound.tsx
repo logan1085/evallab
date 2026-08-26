@@ -102,20 +102,30 @@ export function PanelRoundPage() {
 
   return (
     <main className="sheet sheet--wide">
-      <Masthead
-        crumbs={[{ label: 'Project', to: `/p/${slug}` }, map.round.name]}
-        title={
-          disagreements === 0
-            ? 'The panel agreed on everything'
-            : `The panel split on ${disagreements} of ${map.cases.length} cases`
-        }
-        standfirst={
-          disagreements === 0
+      <header className="masthead">
+        <div className="stamp">
+          <span><b>The Grading Room</b></span>
+          <Link to={`/p/${slug}`}>Back to the Room</Link>
+          <span>{map.round.name}</span>
+        </div>
+        <h1>
+          {disagreements === 0 ? (
+            'The panel agreed on everything.'
+          ) : (
+            <>
+              Your panel split <span style={{ color: 'var(--signal)' }}>{disagreements}</span> time{disagreements === 1 ? '' : 's'}.
+            </>
+          )}
+        </h1>
+        <p className="standfirst">
+          {disagreements === 0
             ? 'Either your rubric decides every case, or this case set avoided the hard ones. Check your ten below before believing it.'
-            : 'Where the panel splits is where your rubric is silent. The sentences it is missing are proposed below, with the evidence.'
-        }
-      />
+            : 'Where the panel splits is where your rubric is silent. Each split below shows who disagreed and why.'}
+        </p>
+      </header>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
+
+      <StandardsHandoff slug={slug!} roundId={roundId!} token={token} splits={disagreements} onError={setError} />
 
       {map.simulated ? (
         <div className="warn">
@@ -160,7 +170,7 @@ export function PanelRoundPage() {
             <h2 style={{ marginBottom: 4 }}>{copy.label}</h2>
             <p className="note" style={{ marginTop: 0 }}>{copy.hint}</p>
             {cases.map((c) => (
-              <div key={c.itemId} className="panel">
+              <div key={c.itemId} className={`panel${pattern === 'persona-driven' || pattern === 'contested' ? ' is-split' : ''}`}>
                 <div className="between">
                   <h3 style={{ margin: 0 }}>{c.title}</h3>
                   {c.pattern === 'settled' ? (
@@ -207,6 +217,70 @@ export function PanelRoundPage() {
         <Link to={`/p/${slug}`}>Back to the project</Link>
       </p>
     </main>
+  );
+}
+
+/* ---- The handoff ---------------------------------------------------------- */
+
+/**
+ * The most important interaction in the product: every grounded split becomes
+ * a sentence in one new Standards version, and the owner approves it on the
+ * Standards page rather than editing here. The failure state is a sentence,
+ * never a spinner.
+ */
+function StandardsHandoff({
+  slug,
+  roundId,
+  token,
+  splits,
+  onError,
+}: {
+  slug: string;
+  roundId: string;
+  token: string;
+  splits: number;
+  onError: (m: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  async function write() {
+    setBusy(true);
+    setFailed(null);
+    try {
+      await api.writeStandards(roundId, token);
+      window.location.href = `/s/${slug}?k=${encodeURIComponent(token)}`;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'The standards could not be written.';
+      setFailed(message);
+      onError(message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel">
+      <div className="between" style={{ alignItems: 'center' }}>
+        <p style={{ margin: 0, maxWidth: 560 }}>
+          {splits === 0
+            ? 'No splits means no missing sentences from this round. Your standards stand as they are.'
+            : 'Every split drafts the sentence your rubric was missing. Nothing is edited here; you read and approve the result on your Standards page.'}
+        </p>
+        <div className="shrink">
+          <button onClick={write} disabled={busy || splits === 0}>
+            {busy ? 'Writing…' : 'Write the next Standards'}
+          </button>
+        </div>
+      </div>
+      {failed ? (
+        <p className="tiny" style={{ marginTop: 10 }}>
+          {failed}{' '}
+          <button className="ghost tiny-btn" onClick={write}>
+            try again
+          </button>
+        </p>
+      ) : null}
+    </div>
   );
 }
 

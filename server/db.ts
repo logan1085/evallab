@@ -340,6 +340,8 @@ ALTER TABLE grades          ADD COLUMN IF NOT EXISTS output_length INTEGER NOT N
 ALTER TABLE rounds          ADD COLUMN IF NOT EXISTS pinned_models TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE rounds          ADD COLUMN IF NOT EXISTS false_settle_rate DOUBLE PRECISION;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS changelog TEXT NOT NULL DEFAULT '';
+ALTER TABLE projects        ADD COLUMN IF NOT EXISTS is_public   BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE projects        ADD COLUMN IF NOT EXISTS owner_email TEXT NOT NULL DEFAULT '';
 `;
 
 /** `?` is what the store writes; Postgres wants `$1`. Quoted literals are left alone. */

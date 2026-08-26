@@ -19,8 +19,9 @@ import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
 import { JudgeError, mapLimit, resolveProvider } from './judge.js';
 import { DrafterError, resolveDrafter } from './drafter.js';
-import { resolveScenarist } from './scenarist.js';
-import { adapterFor, availableFamilies, resolvePanelWriter } from './panelists.js';
+import { offlineScenarist, resolveScenarist } from './scenarist.js';
+import { adapterFor, availableFamilies, offlineAdapter, resolvePanelWriter } from './panelists.js';
+import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
 import { createSpendGuard } from './spend.js';
 import {
   ABSTAIN,
@@ -75,9 +76,31 @@ interface ProjectRequest extends Request {
  */
 export const MAX_JUDGE_BATCH = 16;
 
+/** Older clients fold the limits into the description; recover them. */
+function extractLimits(description: string): string {
+  return description.match(/Hard limits:\s*([\s\S]+)$/i)?.[1] ?? '';
+}
+
+/**
+ * The owner's limits, split into one clause per sentence. "Skip", or anything
+ * too short to be a rule, yields nothing: a rubric clause that says "skip"
+ * would be worse than an empty rubric.
+ */
+function splitIntoClauses(text: string): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length < 12 || /^skip\b/i.test(trimmed)) return [];
+  return trimmed
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 12)
+    .slice(0, 5);
+}
+
 export function createApp(db: DB) {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
+  // The public Standards page uses plain HTML forms for its owner controls.
+  app.use(express.urlencoded({ extended: false }));
 
   const api = express.Router();
 
@@ -183,22 +206,39 @@ export function createApp(db: DB) {
       .object({
         name: z.string().min(1).max(120),
         description: z.string().max(2000).default(''),
+        /** The answer to "anything it must never do?", kept apart on purpose. */
+        limits: z.string().max(1000).default(''),
       })
       .safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'A project name is required.' });
 
+    const description = body.data.description.trim();
     const project = await store.createProject(db, {
       slug: newSlug(body.data.name),
       token: newToken(),
       name: body.data.name,
-      description: body.data.description.trim(),
+      description,
     });
+
+    // The hard limits the owner typed are already rubric sentences: they are
+    // the one thing at setup that is written in their own words about what
+    // counts as failure. They become clauses verbatim rather than being
+    // paraphrased, so v1 is a framework rather than an empty preamble, and so
+    // the literalist has something real to hold the panel to. Nothing else is
+    // invented here; an unwritten rubric is the panel's job to fill.
+    const limits = (body.data.limits || extractLimits(description)).trim();
+    const criteria = splitIntoClauses(limits).map((body_) => ({
+      id: newId(),
+      title: 'Your hard limit',
+      body: body_,
+    }));
+
     const rubric = await store.createRubricVersion(db, {
       projectId: project.id,
       name: 'Your standards',
-      preamble: body.data.description.trim(),
+      preamble: description,
       scale: DEFAULT_SCALE,
-      criteria: [],
+      criteria,
     });
 
     let scenarioCount = 0;
@@ -261,6 +301,24 @@ export function createApp(db: DB) {
         })),
       ),
     });
+  });
+
+  /** Optional email capture at setup: somewhere for the link to be re-sent.
+   *  Captured, not yet sent anywhere; the link stays the credential. */
+  api.post('/projects/:slug/email', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z.object({ email: z.string().email().max(200) }).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'That does not read as an email address.' });
+    await store.setOwnerEmail(db, project.id, body.data.email);
+    res.json({ ok: true });
+  });
+
+  api.post('/projects/:slug/visibility', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z.object({ public: z.boolean() }).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'public: true or false.' });
+    await store.setProjectPublic(db, project.id, body.data.public);
+    res.json({ ok: true, isPublic: body.data.public });
   });
 
   /* ---- API keys ---------------------------------------------------------- */
@@ -1070,13 +1128,9 @@ export function createApp(db: DB) {
    * the response, because plausible ungrounded rubric language is the exact
    * failure this product exists to prevent.
    */
-  api.post('/rounds/:roundId/patches', requireRound, async (req, res) => {
-    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
-    if (round.status !== 'closed') return res.status(409).json({ error: 'Patches are mined from a finished round.' });
-
-    const existing = await store.listPatches(db, round.id);
-    if (existing.length > 0) return res.json({ patches: existing, dropped: 0, regenerated: false });
-
+  /** Mine the missing sentences from a closed round. Shared by the patches
+   *  route and the one-click standards write; grounding rules identical. */
+  async function minePatchesForRound(round: NonNullable<Awaited<ReturnType<typeof store.getRound>>>) {
     const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
     const seatById = new Map(seats.map((s) => [s.id, s]));
     const items = await store.listItems(db, round.id);
@@ -1189,7 +1243,7 @@ export function createApp(db: DB) {
           await store.insertPatch(db, {
             projectId: round.projectId,
             roundId: round.id,
-            text: `The rubric does not decide cases like "${freeContested[0]!.title}". Add one sentence saying which stake wins there, then re-run the panel on the contested cases.`,
+            text: `Cases like "${freeContested[0]!.title}" are decided by this rubric, not left to the grader's judgment: name which stake wins there, in one sentence, and grade every case of that shape the same way.`,
             evidence,
             seatsSided: [],
             projectedLift: liftFor(
@@ -1237,7 +1291,64 @@ export function createApp(db: DB) {
       }
     }
 
+    return { stored, dropped, contestedTotal };
+  }
+
+  api.post('/rounds/:roundId/patches', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Patches are mined from a finished round.' });
+
+    const existing = await store.listPatches(db, round.id);
+    if (existing.length > 0) return res.json({ patches: existing, dropped: 0, regenerated: false });
+
+    const { stored, dropped, contestedTotal } = await minePatchesForRound(round);
     res.status(201).json({ patches: stored, dropped, contestedTotal, regenerated: true });
+  });
+
+  /**
+   * The handoff: every grounded split becomes a sentence in one new Standards
+   * version. Nothing is edited here; the owner approves on the Standards page
+   * by publishing it. Idempotent per round: writing twice returns the version
+   * the round already produced.
+   */
+  api.post('/rounds/:roundId/standards', requireRound, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Standards are written from a finished round.' });
+
+    let patches = await store.listPatches(db, round.id);
+    if (patches.length === 0) patches = (await minePatchesForRound(round)).stored;
+
+    const already = patches.find((p) => p.status === 'accepted' && p.resolvedRubricVersionId);
+    if (already) {
+      const version = await store.getRubric(db, already.resolvedRubricVersionId!);
+      return res.json({ rubric: version, url: `/s/${project.slug}`, sentences: 0, alreadyWritten: true });
+    }
+
+    const proposed = patches.filter((p) => p.status === 'proposed');
+    const current = await store.currentRubric(db, round.projectId);
+    if (!current) return res.status(400).json({ error: 'No rubric to write into.' });
+    if (proposed.length === 0) {
+      return res.status(409).json({
+        error: 'No split produced a grounded sentence, so there is nothing honest to write. The framework stands as it is.',
+      });
+    }
+
+    const version = await store.createRubricVersion(db, {
+      projectId: round.projectId,
+      name: current.name,
+      preamble: current.preamble,
+      scale: current.scale,
+      criteria: [
+        ...current.criteria,
+        ...proposed.map((p) => ({ id: newId(), title: 'Added after a split', body: p.text })),
+      ],
+      parentVersionId: current.id,
+      changelog: `Standards v${current.version + 1}: ${proposed.length} sentence${proposed.length === 1 ? '' : 's'} written from the splits of ${round.name || `Round ${round.index}`}.`,
+    });
+    for (const p of proposed) await store.setPatchStatus(db, p.id, 'accepted', version.id);
+
+    res.status(201).json({ rubric: version, url: `/s/${project.slug}`, sentences: proposed.length, alreadyWritten: false });
   });
 
   api.get('/rounds/:roundId/patches', requireRound, async (req, res) => {
@@ -2360,6 +2471,214 @@ export function createApp(db: DB) {
     );
 
     res.json({ runs, real: resolveProvider().real });
+  });
+
+  /* ---- The public Standards page ----------------------------------------- */
+
+  /** Owner if the credential opens the project; otherwise public-only access. */
+  async function shareAccess(req: Request, project: Project): Promise<'owner' | 'public' | null> {
+    const cred = credentialOf(req) ?? (typeof req.body?.k === 'string' ? req.body.k.trim() : '');
+    if (cred) {
+      if (cred === project.token) return 'owner';
+      if (cred.startsWith('gr_') && (await store.projectIdForKeyHash(db, hashKey(cred))) === project.id) return 'owner';
+    }
+    return project.isPublic ? 'public' : null;
+  }
+
+  /** Everything the Standards document renders, assembled from the store. */
+  async function standardsView(project: Project, owner: boolean, k: string | null): Promise<StandardsView | null> {
+    const version = await store.currentRubric(db, project.id);
+    if (!version) return null;
+    const parent = version.parentVersionId ? await store.getRubric(db, version.parentVersionId) : null;
+    const parentIds = new Set((parent?.criteria ?? []).map((c) => c.id));
+    const addedIds = new Set(parent ? version.criteria.filter((c) => !parentIds.has(c.id)).map((c) => c.id) : []);
+    const patches = await store.patchesForVersion(db, version.id);
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+
+    // Split count from the round the version came from, or the latest closed
+    // round when the framework predates its first patch.
+    const roundId =
+      patches[0]?.roundId ??
+      (await store.listRounds(db, project.id)).filter((r) => r.status === 'closed').at(-1)?.id ??
+      null;
+    let cases = 0;
+    let splits = 0;
+    if (roundId) {
+      const items = await store.listItems(db, roundId);
+      cases = items.length;
+      const seatIds = new Set(seats.map((s) => s.id));
+      const seatName = new Map(seats.map((s) => [s.id, s.name]));
+      const grades = (await store.allGradesForRound(db, roundId)).filter((g) => seatIds.has(g.graderId));
+      const byItem = new Map<string, SeatVote[]>();
+      for (const g of grades) {
+        byItem.set(g.itemId, [
+          ...(byItem.get(g.itemId) ?? []),
+          { seatId: g.graderId, seatName: seatName.get(g.graderId) ?? 'seat', verdict: g.verdict, reason: g.note },
+        ]);
+      }
+      for (const item of items) {
+        if (readCase(item.id, byItem.get(item.id) ?? []).pattern !== 'settled') splits++;
+      }
+    }
+
+    return {
+      project: { name: project.name, slug: project.slug, isPublic: project.isPublic },
+      version: {
+        version: version.version,
+        preamble: version.preamble,
+        criteria: version.criteria,
+        changelog: (version as { changelog?: string }).changelog ?? '',
+        createdAt: version.createdAt ?? project.createdAt,
+      },
+      addedIds,
+      patches: patches.map((p) => ({ text: p.text, evidence: p.evidence, seatsSided: p.seatsSided })),
+      seats: seats.map((s) => ({ name: s.name, objective: s.objective, failsFor: s.failsFor, model: s.model })),
+      stats: {
+        cases,
+        splits,
+        sentences: addedIds.size,
+        simulated: seats.length > 0 && seats.every((s) => s.model === 'simulated' || s.family === 'offline'),
+      },
+      owner,
+      k,
+    };
+  }
+
+  /**
+   * The worked example behind the landing's "See a real framework" link: a
+   * complete offline pass (seats, blind round, splits, standards v2), seeded
+   * once and public. Deliberately the deterministic simulation, whatever keys
+   * the server holds: the example must cost nothing, finish in one request,
+   * and be labeled simulated on the page.
+   */
+  const EXAMPLE_SLUG = 'meridian-outfitters';
+  async function ensureWorkedExample(): Promise<void> {
+    if (await store.getProjectBySlug(db, EXAMPLE_SLUG)) return;
+    const project = await store.createProject(db, {
+      slug: EXAMPLE_SLUG,
+      token: newToken(),
+      name: 'Meridian Outfitters support agent',
+      description:
+        'Meridian Outfitters sells outdoor gear online. The AI answers billing and order questions and can refund up to $50 without approval; anything above $50 goes to a human.',
+    });
+    const rubric = await store.createRubricVersion(db, {
+      projectId: project.id,
+      name: 'Your standards',
+      preamble: project.description,
+      scale: DEFAULT_SCALE,
+      criteria: [
+        { id: newId(), title: 'Answer first', body: 'The answer to the question asked appears in the first two sentences, before any caveat.' },
+        { id: newId(), title: 'The refund line', body: 'Refunds up to $50 are issued without asking; a request above $50 is declined and routed to a human, never improvised.' },
+        { id: newId(), title: 'No invented policy', body: 'The agent never states a policy, price, or timeline that is not in the operating documents.' },
+      ],
+    });
+    const scenarios = await offlineScenarist().write({ description: project.description });
+    await store.addTraces(
+      db,
+      project.id,
+      scenarios.map((s) => ({ title: s.title, content: s.content, source: 'scenario', meta: { probe: s.probe, generated: true, real: false } })),
+    );
+    const lit = archetype(REQUIRED_SEAT)!;
+    const bench = [lit, ...ARCHETYPES.filter((a) => a.id !== REQUIRED_SEAT).slice(0, 5)];
+    const seats = [];
+    for (const spec of bench) {
+      seats.push(
+        await store.insertGrader(db, {
+          projectId: project.id,
+          name: spec.name,
+          kind: 'panelist',
+          objective: spec.objective,
+          failsFor: spec.failsFor,
+          model: 'simulated',
+          family: 'offline',
+          origin: 'archetype',
+          archetypeId: spec.id,
+        }),
+      );
+    }
+    const traces = await store.listTraces(db, project.id);
+    const { round } = await store.createRound(db, {
+      projectId: project.id,
+      rubricVersionId: rubric.id,
+      name: 'Round 1',
+      strategy: 'random',
+      seed: newId(),
+      samplingNote: 'Worked example: the labeled simulation, every seat over every case.',
+      sourceRoundId: null,
+      calibration: traces.map((t) => t.id),
+      heldout: [],
+    });
+    await store.setRoundPinnedModels(db, round.id, Object.fromEntries(seats.map((s) => [s.name, 'offline:simulated'])));
+    const items = await store.listItems(db, round.id);
+    const sim = offlineAdapter();
+    const rubricMarkdown = renderRubricMarkdown(rubric);
+    for (const seat of seats) {
+      for (const item of items) {
+        const trace = traces.find((t) => t.id === item.traceId);
+        if (!trace) continue;
+        const verdict = await sim.score({ seat, rubricMarkdown, caseId: item.traceId, caseTitle: trace.title, caseContent: trace.content });
+        await store.submitGrade(db, { itemId: item.id, graderId: seat.id, verdict: verdict.verdict, note: verdict.reason, outputLength: trace.content.length });
+      }
+    }
+    await store.closeRound(db, round.id);
+    const { stored } = await minePatchesForRound((await store.getRound(db, round.id))!);
+    const proposed = stored.filter((p) => p.status === 'proposed');
+    if (proposed.length > 0) {
+      const version = await store.createRubricVersion(db, {
+        projectId: project.id,
+        name: rubric.name,
+        preamble: rubric.preamble,
+        scale: rubric.scale,
+        criteria: [...rubric.criteria, ...proposed.map((p) => ({ id: newId(), title: 'Added after a split', body: p.text }))],
+        parentVersionId: rubric.id,
+        changelog: `Standards v2: ${proposed.length} sentences written from the splits of Round 1.`,
+      });
+      for (const p of proposed) await store.setPatchStatus(db, p.id, 'accepted', version.id);
+    }
+    await store.setProjectPublic(db, project.id, true);
+  }
+
+  app.get('/s/example', async (_req, res) => {
+    try {
+      await ensureWorkedExample();
+      res.redirect(`/s/${EXAMPLE_SLUG}`);
+    } catch {
+      res.status(503).type('text/plain').send('The example could not be seeded right now.');
+    }
+  });
+
+  app.get('/s/:slug', async (req, res) => {
+    const project = await store.getProjectBySlug(db, req.params.slug!);
+    const access = project ? await shareAccess(req, project) : null;
+    if (!project || !access) {
+      return res.status(404).type('text/plain').send('This Standards page is private or does not exist.');
+    }
+    const k = access === 'owner' ? (credentialOf(req) ?? null) : null;
+    const view = await standardsView(project, access === 'owner', k);
+    if (!view) return res.status(404).type('text/plain').send('This project has no standards yet.');
+    const proto = req.header('x-forwarded-proto') ?? req.protocol;
+    res.type('html').send(renderStandardsPage(view, `${proto}://${req.get('host')}`));
+  });
+
+  app.get('/s/:slug/og.svg', async (req, res) => {
+    const project = await store.getProjectBySlug(db, req.params.slug!);
+    const access = project ? await shareAccess(req, project) : null;
+    if (!project || !access) return res.status(404).end();
+    const view = await standardsView(project, false, null);
+    if (!view) return res.status(404).end();
+    res.type('image/svg+xml').send(renderOgSvg(view));
+  });
+
+  app.post('/s/:slug/visibility', async (req, res) => {
+    const project = await store.getProjectBySlug(db, req.params.slug!);
+    if (!project) return res.status(404).type('text/plain').send('No such project.');
+    if ((await shareAccess(req, project)) !== 'owner') {
+      return res.status(403).type('text/plain').send('Only the key that owns this project can change its visibility.');
+    }
+    const makePublic = req.body?.public === '1' || req.body?.public === true;
+    await store.setProjectPublic(db, project.id, makePublic);
+    const k = typeof req.body?.k === 'string' ? req.body.k : '';
+    res.redirect(`/s/${project.slug}${k ? `?k=${encodeURIComponent(k)}` : ''}`);
   });
 
   // One router, two mounts. /api/v1 is the versioned surface agents build
