@@ -1,124 +1,91 @@
 /**
- * The Anthropic drafter, exercised against a stand-in API.
+ * The drafter, exercised against a scripted router.
  *
- * Everything in `anthropicDrafter` only runs when a key is set, which means it
- * only runs in production unless something like this stands in for the service.
- * The server here speaks just enough of the Messages API to drive the request
- * shape, the refusal path, and the parse failure.
+ * Everything in `openrouterDrafter` only runs when a key is set, which means
+ * it only runs in production unless something stands in for the service. The
+ * gateway's fake transport does that: it speaks the router's response shape,
+ * so the request body, the schema contract, the retry ladder and the failure
+ * translation are all exercised without a network.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import { fakeTransport } from '../server/gateway.js';
+import { CREATOR_PIN } from '../server/openrouter.js';
 import { DrafterError, resolveDrafter } from '../server/drafter.js';
 import { MAX_QUESTIONS } from '../shared/drafting.js';
 
-let server: Server;
-let received: { path: string; body: Record<string, unknown> } | null = null;
-let reply: { status: number; body: unknown } = { status: 200, body: {} };
+const saved = process.env.OPENROUTER_API_KEY;
 
-const savedEnv = { key: process.env.ANTHROPIC_API_KEY, base: process.env.ANTHROPIC_BASE_URL };
-
-function message(text: string, stopReason = 'end_turn') {
-  return {
-    id: 'msg_1',
-    type: 'message',
-    role: 'assistant',
-    model: 'claude-opus-5',
-    content: [{ type: 'text', text }],
-    stop_reason: stopReason,
-    stop_sequence: null,
-    usage: { input_tokens: 1, output_tokens: 1 },
-  };
-}
-
-beforeEach(async () => {
-  received = null;
-  server = createServer((req, res) => {
-    let raw = '';
-    req.on('data', (chunk) => (raw += chunk));
-    req.on('end', () => {
-      received = { path: req.url ?? '', body: raw ? JSON.parse(raw) : {} };
-      res.writeHead(reply.status, { 'content-type': 'application/json' });
-      res.end(JSON.stringify(reply.body));
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-
-  process.env.ANTHROPIC_API_KEY = 'test-key';
-  process.env.ANTHROPIC_BASE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+beforeEach(() => {
+  process.env.OPENROUTER_API_KEY = 'or-test';
 });
 
-afterEach(async () => {
-  if (savedEnv.key === undefined) delete process.env.ANTHROPIC_API_KEY;
-  else process.env.ANTHROPIC_API_KEY = savedEnv.key;
-  if (savedEnv.base === undefined) delete process.env.ANTHROPIC_BASE_URL;
-  else process.env.ANTHROPIC_BASE_URL = savedEnv.base;
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+afterEach(() => {
+  if (saved === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = saved;
 });
 
-const request = {
-  description: 'A support agent that issues refunds.',
-  examples: [{ title: 'Refund approved', content: 'user: refund please' }],
+const REQUEST = {
+  description: 'A support agent that answers billing questions and refunds up to $50.',
+  examples: [],
+  documents: [],
 };
 
-describe('the anthropic drafter', () => {
-  it('is chosen over the offline provider once a key is set', () => {
-    expect(resolveDrafter().real).toBe(true);
+const GOOD_DRAFT = JSON.stringify({
+  name: 'Rubric v1',
+  preamble: 'Grade the agent on what it did.',
+  scale: [
+    { id: 'fail', label: 'fail', rank: 0, description: 'no' },
+    { id: 'pass', label: 'pass', rank: 1, description: 'yes' },
+  ],
+  criteria: [{ id: 'c1', title: 'Answer first', body: 'The answer comes first.' }],
+  conflicts: [],
+  openQuestions: [{ id: 'q1', question: 'What counts as partial?', why: 'Teams split here.' }],
+});
+
+describe('the drafter through the router', () => {
+  it('drafts from a well-formed reply', async () => {
+    const drafter = resolveDrafter();
+    expect(drafter.real).toBe(true);
+    const draft = await drafter.draft(REQUEST, {
+      transport: fakeTransport([{ pin_id: CREATOR_PIN, text: GOOD_DRAFT }]),
+    });
+    expect(draft.criteria[0]!.body).toBe('The answer comes first.');
+    expect(draft.openQuestions.length).toBeLessThanOrEqual(MAX_QUESTIONS);
   });
 
-  it('sends the rubric, the transcripts, and a schema that constrains the answer', async () => {
-    reply = {
-      status: 200,
-      body: message(
-        JSON.stringify({
-          name: 'Refund rubric',
-          preamble: 'Decide whether the refund was handled.',
-          scale: [{ label: 'fail' }, { label: 'recoverable' }, { label: 'pass' }],
-          criteria: [{ title: 'Names the amount', body: 'The agent states the refunded amount.' }],
-          openQuestions: [{ question: 'Is an escalation a pass?', why: 'Only one example escalates.' }],
-        }),
-      ),
-    };
-
-    const draft = await resolveDrafter('claude-opus-5').draft(request);
-
-    expect(received?.path).toContain('/v1/messages');
-    expect(received?.body.model).toBe('claude-opus-5');
-    expect(String(received?.body.system)).toMatch(/never write a criterion that is really a question/i);
-    expect(JSON.stringify(received?.body.messages)).toContain('user: refund please');
-
-    const schema = (received?.body.output_config as { format: { schema: { properties: Record<string, unknown> } } })
-      .format.schema;
-    expect(Object.keys(schema.properties)).toContain('openQuestions');
-    expect((schema.properties.openQuestions as { maxItems: number }).maxItems).toBe(MAX_QUESTIONS);
-
-    expect(draft.name).toBe('Refund rubric');
-    expect(draft.scale.map((s) => s.rank)).toEqual([0, 1, 2]);
-    expect(draft.openQuestions[0]!.id).toBe('q1');
+  it('turns a router error into a typed drafter error, never a raw failure', async () => {
+    const drafter = resolveDrafter();
+    await expect(
+      drafter.draft(REQUEST, {
+        transport: fakeTransport([{ pin_id: CREATOR_PIN, text: GOOD_DRAFT, status: 401 }]),
+      }),
+    ).rejects.toBeInstanceOf(DrafterError);
   });
 
-  it('turns a refusal into an error rather than an empty rubric', async () => {
-    reply = { status: 200, body: message('', 'refusal') };
-    await expect(resolveDrafter().draft(request)).rejects.toMatchObject({ code: 'refusal' });
-  });
-
-  it('reports unparseable output instead of returning a blank draft', async () => {
-    reply = { status: 200, body: message('I have decided not to use JSON today.') };
-    await expect(resolveDrafter().draft(request)).rejects.toMatchObject({ code: 'parse' });
-  });
-
-  it('names a rejected key rather than surfacing an SDK stack trace', async () => {
-    reply = { status: 401, body: { type: 'error', error: { type: 'authentication_error', message: 'nope' } } };
-    const error = await resolveDrafter()
-      .draft(request)
+  it('reports unparseable output as a parse failure rather than an empty rubric', async () => {
+    const drafter = resolveDrafter();
+    const error = await drafter
+      .draft(REQUEST, { transport: fakeTransport([{ pin_id: CREATOR_PIN, text: 'not json at all' }]) })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DrafterError);
-    expect((error as DrafterError).code).toBe('auth');
-    expect((error as DrafterError).message).toMatch(/ANTHROPIC_API_KEY/);
+    expect((error as DrafterError).code).toBe('parse');
   });
 
-  it('tells the team to wait rather than retrying into the same limit', async () => {
-    reply = { status: 429, body: { type: 'error', error: { type: 'rate_limit_error', message: 'slow down' } } };
-    await expect(resolveDrafter().draft(request)).rejects.toMatchObject({ code: 'rate_limited' });
+  it('retries a rate limit and succeeds, rather than surfacing the first 429', async () => {
+    const drafter = resolveDrafter();
+    const draft = await drafter.draft(REQUEST, {
+      transport: fakeTransport([{ pin_id: CREATOR_PIN, text: GOOD_DRAFT, failFirst: 2, status: 429 }]),
+      sleep: async () => undefined,
+    });
+    expect(draft.criteria.length).toBe(1);
+  });
+
+  it('falls back to the honest skeleton with no key, and never invents criteria', async () => {
+    delete process.env.OPENROUTER_API_KEY;
+    const drafter = resolveDrafter();
+    expect(drafter.real).toBe(false);
+    const draft = await drafter.draft(REQUEST);
+    expect(draft.criteria).toEqual([]);
+    expect(draft.openQuestions.length).toBeGreaterThan(0);
   });
 });

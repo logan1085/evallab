@@ -206,8 +206,10 @@ function PanelSection({
       </div>
 
       <p className="tiny" style={{ margin: '10px 0 0' }}>
-        Families on the panel: {[...new Set(seats.map((s) => (s.family === 'offline' ? 'simulated' : s.family)))].join(', ')}.
-        {new Set(seats.map((s) => s.family)).size < 3 && seats.some((s) => s.family !== 'offline')
+        {simulatedPanel
+          ? 'Every seat is simulated: no OPENROUTER_API_KEY is set, so this is the labeled simulation rather than judgment.'
+          : `${seats.length} seats across ${new Set(seats.map((s) => s.family)).size} model families: ${[...new Set(seats.map((s) => s.family))].join(', ')}. Different families is the point, because a panel that is one model six times agrees with itself for reasons that have nothing to do with your rubric.`}
+        {new Set(seats.map((s) => s.family)).size < 3 && !simulatedPanel
           ? ' Fewer than three disjoint families: the run will refuse until the spread is real.'
           : ''}
       </p>
@@ -259,7 +261,11 @@ function PanelSection({
               <>
                 <div className="between">
                   <strong style={{ fontSize: 15 }}>{seat.name}</strong>
-                  <span className="tiny shrink">{seat.family === 'offline' ? 'simulated' : seat.family}</span>
+                  {/* The model, named. "Six judges" is only a claim until you
+                      can see that they are six different models. */}
+                  <span className="seat-model shrink" title={`${seat.family} family`}>
+                    {seat.model === 'simulated' || seat.family === 'offline' ? 'simulated' : seat.model}
+                  </span>
                 </div>
                 <p className="tiny" style={{ margin: '6px 0 0' }}>{seat.objective}</p>
                 <p className="tiny" style={{ margin: '4px 0 8px', opacity: 0.75 }}>{seat.failsFor}</p>
@@ -516,7 +522,7 @@ function ScenarioWriter({
       setResult(
         res.provider.real
           ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.`
-          : `${res.scenarios.length} starter scenarios added. No ANTHROPIC_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
+          : `${res.scenarios.length} starter scenarios added. No OPENROUTER_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
       );
       setDescription('');
       onDone();
@@ -617,7 +623,7 @@ function TracesTab({
             <span className="metric-k">Placeholder scenarios</span>
             <p style={{ margin: '6px 0 0' }}>
               {stubScenarios} of these scenarios are generic starters, not written from your description, because
-              the server has no ANTHROPIC_API_KEY. Set one in your deployment, then use the writer below to replace
+              the server has no OPENROUTER_API_KEY. Set one in your deployment, then use the writer below to replace
               them with scenarios about your actual operation.
             </p>
           </div>
@@ -917,7 +923,7 @@ function DraftPanel({
               <p style={{ margin: '6px 0 0' }}>
                 Nothing read your conversations, so there are no criteria below. Inventing some would give you standards
                 that look drafted from your data and are not. What you get instead is a blank three-point scale and the
-                questions teams argue about first. Set ANTHROPIC_API_KEY to draft from your own material.
+                questions teams argue about first. Set OPENROUTER_API_KEY to draft from your own material.
               </p>
             </div>
           ) : null}

@@ -18,13 +18,21 @@ beforeEach(async () => {
   app = createApp(db);
 });
 
+const DESCRIPTION =
+  'A support agent that answers billing questions and can refund up to $50 without approval.';
+
+/** Create, seat, write: the three steps setup runs, as the product runs them. */
 async function makeProject(name = 'Keyed') {
   const { project } = (
-    await request(app).post('/api/v1/projects').send({
-      name,
-      description: 'A support agent that answers billing questions and can refund up to $50 without approval.',
-    }).expect(201)
+    await request(app).post('/api/v1/projects').send({ name, description: DESCRIPTION }).expect(201)
   ).body;
+  const auth = `Bearer ${project.token}`;
+  await request(app).post(`/api/v1/projects/${project.slug}/panel`).set('authorization', auth).expect(201);
+  await request(app)
+    .post(`/api/v1/projects/${project.slug}/scenarios`)
+    .set('authorization', auth)
+    .send({ description: DESCRIPTION })
+    .expect(201);
   return project as { slug: string; token: string };
 }
 

@@ -8,7 +8,6 @@
  */
 
 import { callModel, type GatewayOptions } from './gateway.js';
-import { pinsByFamily } from './pins.js';
 import { DrafterError } from './drafter.js';
 
 export function openrouterKey(): string | undefined {
@@ -18,12 +17,8 @@ export function openrouterKey(): string | undefined {
 /** Generation quality wants the frontier pin; graders use the small tier. */
 export const CREATOR_PIN = process.env.GR_CREATOR_PIN ?? 'anthropic-frontier-1';
 
-export const OPENROUTER_MODELS: Record<string, string> = Object.fromEntries(
-  [...pinsByFamily('small').entries()].map(([family, pin]) => [family, pin.openrouter_model_id]),
-);
-
 export async function openrouterJson<T>(args: {
-  model?: string;
+  /** Which pin runs this task. Defaults to the creator pin. */
   pinId?: string;
   system: string;
   user: string;

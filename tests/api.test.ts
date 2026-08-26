@@ -445,7 +445,7 @@ describe('judge', () => {
       .expect(201);
 
     // Without an API key this is the offline stub, and the response says so.
-    expect(run.body.real).toBe(process.env.ANTHROPIC_API_KEY ? true : false);
+    expect(run.body.real).toBe(process.env.OPENROUTER_API_KEY ? true : false);
 
     const runs = await request(app).get(`/api/rounds/${seeded.roundId}/judge?k=${project.token}`).expect(200);
     expect(runs.body.runs).toHaveLength(1);

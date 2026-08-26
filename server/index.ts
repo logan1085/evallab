@@ -32,8 +32,8 @@ if (webDir) {
 const server = app.listen(port, () => {
   const mode = webDir ? 'app + api' : 'api only (run `npm run dev:web` for the UI)';
   console.log(`The Grading Room: ${mode} on http://localhost:${port}`);
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.log('No ANTHROPIC_API_KEY set: judge runs will use the offline stub, which is not a real judge.');
+  if (!process.env.OPENROUTER_API_KEY) {
+    console.log('No OPENROUTER_API_KEY set: the panel runs as the labeled simulation, which is not judgment.');
   }
 });
 

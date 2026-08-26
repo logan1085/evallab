@@ -8,7 +8,6 @@
  * labelled as such, which is a better start than an empty page and never a lie.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import {
   buildScenarioSystemPrompt,
   buildScenarioUserPrompt,
@@ -19,9 +18,10 @@ import {
   type ScenarioRequest,
 } from '../shared/scenarios.js';
 import { DrafterError } from './drafter.js';
-import { OPENROUTER_MODELS, openrouterJson, openrouterKey } from './openrouter.js';
+import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import { resolvePin } from './pins.js';
 
-export const DEFAULT_SCENARIO_MODEL = 'claude-opus-5';
+export const DEFAULT_SCENARIO_MODEL = 'openrouter';
 
 export interface ScenarioProvider {
   id: string;
@@ -31,23 +31,20 @@ export interface ScenarioProvider {
   write(req: ScenarioRequest): Promise<Scenario[]>;
 }
 
-export function resolveScenarist(model = process.env.GR_DRAFT_MODEL ?? DEFAULT_SCENARIO_MODEL): ScenarioProvider {
-  if (process.env.ANTHROPIC_API_KEY) return anthropicScenarist(model);
+export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_SCENARIO_MODEL): ScenarioProvider {
   if (openrouterKey()) return openrouterScenarist();
   return offlineScenarist();
 }
 
 /** One OpenRouter key makes the arrival real: scenarios written, not stubbed. */
 function openrouterScenarist(): ScenarioProvider {
-  const model = OPENROUTER_MODELS.anthropic!;
   return {
     id: 'openrouter',
-    model,
+    model: resolvePin(CREATOR_PIN).openrouter_model_id,
     real: true,
     async write(req) {
       const count = clampScenarioCount(req.count);
       const parsed = await openrouterJson<unknown>({
-        model,
         system: buildScenarioSystemPrompt(),
         user: buildScenarioUserPrompt(req),
         schema: scenarioJsonSchema(count),
@@ -58,57 +55,6 @@ function openrouterScenarist(): ScenarioProvider {
   };
 }
 
-function anthropicScenarist(model: string): ScenarioProvider {
-  const client = new Anthropic();
-  return {
-    id: 'anthropic',
-    model,
-    real: true,
-    async write(req) {
-      const count = clampScenarioCount(req.count);
-      let response;
-      try {
-        response = await client.messages.create({
-          model,
-          max_tokens: 8192,
-          system: buildScenarioSystemPrompt(),
-          messages: [{ role: 'user', content: buildScenarioUserPrompt(req) }],
-          output_config: { format: { type: 'json_schema', schema: scenarioJsonSchema(count) } },
-        });
-      } catch (error) {
-        if (error instanceof Anthropic.RateLimitError) {
-          throw new DrafterError('rate_limited', 'Scenario writing was rate limited. Wait a moment and try again.');
-        }
-        if (error instanceof Anthropic.AuthenticationError) {
-          throw new DrafterError('auth', 'ANTHROPIC_API_KEY was rejected.');
-        }
-        if (error instanceof Anthropic.APIConnectionError) {
-          throw new DrafterError('network', 'Could not reach the Anthropic API.');
-        }
-        throw new DrafterError('api', error instanceof Error ? error.message : 'Scenario writing failed.');
-      }
-
-      if (response.stop_reason === 'refusal') {
-        throw new DrafterError('refusal', 'The model declined to write scenarios from this description.');
-      }
-
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new DrafterError('parse', 'Scenario writing returned output that was not the expected JSON.');
-      }
-      return normalizeScenarios(parsed, count);
-    },
-  };
-}
-
-/** The situations nearly every operation meets, whatever it does. */
 export function offlineScenarist(): ScenarioProvider {
   return {
     id: 'offline',

@@ -51,14 +51,16 @@ curl -s -X DELETE ${v1}/projects/$SLUG/keys/$KEY_ID -H "Authorization: Bearer $T
 
 ### 1. Create a project
 
-Returns the project (its \`token\` is the master key), a first rubric version,
-generated scenarios, and a seated panel.
+Returns the project (its \`token\` is the master key) and a first rubric version
+built from any hard limits you pass, verbatim. It makes no model calls, so it
+returns immediately; seating the panel and writing the scenarios are steps 3
+and 4, one model call each.
 
 \`\`\`bash
 curl -s -X POST ${v1}/projects \\
   -H 'content-type: application/json' \\
-  -d '{"name":"Acme Outdoor","description":"A support agent that answers billing questions and can refund up to $50 without approval."}'
-# -> { "project": { "slug": "…", "token": "…" }, "rubric": …, "scenarioCount": 6, "seatCount": 6 }
+  -d '{"name":"Acme Outdoor","description":"A support agent that answers billing questions and can refund up to $50 without approval.","limits":"Never refund over $50 without human approval."}'
+# -> { "project": { "slug": "…", "token": "…" }, "rubric": { "version": 1, … } }
 SLUG=…; TOKEN=…
 \`\`\`
 
@@ -82,8 +84,10 @@ curl -s -X POST ${v1}/projects/$SLUG/traces \\
 
 ### 4. The panel
 
-Seated at creation; this endpoint is idempotent and never regenerates over
-your edits. Seats can be added, edited (\`PATCH\`), and deleted; every edit is
+One model call. Idempotent: it never regenerates over your edits. Each seat
+takes a different model family from the pin registry, and the literalist takes
+the cheapest, because a panel that is one model six times agrees with itself
+for reasons that have nothing to do with your rubric. Seats can be added, edited (\`PATCH\`), and deleted; every edit is
 recorded as signal.
 
 \`\`\`bash
@@ -106,9 +110,11 @@ for SEAT in $(echo "$ROUND" | jq -r '.seats[].id'); do
 done
 \`\`\`
 
-With an OpenRouter key on the server the seats are real models on pinned
-versions; per-request BYOK is accepted as \`x-openrouter-key\` and never stored.
-With no key the run is a labeled simulation.
+With \`OPENROUTER_API_KEY\` on the server the seats are real models on pinned
+versions, one family each; per-request BYOK is accepted as \`x-openrouter-key\`
+and never stored. With no key the run is a labeled simulation. Every call,
+including retries, lands in \`model_call\` with its usage read off the router,
+which is where the per-seat costs on the map come from.
 
 ### 6. Read the disagreement map
 

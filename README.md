@@ -35,13 +35,23 @@ npm run dev      # http://localhost:5173
 
 ## Keys
 
-Set **`OPENROUTER_API_KEY`** and the whole product is real with one key: the
-panel seats spread across Anthropic, OpenAI, and Google models through
-OpenRouter, and scenario and panel generation run on a real model too. Direct
-provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`) take
-precedence for their family when present, so OpenRouter is a default, never a
-lock-in. With no keys at all the loop still runs against a deterministic
-simulation that is labeled simulated on every surface.
+One key: **`OPENROUTER_API_KEY`**. Every model call in the product goes
+through OpenRouter, so that key seats a panel spanning Anthropic, OpenAI,
+Google, Meta, DeepSeek and Mistral, and runs scenario writing, panel writing,
+rubric drafting and the judge as well. With no key the loop still runs against
+a deterministic simulation that is labeled simulated on every surface.
+
+There is deliberately no per-vendor key path. A call that goes straight to a
+vendor skips `callModel`, and skipping `callModel` means no version pin, no
+`model_call` row, no spend ceiling and no typed error: the product would lose
+the ability to account for itself exactly where it spends money. A test
+(`tests/models.test.ts`) fails the build if a provider SDK or endpoint
+reappears in `server/`.
+
+Run `npm run pins:check` before the first live round. The registry pins exact
+versioned model slugs, which is the right discipline and also the thing most
+likely to go stale; that command checks every one against openrouter.ai's own
+model list in a single request.
 
 ## Deploying it
 
@@ -62,14 +72,17 @@ because serverless functions exhaust a direct connection under load. Provisionin
 by hand from [neon.tech](https://neon.tech) works identically: set `DATABASE_URL`
 to the **pooled** string, the one with `-pooler` in the hostname.
 
-**Set `ANTHROPIC_API_KEY`.** This one matters: scenario writing is the heart
+**Set `OPENROUTER_API_KEY`.** This one matters: scenario writing is the heart
 of the product, and without a key every company gets the same six labelled
 placeholder scenarios instead of ones written from its own description. The
-judge and the rubric drafter also fall back to clearly labelled stubs.
+panel, the judge and the rubric drafter also fall back to clearly labelled
+stubs.
 
-`vercel.json` already points the build at the SPA, routes `/api/*` to the single
-function in `api/`, and gives that function the full 60 seconds a judge run
-needs.
+`vercel.json` points the build at the SPA, routes `/api/*` and `/s/*` to the
+single function in `api/`, and gives that function 300 seconds. Setup never
+needs that much: creating a project does no model work, and seating the panel
+and writing scenarios are separate requests of one model call each, precisely
+so neither runs into a function's wall clock.
 
 **3. Create the schema.** If Vercel provisioned the database, pull its
 variables first:
@@ -310,7 +323,7 @@ when the case turns on one of these" would make an early rubric abstain often
 and a calibrated one abstain rarely, and since abstentions never count as
 agreement, calibration would post a win that had nothing to do with judgment.
 
-Without `ANTHROPIC_API_KEY` the drafter returns no criteria at all, plus the
+Without `OPENROUTER_API_KEY` the drafter returns no criteria at all, plus the
 questions teams argue about first, and says that is what it is doing.
 Inventing criteria offline would hand someone a rubric that looks drafted from
 their data and is not.
@@ -321,7 +334,7 @@ rubric nobody graded against.
 
 **The judge reads the rubric verbatim**, the same text the humans read, and
 is then scored as one more rater on the same units, with the same math. Without
-`ANTHROPIC_API_KEY` it falls back to a deterministic keyword scorer that is
+`OPENROUTER_API_KEY` it falls back to a deterministic keyword scorer that is
 labelled, in the UI and in the API response, as not a judge.
 
 ## Layout
@@ -343,6 +356,7 @@ and the types the UI renders cannot drift.
 | `npm run dev` | API on :8787, UI on :5173 with a proxy |
 | `npm run seed` | Create the demo project, print its link |
 | `npm run db:migrate` | Create or update the schema on `DATABASE_URL` |
+| `npm run pins:check` | Verify every pinned model slug against openrouter.ai |
 | `npm run mcp` | Run the MCP server over stdio (dev) |
 | `npm run build:mcp` | Bundle it to `dist/mcp.js` for an agent host |
 | `npm test` | 152 tests |
@@ -357,9 +371,10 @@ and the types the UI renders cannot drift.
 | `DATABASE_URL` | unset | Postgres. Unset means in-memory PGlite, which is not durable |
 | `POSTGRES_URL` | unset | Accepted too; whichever variable your host's integration wrote |
 | `PORT` | `8787` | HTTP port, standalone server only |
-| `ANTHROPIC_API_KEY` | unset | Enables the real judge and the real rubric drafter |
-| `GR_JUDGE_MODEL` | `claude-opus-5` | Model for judge runs |
-| `GR_DRAFT_MODEL` | `claude-opus-5` | Model for rubric drafting |
+| `OPENROUTER_API_KEY` | unset | The one model key. Enables the real panel, judge, drafter and scenarist |
+| `GR_CREATOR_PIN` | `anthropic-frontier-1` | Which registry pin writes panels, scenarios, rubrics and judge verdicts |
+| `GR_ROUND_COST_CEILING_CREDITS` | unset | Per-round spend ceiling, enforced inside `callModel` |
+| `GR_DAILY_COST_CEILING_CREDITS` | unset | Daily spend ceiling, same enforcement |
 | `GR_PG_MAX` | `4` | Pool size per serverless instance |
 | `GR_BASE_URL` | `http://localhost:8787` | Which instance the MCP server talks to |
 

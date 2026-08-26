@@ -68,6 +68,7 @@ export async function runRecovery(): Promise<RecoveryResult[]> {
     const auth = (r: request.Test) => r.set('x-gr-token', project.token);
 
     await auth(request(app).post(`/api/projects/${project.slug}/panel`));
+    await auth(request(app).post(`/api/projects/${project.slug}/scenarios`)).send({ description: fixture.description });
 
     const runRound = async () => {
       const created = (await auth(request(app).post(`/api/projects/${project.slug}/panel-rounds`))).body;

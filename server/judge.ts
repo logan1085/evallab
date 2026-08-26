@@ -8,18 +8,21 @@
  * that claim only holds if the judge and the humans were given the same text.
  *
  * Two providers:
- *   - anthropic     a real model, used when ANTHROPIC_API_KEY is set
- *   - offline-stub  a deterministic keyword scorer, used when it is not
+ *   - openrouter    a real model on a pinned version, through callModel, so
+ *                   every judge call is costed and recorded like any other
+ *   - offline-stub  a deterministic keyword scorer, used when there is no key
  *
  * The stub exists so the workflow is explorable without credentials. It is not
  * a judge and the UI says so wherever its numbers appear.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { ABSTAIN, type RubricVersion, type Trace } from '../shared/types.js';
 import { buildJudgeSystemPrompt, buildJudgeUserPrompt } from '../shared/rubric.js';
+import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import { resolvePin } from './pins.js';
+import { DrafterError } from './drafter.js';
 
-export const DEFAULT_JUDGE_MODEL = 'claude-opus-5';
+export const DEFAULT_JUDGE_MODEL = 'openrouter';
 
 export interface JudgeResult {
   verdict: string;
@@ -34,26 +37,25 @@ export interface JudgeProvider {
   grade(rubric: RubricVersion, trace: Pick<Trace, 'title' | 'content'>): Promise<JudgeResult>;
 }
 
-export function resolveProvider(model = process.env.GR_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL): JudgeProvider {
-  if (process.env.ANTHROPIC_API_KEY) return anthropicProvider(model);
+export function resolveProvider(_model = process.env.GR_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL): JudgeProvider {
+  if (openrouterKey()) return openrouterProvider();
   return offlineProvider();
 }
 
-/* ---- Anthropic ---------------------------------------------------------- */
+/* ---- OpenRouter --------------------------------------------------------- */
 
-function anthropicProvider(model: string): JudgeProvider {
-  const client = new Anthropic();
-
+function openrouterProvider(): JudgeProvider {
+  const pin = resolvePin(CREATOR_PIN);
   return {
-    id: 'anthropic',
-    model,
+    id: 'openrouter',
+    model: pin.openrouter_model_id,
     real: true,
     async grade(rubric, trace) {
       const allowed = [...rubric.scale].sort((a, b) => b.rank - a.rank).map((s) => s.id);
 
       // Structured outputs rather than "reply with JSON" plus a parser: the
-      // schema is enforced server-side, so a malformed verdict is not a failure
-      // mode we have to code around.
+      // schema is enforced at the router, so a malformed verdict is not a
+      // failure mode we have to code around.
       const schema = {
         type: 'object',
         properties: {
@@ -64,51 +66,39 @@ function anthropicProvider(model: string): JudgeProvider {
         additionalProperties: false,
       };
 
-      let response;
-      try {
-        response = await client.messages.create({
-          model,
-          // Thinking is on by default and counts against max_tokens, so this is
-          // sized for reasoning plus a two-field object, not just the object.
-          max_tokens: 4096,
-          system: buildJudgeSystemPrompt(rubric),
-          messages: [{ role: 'user', content: buildJudgeUserPrompt(trace) }],
-          output_config: { format: { type: 'json_schema', schema } },
-        });
-      } catch (error) {
-        if (error instanceof Anthropic.RateLimitError) {
-          throw new JudgeError('rate_limited', 'The judge was rate limited. Try a smaller arm or wait and re-run.');
-        }
-        if (error instanceof Anthropic.AuthenticationError) {
-          throw new JudgeError('auth', 'ANTHROPIC_API_KEY was rejected.');
-        }
-        if (error instanceof Anthropic.APIConnectionError) {
-          throw new JudgeError('network', 'Could not reach the Anthropic API.');
-        }
-        throw new JudgeError('api', error instanceof Error ? error.message : 'Judge request failed.');
-      }
-
-      // A refusal is a real outcome, not an exception. Recording it as an
-      // abstention keeps it visible in coverage rather than silently dropping
-      // the item out of the agreement calculation.
-      if (response.stop_reason === 'refusal') {
-        return { verdict: ABSTAIN, rationale: 'The model declined to grade this trace.' };
-      }
-
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
-
       let parsed: JudgeResult;
       try {
-        parsed = JSON.parse(text) as JudgeResult;
-      } catch {
-        throw new JudgeError('parse', 'The judge returned output that was not the expected JSON object.');
+        parsed = await openrouterJson<JudgeResult>({
+          system: buildJudgeSystemPrompt(rubric),
+          user: buildJudgeUserPrompt(trace),
+          schema,
+          // Sized for reasoning plus a two-field object, not just the object.
+          maxTokens: 4096,
+        });
+      } catch (error) {
+        // The drafter taxonomy and the judge taxonomy are the same taxonomy
+        // wearing different names; translate rather than invent a third.
+        const kind = error instanceof DrafterError ? error.code : 'api';
+        const message = error instanceof Error ? error.message : 'Judge request failed.';
+        if (kind === 'rate_limited') {
+          throw new JudgeError('rate_limited', 'The judge was rate limited. Try a smaller arm or wait and re-run.');
+        }
+        if (kind === 'auth') throw new JudgeError('auth', 'OPENROUTER_API_KEY was rejected.');
+        if (kind === 'network') throw new JudgeError('network', 'Could not reach OpenRouter.');
+        if (kind === 'refusal') {
+          // A refusal is a real outcome, not an exception. Recording it as an
+          // abstention keeps it visible in coverage rather than silently
+          // dropping the item out of the agreement calculation.
+          return { verdict: ABSTAIN, rationale: 'The model declined to grade this trace.' };
+        }
+        if (kind === 'parse') {
+          throw new JudgeError('parse', 'The judge returned output that was not the expected JSON object.');
+        }
+        throw new JudgeError('api', message);
       }
 
       const verdict = allowed.includes(parsed.verdict) || parsed.verdict === ABSTAIN ? parsed.verdict : ABSTAIN;
-      return { verdict, rationale: String(parsed.rationale ?? '') };
+      return { verdict, rationale: typeof parsed.rationale === 'string' ? parsed.rationale : '' };
     },
   };
 }

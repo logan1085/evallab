@@ -2,8 +2,8 @@
  * Rubric drafting — the entry point for a team with no rubric at all.
  *
  * Two providers, same shape as the judge:
- *   - anthropic  a real model, used when ANTHROPIC_API_KEY is set
- *   - offline    a blank scale plus the questions teams always argue about first
+ *   - openrouter  a real model on a pinned version, through callModel
+ *   - offline     a blank scale plus the questions teams always argue about first
  *
  * The offline provider does not pretend. It cannot read the transcripts, so it
  * does not invent criteria from them; it returns a starting skeleton and says
@@ -11,7 +11,9 @@
  * be worse than no rubric, because the team would trust it.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import type { GatewayOptions } from './gateway.js';
+import { resolvePin } from './pins.js';
 import {
   buildDrafterSystemPrompt,
   buildDrafterUserPrompt,
@@ -22,76 +24,40 @@ import {
 } from '../shared/drafting.js';
 import { DEFAULT_SCALE } from '../shared/types.js';
 
-export const DEFAULT_DRAFT_MODEL = 'claude-opus-5';
+export const DEFAULT_DRAFT_MODEL = 'openrouter';
 
 export interface DrafterProvider {
   id: string;
   model: string;
   /** True when a model actually read the transcripts. The UI gates its claims on it. */
   real: boolean;
-  draft(req: DraftRequest): Promise<RubricDraft>;
+  draft(req: DraftRequest, gateway?: GatewayOptions): Promise<RubricDraft>;
 }
 
-export function resolveDrafter(model = process.env.GR_DRAFT_MODEL ?? DEFAULT_DRAFT_MODEL): DrafterProvider {
-  if (process.env.ANTHROPIC_API_KEY) return anthropicDrafter(model);
+export function resolveDrafter(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_DRAFT_MODEL): DrafterProvider {
+  if (openrouterKey()) return openrouterDrafter();
   return offlineDrafter();
 }
 
-/* ---- Anthropic ---------------------------------------------------------- */
+/* ---- OpenRouter --------------------------------------------------------- */
 
-function anthropicDrafter(model: string): DrafterProvider {
-  const client = new Anthropic();
-
+function openrouterDrafter(): DrafterProvider {
   return {
-    id: 'anthropic',
-    model,
+    id: 'openrouter',
+    model: resolvePin(CREATOR_PIN).openrouter_model_id,
     real: true,
-    async draft(req) {
-      let response;
-      try {
-        response = await client.messages.create({
-          model,
-          // A scale, up to six criteria with bodies, and six questions with
-          // reasons — plus thinking, which counts against this budget.
-          max_tokens: 8192,
-          system: buildDrafterSystemPrompt(),
-          messages: [{ role: 'user', content: buildDrafterUserPrompt(req) }],
-          output_config: { format: { type: 'json_schema', schema: draftJsonSchema() } },
-        });
-      } catch (error) {
-        if (error instanceof Anthropic.RateLimitError) {
-          throw new DrafterError('rate_limited', 'The drafter was rate limited. Wait a moment and try again.');
-        }
-        if (error instanceof Anthropic.AuthenticationError) {
-          throw new DrafterError('auth', 'ANTHROPIC_API_KEY was rejected.');
-        }
-        if (error instanceof Anthropic.APIConnectionError) {
-          throw new DrafterError('network', 'Could not reach the Anthropic API.');
-        }
-        throw new DrafterError('api', error instanceof Error ? error.message : 'The draft request failed.');
-      }
-
-      // Unlike a judge refusal, there is no useful partial result to record —
-      // an empty rubric is not an outcome, so this surfaces as an error.
-      if (response.stop_reason === 'refusal') {
-        throw new DrafterError(
-          'refusal',
-          'The model declined to draft a rubric from these transcripts. Check what is in them, or write the first version by hand.',
-        );
-      }
-
-      const text = response.content
-        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-        .map((block) => block.text)
-        .join('');
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        throw new DrafterError('parse', 'The drafter returned output that was not the expected JSON object.');
-      }
-
+    async draft(req, gateway) {
+      // openrouterJson throws DrafterError already, with the router's own
+      // error kind preserved: this path adds no error taxonomy of its own.
+      const parsed = await openrouterJson<unknown>({
+        system: buildDrafterSystemPrompt(),
+        user: buildDrafterUserPrompt(req),
+        schema: draftJsonSchema(),
+        gateway,
+        // A scale, up to six criteria with bodies, and six questions with
+        // reasons, plus reasoning tokens, which count against this budget.
+        maxTokens: 8192,
+      });
       return normalizeDraft(parsed, 'Rubric');
     },
   };

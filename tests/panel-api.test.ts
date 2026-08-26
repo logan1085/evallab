@@ -20,26 +20,39 @@ beforeEach(async () => {
   app = createApp(db);
 });
 
+const DESCRIPTION =
+  'A support agent that answers billing questions and can refund up to $50 without approval.';
+
+/**
+ * Setup as the product actually runs it: create, seat, write. Three requests
+ * rather than one, because seating and scenario writing are a model call each
+ * and doing both inside create is what put this route over a serverless
+ * function's wall clock.
+ */
 async function makePanelProject() {
   const created = (
-    await request(app).post('/api/projects').send({
-      name: 'Panel test',
-      description: 'A support agent that answers billing questions and can refund up to $50 without approval.',
-    }).expect(201)
+    await request(app).post('/api/projects').send({ name: 'Panel test', description: DESCRIPTION }).expect(201)
   ).body;
   const project = created.project;
   const auth = (r: request.Test) => r.set('x-gr-token', project.token);
-  return { project, auth, created };
+  const seated = (await auth(request(app).post(`/api/projects/${project.slug}/panel`)).expect(201)).body;
+  await auth(request(app).post(`/api/projects/${project.slug}/scenarios`)).send({ description: DESCRIPTION }).expect(201);
+  return { project, auth, created, seated };
 }
 
 describe('the synthetic panel', () => {
   it('runs the whole loop: seats, blind round, map, patches, the ten, bundle', async () => {
-    const { project, auth, created: intake } = await makePanelProject();
+    const { project, auth, seated } = await makePanelProject();
 
-    // 1. The panel is seated at creation: the landing page promises a seated
-    //    panel, so the create call delivers one. Literalist seated
-    //    structurally, first in order.
-    expect(intake.seatCount).toBe(6);
+    // 1. Setup seats the panel: literalist first, structurally, and every seat
+    //    on its own model family so agreement is not one model nodding at
+    //    itself.
+    expect(seated.seats.length).toBe(6);
+    // Offline there is exactly one family by construction, and every seat says
+    // so rather than borrowing a real model's name. The claim that matters for
+    // diversity is about the registry and is tested in models.test.ts.
+    expect(seated.seats.every((s: { family: string }) => s.family === 'offline')).toBe(true);
+    expect(seated.seats.every((s: { model: string }) => s.model === 'simulated')).toBe(true);
     const panel = (await auth(request(app).post(`/api/projects/${project.slug}/panel`)).expect(200)).body;
     // Idempotent: the seats already exist, so this returns them, never
     //   regenerates over user edits.

@@ -460,6 +460,15 @@ textarea::placeholder {
   color: var(--muted);
 }
 
+/* Which model sits in the seat. Named, always: "six judges" means nothing if
+   they are one model six times, so the evidence for the claim is on screen. */
+.seat-model {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 /* ---- Verdicts ----------------------------------------------------------- */
 
 .verdict {

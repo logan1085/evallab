@@ -33,6 +33,21 @@ export interface StandardsView {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+/** Distinct model families on the panel: the number that makes "six judges" mean something. */
+export function familyCount(v: StandardsView): number {
+  return new Set(v.seats.map((s) => s.model || 'unrecorded')).size;
+}
+
+/** The models themselves, named, deduped, in seat order. */
+export function modelLine(v: StandardsView): string {
+  const seen: string[] = [];
+  for (const s of v.seats) {
+    const model = s.model || 'unrecorded';
+    if (!seen.includes(model)) seen.push(model);
+  }
+  return seen.join(' · ');
+}
+
 export function ogStatLine(v: StandardsView): string {
   const experts = v.seats.length;
   return `${experts} expert${experts === 1 ? '' : 's'}. ${v.stats.splits} disagreement${v.stats.splits === 1 ? '' : 's'}. ${v.stats.sentences} missing sentence${v.stats.sentences === 1 ? '' : 's'} found.`;
@@ -66,6 +81,7 @@ h2{font-size:15px;font-weight:600;font-family:Inter,system-ui,sans-serif;text-tr
 .seat:last-child{border-bottom:none}
 .seat .name{font-size:19px}
 .seat .meta{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:13px;color:var(--muted);margin-top:2px}
+.seat .model{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);margin-top:3px}
 .foot{border-top:1px solid var(--ink);margin-top:24px;padding-top:24px;text-align:center;color:var(--muted)}
 .btn{display:inline-block;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:500;background:var(--ink);color:var(--paper);padding:10px 20px;border:none;border-radius:8px;text-decoration:none;cursor:pointer;margin-top:12px}
 .ownerbar{font-family:Inter,system-ui,sans-serif;font-size:13px;color:var(--muted);display:flex;gap:16px;justify-content:center;align-items:center;margin:18px 0 0}
@@ -111,6 +127,7 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
       (s) => `<div class="seat">
       <div class="name">${esc(s.name)}</div>
       <div class="meta">${esc(s.objective)} · fails: ${esc(s.failsFor.replace(/^Fails /i, ''))}</div>
+      <div class="model">${esc(s.model || 'unrecorded')}</div>
     </div>`,
     )
     .join('\n');
@@ -149,7 +166,8 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
   <header class="head">
     <h1>Standards v${v.version.version}</h1>
     <div class="sub">${esc(v.project.name)}</div>
-    <div class="stamp mono">Graded by ${v.seats.length} ${v.stats.simulated ? 'simulated ' : ''}expert judges · ${v.stats.cases} cases · ${v.stats.splits} splits · ${date}</div>
+    <div class="stamp mono">Graded by ${v.seats.length} ${v.stats.simulated ? 'simulated ' : ''}expert judges across ${familyCount(v)} model famil${familyCount(v) === 1 ? 'y' : 'ies'} · ${v.stats.cases} cases · ${v.stats.splits} splits · ${date}</div>
+    <div class="stamp mono">${esc(modelLine(v))}</div>
     ${ownerBar}
   </header>
 
@@ -161,7 +179,7 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
 
   <section>
     <h2>2 · Why you can trust it</h2>
-    <p style="margin-bottom:18px">${v.stats.cases} cases graded blind by ${v.seats.length} judges with conflicting stakes. The panel split ${v.stats.splits} time${v.stats.splits === 1 ? '' : 's'}; ${v.stats.sentences} of those splits survived the grounding rule and became the sentences below. Every sentence quotes the room verbatim.</p>
+    <p style="margin-bottom:18px">${v.stats.cases} cases graded blind by ${v.seats.length} judges with conflicting stakes, running on ${familyCount(v)} different model famil${familyCount(v) === 1 ? 'y' : 'ies'} so that agreement between them is not one model agreeing with itself. The panel split ${v.stats.splits} time${v.stats.splits === 1 ? '' : 's'}; ${v.stats.sentences} of those splits survived the grounding rule and became the sentences below. Every sentence quotes the room verbatim.</p>
     ${evidence || '<p class="note">Version 1 predates the first round. The evidence arrives with the first splits.</p>'}
   </section>
 

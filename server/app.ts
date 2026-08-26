@@ -20,7 +20,7 @@ import { parseImport } from './import.js';
 import { JudgeError, mapLimit, resolveProvider } from './judge.js';
 import { DrafterError, resolveDrafter } from './drafter.js';
 import { offlineScenarist, resolveScenarist } from './scenarist.js';
-import { adapterFor, availableFamilies, offlineAdapter, resolvePanelWriter } from './panelists.js';
+import { adapterFor, availableFamilies, offlineAdapter, offlinePanelWriter, resolvePanelWriter } from './panelists.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
 import { createSpendGuard } from './spend.js';
 import {
@@ -241,39 +241,14 @@ export function createApp(db: DB) {
       criteria,
     });
 
-    let scenarioCount = 0;
-    let scenariosReal = false;
-    if (project.description.length >= 10) {
-      try {
-        const scenarist = resolveScenarist();
-        const scenarios = await scenarist.write({ description: project.description });
-        await store.addTraces(
-          db,
-          project.id,
-          scenarios.map((s) => ({
-            title: s.title,
-            content: s.content,
-            source: 'scenario',
-            meta: { probe: s.probe, generated: true, real: scenarist.real },
-          })),
-        );
-        scenarioCount = scenarios.length;
-        scenariosReal = scenarist.real;
-      } catch {
-        // The project stands; scenarios can be written from the Scenarios tab.
-      }
-    }
-
-    // The landing page promises a seated panel, so the panel is seated here,
-    // not left as a button. Best-effort for the same reason scenarios are.
-    let seatCount = 0;
-    try {
-      seatCount = (await seatPanel(project)).seats.length;
-    } catch {
-      // The Seat-the-panel button on the project page covers this path.
-    }
-
-    res.status(201).json({ project, rubric, scenarioCount, scenariosReal, seatCount });
+    // No model calls here, deliberately. Seating a panel and writing scenarios
+    // are one model call each, and doing both inside the create request put
+    // two of them in series behind a serverless function's wall clock, which
+    // is how this route started returning 504s under real models. They are
+    // now their own endpoints, called in sequence by setup, which also lets
+    // the page report each one as it actually finishes instead of claiming
+    // both up front. Their work is unchanged; only who waits for it moved.
+    res.status(201).json({ project, rubric, scenarioCount: 0, scenariosReal: false, seatCount: 0 });
   });
 
   api.post('/projects/demo', async (req, res) => {
@@ -663,16 +638,16 @@ export function createApp(db: DB) {
   /* ---- The panel --------------------------------------------------------- */
 
   /**
-   * Generate the panel: project-specific seats from the writer, spread across
-   * available model families, plus the literalist, which is seated
-   * structurally rather than left to a model to propose. Idempotent: an
-   * existing panel is returned, never silently regenerated over user edits.
-   */
-  /**
-   * Seat a fresh panel: project-specific seats from the writer, spread across
-   * available model families, plus the literalist, which is seated structurally
-   * rather than left to a model to propose. Callers must check for an existing
-   * panel first; this never regenerates over user edits.
+   * Seat a fresh panel: project-specific seats from the writer, one model
+   * family each, plus the literalist, which is seated structurally rather than
+   * left to a model to propose. Callers must check for an existing panel
+   * first; this never regenerates over user edits.
+   *
+   * The assignment is the point. Six seats backed by one model is one judge
+   * wearing six hats: it agrees with itself for reasons that have nothing to
+   * do with the rubric. So each seat takes a different family, and the
+   * literalist takes the cheapest of them, because its job is the mechanical
+   * one (does the written rubric decide this case?) and it runs on every case.
    */
   async function seatPanel(project: Project) {
     const families = availableFamilies();
@@ -681,7 +656,10 @@ export function createApp(db: DB) {
     try {
       proposed = await writer.write(project.description || project.name, 5);
     } catch {
-      proposed = await resolvePanelWriter().write('', 5);
+      // Explicitly the offline writer, not another resolve: re-resolving would
+      // hand back the same writer that just failed and retry the identical
+      // call. A router hiccup should cost a bespoke panel, never the panel.
+      proposed = await offlinePanelWriter().write('', 5);
     }
 
     const lit = archetype(REQUIRED_SEAT)!;
@@ -692,6 +670,8 @@ export function createApp(db: DB) {
         .map((p) => ({ ...p, archetypeId: null, origin: 'generated' as const })),
     ];
 
+    // families arrives cheapest-first, so the literalist (always seat 0) takes
+    // the cheapest family and the rest spread across the others in order.
     const seats = [];
     for (const [i, spec] of seatSpecs.entries()) {
       const fam = families[i % families.length]!;

@@ -132,8 +132,8 @@ export function PanelRoundPage() {
           <span className="metric-k">Simulated panel</span>
           <p style={{ margin: '6px 0 0' }}>
             No model API keys are set, so these verdicts come from a deterministic simulation, clearly not judgment.
-            The full loop works; the verdicts mean nothing. Set ANTHROPIC_API_KEY (and OPENAI_API_KEY, GEMINI_API_KEY
-            for real family diversity) to seat real models.
+            The full loop works; the verdicts mean nothing. Set OPENROUTER_API_KEY to seat real models: one key
+            reaches every family, which is what makes the panel six judges rather than one model six times.
           </p>
         </div>
       ) : null}

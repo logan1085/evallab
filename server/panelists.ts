@@ -2,18 +2,22 @@
  * The panel's providers: who writes the seats, and who sits in them.
  *
  * Family diversity is the product, not a config option (PoLL, arXiv
- * 2404.18796; self-preference, arXiv 2404.13076). Three adapters exist:
- * Anthropic, OpenAI, Google, each used only when its key is present. Seats
- * are spread across available families round-robin; when fewer than three
- * families have keys, the shortfall is reported, never papered over.
+ * 2404.18796; self-preference, arXiv 2404.13076), and OpenRouter is how one
+ * key buys it: every family in the pin registry is reachable through the same
+ * gateway, so the panel is genuinely six model families rather than one model
+ * wearing six hats.
  *
- * The offline scorer exists so the whole loop runs with no keys at all: a
+ * There are no direct provider SDKs here on purpose. A call that goes straight
+ * to a vendor skips callModel, and skipping callModel means no version pin, no
+ * model_call row, no spend ceiling and no typed error: the product loses the
+ * ability to account for itself exactly where it spends money.
+ *
+ * The offline scorer exists so the whole loop runs with no key at all: a
  * deterministic function of (seat, case) with per-persona bias, clearly
  * labeled simulated. It produces real disagreement structure, which is what
  * the UI and tests need, and no judgment, which it says out loud.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import {
   buildPanelSystemPrompt,
   buildPanelUserPrompt,
@@ -23,7 +27,7 @@ import {
   type Seat,
 } from '../shared/panel.js';
 import { DrafterError } from './drafter.js';
-import { OPENROUTER_MODELS, openrouterJson, openrouterKey } from './openrouter.js';
+import { openrouterJson, openrouterKey } from './openrouter.js';
 import { callModel, type GatewayOptions } from './gateway.js';
 import { pinsByFamily } from './pins.js';
 
@@ -47,32 +51,19 @@ export interface FamilyAdapter {
   score(req: ScoreRequest, gateway?: GatewayOptions): Promise<SeatVerdict>;
 }
 
-const ANTHROPIC_PANEL_MODEL = process.env.GR_PANEL_MODEL_ANTHROPIC ?? 'claude-haiku-4-5-20251001';
-const OPENAI_PANEL_MODEL = process.env.GR_PANEL_MODEL_OPENAI ?? 'gpt-5-mini';
-const GOOGLE_PANEL_MODEL = process.env.GR_PANEL_MODEL_GOOGLE ?? 'gemini-2.5-flash';
-
 /**
- * Families with a key present, in preference order. A direct provider key
- * wins its family; OPENROUTER_API_KEY fills every family that has no direct
- * key, which is how one key yields the three-family spread the product wants.
- * Offline fills to one only when nothing real is available.
+ * Every family the registry can reach, cheapest first. One OPENROUTER_API_KEY
+ * yields all of them; with no key the list is the single labeled simulation,
+ * so the loop still runs and still says what it is.
  */
 export function availableFamilies(): FamilyAdapter[] {
-  const out: FamilyAdapter[] = [];
-  if (process.env.ANTHROPIC_API_KEY) out.push(anthropicAdapter());
-  if (process.env.OPENAI_API_KEY) out.push(openaiAdapter());
-  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) out.push(googleAdapter());
-  if (openrouterKey()) {
-    for (const family of ['anthropic', 'openai', 'google'] as const) {
-      if (!out.some((a) => a.family === family)) out.push(openrouterAdapter(family));
-    }
-  }
-  if (out.length === 0) out.push(offlineAdapter());
-  return out;
+  if (!openrouterKey()) return [offlineAdapter()];
+  return [...pinsByFamily('small').keys()].map((family) => openrouterAdapter(family));
 }
 
-function openrouterAdapter(family: 'anthropic' | 'openai' | 'google'): FamilyAdapter {
-  const pin = pinsByFamily('small').get(family)!;
+export function openrouterAdapter(family: string): FamilyAdapter {
+  const pin = pinsByFamily('small').get(family);
+  if (!pin) return offlineAdapter();
   return {
     family,
     model: pin.openrouter_model_id,
@@ -121,85 +112,6 @@ function openrouterAdapter(family: 'anthropic' | 'openai' | 'google'): FamilyAda
 export function adapterFor(family: string): FamilyAdapter {
   const found = availableFamilies().find((a) => a.family === family);
   return found ?? offlineAdapter();
-}
-
-function anthropicAdapter(): FamilyAdapter {
-  const client = new Anthropic();
-  return {
-    family: 'anthropic',
-    model: ANTHROPIC_PANEL_MODEL,
-    real: true,
-    async score(req) {
-      const response = await client.messages.create({
-        model: req.seat.model || ANTHROPIC_PANEL_MODEL,
-        max_tokens: 300,
-        system: buildSeatSystemPrompt(req.seat, req.rubricMarkdown),
-        messages: [{ role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` }],
-        output_config: { format: { type: 'json_schema', schema: SEAT_VERDICT_SCHEMA } },
-      });
-      const text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      return normalizeVerdict(JSON.parse(text));
-    },
-  };
-}
-
-/** Minimal fetch adapters: family diversity without two more SDK dependencies. */
-function openaiAdapter(): FamilyAdapter {
-  return {
-    family: 'openai',
-    model: OPENAI_PANEL_MODEL,
-    real: true,
-    async score(req) {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: req.seat.model || OPENAI_PANEL_MODEL,
-          messages: [
-            { role: 'system', content: buildSeatSystemPrompt(req.seat, req.rubricMarkdown) },
-            { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
-          ],
-          response_format: { type: 'json_object' },
-        }),
-      });
-      if (!res.ok) throw new DrafterError('api', `OpenAI returned ${res.status} for a panel verdict.`);
-      const body = (await res.json()) as { choices: { message: { content: string } }[] };
-      return normalizeVerdict(JSON.parse(body.choices[0]!.message.content));
-    },
-  };
-}
-
-function googleAdapter(): FamilyAdapter {
-  const key = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY;
-  return {
-    family: 'google',
-    model: GOOGLE_PANEL_MODEL,
-    real: true,
-    async score(req) {
-      const model = req.seat.model || GOOGLE_PANEL_MODEL;
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: buildSeatSystemPrompt(req.seat, req.rubricMarkdown) }] },
-            contents: [{ role: 'user', parts: [{ text: `Case: ${req.caseTitle}\n\n${req.caseContent}` }] }],
-            generationConfig: { responseMimeType: 'application/json' },
-          }),
-        },
-      );
-      if (!res.ok) throw new DrafterError('api', `Google returned ${res.status} for a panel verdict.`);
-      const body = (await res.json()) as { candidates: { content: { parts: { text: string }[] } }[] };
-      return normalizeVerdict(JSON.parse(body.candidates[0]!.content.parts.map((p) => p.text).join('')));
-    },
-  };
 }
 
 /**
@@ -290,39 +202,12 @@ export interface PanelWriter {
 }
 
 export function resolvePanelWriter(): PanelWriter {
-  if (process.env.ANTHROPIC_API_KEY) {
-    const client = new Anthropic();
-    const model = process.env.GR_DRAFT_MODEL ?? 'claude-opus-5';
-    return {
-      id: 'anthropic',
-      real: true,
-      async write(description, count) {
-        const response = await client.messages.create({
-          model,
-          max_tokens: 4096,
-          system: buildPanelSystemPrompt(),
-          messages: [{ role: 'user', content: buildPanelUserPrompt(description, count) }],
-          output_config: { format: { type: 'json_schema', schema: panelJsonSchema(count) } },
-        });
-        if (response.stop_reason === 'refusal') {
-          throw new DrafterError('refusal', 'The model declined to design a panel from this description.');
-        }
-        const text = response.content
-          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-          .map((b) => b.text)
-          .join('');
-        const parsed = JSON.parse(text) as { seats: { name: string; objective: string; failsFor: string }[] };
-        return parsed.seats.slice(0, count);
-      },
-    };
-  }
   if (openrouterKey()) {
     return {
       id: 'openrouter',
       real: true,
       async write(description, count) {
         const parsed = await openrouterJson<{ seats: { name: string; objective: string; failsFor: string }[] }>({
-          model: OPENROUTER_MODELS.anthropic!,
           system: buildPanelSystemPrompt(),
           user: buildPanelUserPrompt(description, count),
           schema: panelJsonSchema(count),
@@ -332,6 +217,16 @@ export function resolvePanelWriter(): PanelWriter {
       },
     };
   }
+  return offlinePanelWriter();
+}
+
+/**
+ * The generic bench: the core archetypes, minus the literalist, which is
+ * seated structurally. Exported because it is also the fallback when the
+ * writer fails mid-seating: a router hiccup should cost you a bespoke panel,
+ * not a panel.
+ */
+export function offlinePanelWriter(): PanelWriter {
   return {
     id: 'offline',
     real: false,
