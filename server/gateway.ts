@@ -111,6 +111,31 @@ export function buildRequestBody(pin: Pin, req: ModelCallRequest): object {
 let counter = 0;
 const newCallId = () => `call_${Date.now().toString(36)}_${(counter++).toString(36)}`;
 
+/**
+ * OpenRouter's own words for a failure. The shape varies by which layer
+ * refused (`error.message`, a bare `message`, or an upstream body carried in
+ * `error.metadata.raw`), so all of them are read rather than assuming one.
+ */
+export function routerErrorMessage(json: unknown): string {
+  if (typeof json !== 'object' || json === null) return '';
+  const body = json as { error?: unknown; message?: unknown };
+  const error = body.error;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const inner = error as { message?: unknown; metadata?: unknown };
+    if (typeof inner.message === 'string') {
+      const meta = inner.metadata;
+      if (typeof meta === 'object' && meta !== null) {
+        const raw = (meta as { raw?: unknown }).raw;
+        if (typeof raw === 'string' && raw.length > 0) return `${inner.message} (${raw})`;
+      }
+      return inner.message;
+    }
+  }
+  if (typeof body.message === 'string') return body.message;
+  return '';
+}
+
 function readUsage(json: unknown): { usage: ModelUsage; generationId: string | null } {
   const body = json as {
     id?: string;
@@ -255,7 +280,21 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
         upstream_inference_cost: null, generation_id: null,
         latency_ms: latency, http_status: status, error_kind: 'provider_error',
       });
-      return { ...errorResult(req, pin, callId, 'provider_error', `The router returned ${status}.`), latency_ms: latency };
+      // The router explains its own 4xx, and that explanation is the whole
+      // diagnosis: "not a valid model ID" and "invalid schema" are the same
+      // status with completely different fixes. Throwing it away left the
+      // operator with "the router returned 400" and nothing to act on.
+      const detail = routerErrorMessage(json);
+      return {
+        ...errorResult(
+          req,
+          pin,
+          callId,
+          status === 404 ? 'model_deprecated' : 'provider_error',
+          `The router returned ${status} for ${pin.openrouter_model_id}${detail ? `: ${detail}` : '.'}`,
+        ),
+        latency_ms: latency,
+      };
     }
 
     const parsed = json as { choices?: { message?: { content?: string } }[] };

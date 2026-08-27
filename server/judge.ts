@@ -17,7 +17,7 @@
  */
 
 import { ABSTAIN, type RubricVersion, type Trace } from '../shared/types.js';
-import { buildJudgeSystemPrompt, buildJudgeUserPrompt } from '../shared/rubric.js';
+import { buildJudgeSystemPrompt, buildJudgeUserPrompt, judgeJsonSchema } from '../shared/rubric.js';
 import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
 import { resolvePin } from './pins.js';
 import { DrafterError } from './drafter.js';
@@ -56,15 +56,7 @@ function openrouterProvider(): JudgeProvider {
       // Structured outputs rather than "reply with JSON" plus a parser: the
       // schema is enforced at the router, so a malformed verdict is not a
       // failure mode we have to code around.
-      const schema = {
-        type: 'object',
-        properties: {
-          verdict: { type: 'string', enum: [...allowed, ABSTAIN] },
-          rationale: { type: 'string' },
-        },
-        required: ['verdict', 'rationale'],
-        additionalProperties: false,
-      };
+      const schema = judgeJsonSchema(allowed, ABSTAIN);
 
       let parsed: JudgeResult;
       try {

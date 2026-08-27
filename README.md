@@ -48,6 +48,13 @@ the ability to account for itself exactly where it spends money. A test
 (`tests/models.test.ts`) fails the build if a provider SDK or endpoint
 reappears in `server/`.
 
+Two preflights before a live round. `npm run creator:smoke` prints the exact
+body each creator call puts on the wire and validates its schema against the
+strict structured-output subset offline; add `--live` to send those same
+bodies to the real router. Every schema is strict-checked in the suite too,
+because a size keyword like `minItems` reads perfectly well as JSON Schema and
+is rejected with a 400 before a model ever sees the request.
+
 Run `npm run pins:check` before the first live round. The registry pins exact
 versioned model slugs, which is the right discipline and also the thing most
 likely to go stale; that command checks every one against openrouter.ai's own
@@ -356,7 +363,8 @@ and the types the UI renders cannot drift.
 | `npm run dev` | API on :8787, UI on :5173 with a proxy |
 | `npm run seed` | Create the demo project, print its link |
 | `npm run db:migrate` | Create or update the schema on `DATABASE_URL` |
-| `npm run pins:check` | Verify every pinned model slug against openrouter.ai |
+| `npm run pins:check` | Verify every pinned model slug against openrouter.ai, and name replacements for any that moved |
+| `npm run creator:smoke` | Print the creator request bodies and check them against strict; `--live` sends them for real |
 | `npm run mcp` | Run the MCP server over stdio (dev) |
 | `npm run build:mcp` | Bundle it to `dist/mcp.js` for an agent host |
 | `npm test` | 152 tests |

@@ -238,8 +238,8 @@ export function draftJsonSchema() {
       preamble: { type: 'string' },
       scale: {
         type: 'array',
-        minItems: MIN_SCALE_LEVELS,
-        maxItems: MAX_SCALE_LEVELS,
+        // Strict rejects size keywords; bounds live in the prompt and in
+        // normalizeDraft, which clamps whatever comes back.
         description: 'Verdict levels ordered worst to best.',
         items: {
           type: 'object',
@@ -250,7 +250,6 @@ export function draftJsonSchema() {
       },
       criteria: {
         type: 'array',
-        maxItems: MAX_CRITERIA,
         items: {
           type: 'object',
           properties: {
@@ -273,7 +272,6 @@ export function draftJsonSchema() {
       },
       conflicts: {
         type: 'array',
-        maxItems: MAX_CONFLICTS,
         description: 'Rules that cannot become a test. Never repaired into criteria.',
         items: {
           type: 'object',
@@ -289,8 +287,6 @@ export function draftJsonSchema() {
       },
       openQuestions: {
         type: 'array',
-        minItems: 1,
-        maxItems: MAX_QUESTIONS,
         items: {
           type: 'object',
           properties: {

@@ -152,8 +152,8 @@ export function panelJsonSchema(count: number) {
     properties: {
       seats: {
         type: 'array' as const,
-        minItems: count,
-        maxItems: count,
+        // No minItems/maxItems: strict rejects size keywords. The count is in
+        // the prompt and the caller slices to it.
         items: {
           type: 'object' as const,
           properties: {
@@ -162,10 +162,12 @@ export function panelJsonSchema(count: number) {
             failsFor: { type: 'string' as const, description: 'One line: what it fails an answer for' },
           },
           required: ['name', 'objective', 'failsFor'],
+          additionalProperties: false as const,
         },
       },
     },
     required: ['seats'],
+    additionalProperties: false as const,
   };
 }
 
@@ -197,4 +199,7 @@ export const SEAT_VERDICT_SCHEMA = {
     reason: { type: 'string' as const, description: 'One sentence, in this seat’s terms.' },
   },
   required: ['verdict', 'reason'],
+  // Required by strict structured outputs. Without it every grading call is a
+  // 400, which would have taken out the panel run as well as the writers.
+  additionalProperties: false as const,
 };

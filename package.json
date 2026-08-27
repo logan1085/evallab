@@ -23,7 +23,8 @@
     "mcp": "tsx mcp/server.ts",
     "build:mcp": "esbuild mcp/server.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/mcp.js",
     "recovery": "tsx scripts/recovery-test.ts",
-    "pins:check": "tsx scripts/pins-check.ts"
+    "pins:check": "tsx scripts/pins-check.ts",
+    "creator:smoke": "tsx scripts/creator-smoke.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

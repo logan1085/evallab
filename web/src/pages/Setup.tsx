@@ -62,6 +62,7 @@ export function SetupPage() {
   const [failure, setFailure] = useState<{ step: Step; message: string } | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [seats, setSeats] = useState<Grader[]>([]);
+  const [seatingFallback, setSeatingFallback] = useState<string | null>(null);
   const [caseCount, setCaseCount] = useState(0);
   const [revealed, setRevealed] = useState(0);
   const [email, setEmail] = useState('');
@@ -110,6 +111,7 @@ export function SetupPage() {
         setFailure(null);
         const seated = await api.generatePanel(current.slug, current.token);
         setSeats(seated.seats);
+        setSeatingFallback(seated.fallbackReason ?? null);
       }
 
       setPhase('writing');
@@ -244,6 +246,12 @@ export function SetupPage() {
               </div>
             ))}
           </div>
+          {benchSeated && seatingFallback ? (
+            <p className="progress-line">
+              These are the stock seats, not seats written for your product: the writer failed with
+              {' '}{seatingFallback} You can edit any of them in the Room, or retry the seating there.
+            </p>
+          ) : null}
           {benchSeated ? (
             <p className="progress-line">
               {seats.every((s) => s.family === 'offline')

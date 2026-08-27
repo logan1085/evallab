@@ -138,3 +138,21 @@ export function buildJudgeUserPrompt(trace: Pick<Trace, 'title' | 'content'>): s
 export function nextVersionName(rubric: RubricVersion): string {
   return rubric.name;
 }
+
+
+/**
+ * The judge's reply shape. Extracted rather than inline so the strict-subset
+ * test can see it: a schema the test cannot reach is a schema that can drift
+ * back into a 400.
+ */
+export function judgeJsonSchema(allowed: string[], abstain: string) {
+  return {
+    type: 'object' as const,
+    properties: {
+      verdict: { type: 'string' as const, enum: [...allowed, abstain] },
+      rationale: { type: 'string' as const },
+    },
+    required: ['verdict', 'rationale'],
+    additionalProperties: false as const,
+  };
+}

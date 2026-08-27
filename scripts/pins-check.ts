@@ -24,15 +24,35 @@ const body = (await res.json()) as { data: { id: string }[] };
 const known = new Set(body.data.map((m) => m.id));
 
 let bad = 0;
+let live = 0;
 for (const pin of PIN_REGISTRY) {
   if (pin.status !== 'live') continue;
+  live++;
   const ok = known.has(pin.openrouter_model_id);
   if (!ok) bad++;
   console.log(`${ok ? 'OK  ' : 'GONE'} ${pin.pin_id.padEnd(22)} ${pin.openrouter_model_id}`);
+  if (!ok) {
+    // A stale pin is only half a diagnosis; the other half is what to put in
+    // its place. The prefix before the slash is the vendor namespace, so the
+    // same-family slugs that do exist are the shortlist.
+    const namespace = pin.openrouter_model_id.split('/')[0];
+    const candidates = body.data
+      .map((m) => m.id)
+      .filter((id) => id.startsWith(`${namespace}/`))
+      .sort();
+    if (candidates.length > 0) {
+      console.log(`     live ${namespace} models to repin to:`);
+      for (const id of candidates.slice(0, 12)) console.log(`       ${id}`);
+      if (candidates.length > 12) console.log(`       … and ${candidates.length - 12} more`);
+    } else {
+      console.log(`     no live models under "${namespace}/": the whole namespace may have moved.`);
+    }
+  }
 }
 
-console.log(`\n${PIN_REGISTRY.length - bad}/${PIN_REGISTRY.length} pins resolve against openrouter.ai.`);
+console.log(`\n${live - bad}/${live} live pins resolve against openrouter.ai.`);
 if (bad > 0) {
-  console.log('A GONE pin must be repinned to a slug that exists, or marked deprecated, before the next live round.');
+  console.log('Repin each GONE entry in server/pins.ts to a slug above, then run this again.');
+  console.log('Nothing else needs changing: callers pass pin ids, never model strings.');
 }
 process.exit(bad > 0 || unsafe.length > 0 ? 1 : 0);

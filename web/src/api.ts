@@ -350,7 +350,7 @@ export const api = {
   revokeKey: (slug: string, token: string, keyId: string) =>
     call<void>(`/projects/${slug}/keys/${keyId}`, { method: 'DELETE', token }),
   generatePanel: (slug: string, token: string) =>
-    call<{ seats: Grader[]; families: string[]; familiesShort?: number; generated: boolean; real?: boolean }>(
+    call<{ seats: Grader[]; families: string[]; familiesShort?: number; generated: boolean; real?: boolean; fallbackReason?: string }>(
       `/projects/${slug}/panel`,
       { method: 'POST', token },
     ),

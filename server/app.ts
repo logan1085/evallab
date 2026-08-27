@@ -653,12 +653,19 @@ export function createApp(db: DB) {
     const families = availableFamilies();
     const writer = resolvePanelWriter();
     let proposed: { name: string; objective: string; failsFor: string }[];
+    // Whether the seats were actually written for this project, or came from
+    // the generic bench because the writer failed. Silently swallowing that
+    // is what let a broken creator call look like a healthy panel: the seats
+    // still carried real model names, because those come from the registry
+    // rather than from the call. The caller reports it now.
+    let fallbackReason: string | null = null;
     try {
       proposed = await writer.write(project.description || project.name, 5);
-    } catch {
+    } catch (error) {
       // Explicitly the offline writer, not another resolve: re-resolving would
       // hand back the same writer that just failed and retry the identical
       // call. A router hiccup should cost a bespoke panel, never the panel.
+      fallbackReason = error instanceof Error ? error.message : 'The panel writer failed.';
       proposed = await offlinePanelWriter().write('', 5);
     }
 
@@ -689,7 +696,7 @@ export function createApp(db: DB) {
         }),
       );
     }
-    return { seats, families, real: writer.real };
+    return { seats, families, real: writer.real && fallbackReason === null, fallbackReason };
   }
 
   api.post('/projects/:slug/panel', requireProject, async (req, res) => {
@@ -699,13 +706,17 @@ export function createApp(db: DB) {
       return res.json({ seats: existing, families: availableFamilies().map((f) => f.family), generated: false });
     }
 
-    const { seats, families, real } = await seatPanel(project);
+    const { seats, families, real, fallbackReason } = await seatPanel(project);
     res.status(201).json({
       seats,
       families: families.map((f) => f.family),
       familiesShort: Math.max(0, 3 - new Set(families.filter((f) => f.real).map((f) => f.family)).size),
       generated: true,
       real,
+      // Present only when the bespoke writer failed and the generic bench
+      // stood in. The UI says so rather than presenting stock seats as though
+      // a model had designed them for this project.
+      ...(fallbackReason ? { fallbackReason } : {}),
     });
   });
 

@@ -97,8 +97,9 @@ export function scenarioJsonSchema(count: number) {
     properties: {
       scenarios: {
         type: 'array',
-        minItems: MIN_SCENARIOS,
-        maxItems: count,
+        // No minItems/maxItems: strict structured outputs reject size
+        // keywords with a 400 before a model sees the request. The count is
+        // asked for in the prompt and clamped by normalizeScenarios.
         items: {
           type: 'object',
           properties: {
