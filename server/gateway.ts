@@ -139,6 +139,27 @@ export function routerErrorMessage(json: unknown): string {
   return '';
 }
 
+/** True when this request asked for a schema-enforced reply. */
+function usesJsonSchema(req: ModelCallRequest): boolean {
+  return (req.response_format as { type?: string } | undefined)?.type === 'json_schema';
+}
+
+/**
+ * The router saying this model cannot do the format, as opposed to saying our
+ * schema is wrong. The distinction matters: the first is worth degrading for,
+ * the second is a bug that must stay loud.
+ */
+function saysFormatUnsupported(detail: string): boolean {
+  const text = detail.toLowerCase();
+  // "Invalid schema" is our bug, not the model's limitation. Degrading on it
+  // would have hidden the outage that started all of this, so it is excluded
+  // before anything else is considered.
+  if (/invalid schema|schema is invalid|bad schema|schema validation/.test(text)) return false;
+  const aboutFormat = /response_format|structured output|json_schema|json schema/.test(text);
+  const unsupported = /does ?n[o\u2019']?t support|not supported|unsupported|no endpoints/.test(text);
+  return aboutFormat && unsupported;
+}
+
 function readUsage(json: unknown): { usage: ModelUsage; generationId: string | null } {
   const body = json as {
     id?: string;
@@ -213,7 +234,12 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
 
   const transport = opts.transport ?? httpTransport();
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const body = buildRequestBody(pin, req);
+  let body = buildRequestBody(pin, req);
+  // Strict structured outputs are not universal. A six-family panel will meet
+  // models that implement plain JSON mode but refuse a json_schema, and that
+  // refusal is a 400 on the request, not a bad answer: without this, adding a
+  // family to the registry could take out every seat it sits in.
+  let degradedFormat = false;
 
   const record = async (attempt: Omit<ModelCallAttempt, 'call_id' | 'caller_kind' | 'round_id' | 'panelist_id' | 'case_id' | 'pin_id' | 'model_family' | 'openrouter_model_id' | 'provider_slug' | 'attempt_no'> & { attempt_no: number; provider_slug?: string | null }) => {
     if (!opts.recorder) return;
@@ -288,6 +314,18 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
       // status with completely different fixes. Throwing it away left the
       // operator with "the router returned 400" and nothing to act on.
       const detail = routerErrorMessage(json);
+
+      // One step down, once: json_schema to plain JSON mode. Only when the
+      // router says the model does not support the format, never when it says
+      // our schema is malformed, because masking that is how the last outage
+      // stayed invisible for a week.
+      if (!degradedFormat && usesJsonSchema(req) && saysFormatUnsupported(detail)) {
+        degradedFormat = true;
+        body = buildRequestBody(pin, { ...req, response_format: { type: 'json_object' } });
+        lastMessage = detail;
+        continue;
+      }
+
       return {
         ...errorResult(
           req,

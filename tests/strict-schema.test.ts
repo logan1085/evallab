@@ -174,3 +174,69 @@ describe('the creator call against a router that enforces strict', () => {
     expect(attempts).toEqual([1]);
   });
 });
+
+/**
+ * A six-family panel meets models that do plain JSON but refuse a schema.
+ * That refusal is a 400 on the request, so without a step down, adding a
+ * family to the registry could take out every seat it sits in.
+ */
+describe('a model that cannot do strict structured outputs', () => {
+  /** Refuses json_schema the way a model without the capability does. */
+  function noSchemaSupport(seen: { formats: string[] }): GatewayTransport {
+    return {
+      async post(body) {
+        const sent = body as { response_format?: { type?: string } };
+        const type = sent.response_format?.type ?? 'none';
+        seen.formats.push(type);
+        if (type === 'json_schema') {
+          return {
+            status: 400,
+            json: { error: { message: 'This model does not support response_format json_schema' } },
+          };
+        }
+        return {
+          status: 200,
+          json: {
+            id: 'gen-degraded',
+            choices: [{ message: { content: '{"verdict":"pass","reason":"fine"}' } }],
+            usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10, cost: 0 },
+          },
+        };
+      },
+    };
+  }
+
+  const request = (schema: unknown) => ({
+    pin_id: 'meta-small-1',
+    messages: [{ role: 'user' as const, content: 'grade this' }],
+    max_tokens: 300,
+    response_format: { type: 'json_schema' as const, json_schema: { name: 'v', strict: true, schema } },
+    caller: { kind: 'grader' as const },
+  });
+
+  it('steps down to plain JSON mode once and still returns a verdict', async () => {
+    const seen = { formats: [] as string[] };
+    const result = await callModel(request(SEAT_VERDICT_SCHEMA), {
+      apiKey: 'sk-or-test',
+      transport: noSchemaSupport(seen),
+      sleep: async () => undefined,
+    });
+    expect(result.error).toBeUndefined();
+    expect(JSON.parse(result.text).verdict).toBe('pass');
+    // Exactly one step down, not a loop.
+    expect(seen.formats).toEqual(['json_schema', 'json_object']);
+  });
+
+  it('does not step down when the router says our schema is malformed', async () => {
+    // Degrading here would have hidden the outage that started all this.
+    const seen = { body: null as unknown };
+    const badSchema = { type: 'object', properties: { a: { type: 'array', minItems: 1 } }, required: ['a'], additionalProperties: false };
+    const result = await callModel(request(badSchema), {
+      apiKey: 'sk-or-test',
+      transport: strictRouter(seen),
+      sleep: async () => undefined,
+    });
+    expect(result.error?.kind).toBe('provider_error');
+    expect(result.error?.message).toContain('minItems');
+  });
+});

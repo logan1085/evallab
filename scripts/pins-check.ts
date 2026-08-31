@@ -20,8 +20,9 @@ if (!res.ok) {
   console.error(`Could not read the model list: HTTP ${res.status}.`);
   process.exit(2);
 }
-const body = (await res.json()) as { data: { id: string }[] };
+const body = (await res.json()) as { data: { id: string; supported_parameters?: string[] }[] };
 const known = new Set(body.data.map((m) => m.id));
+const byId = new Map(body.data.map((m) => [m.id, m]));
 
 let bad = 0;
 let live = 0;
@@ -30,7 +31,15 @@ for (const pin of PIN_REGISTRY) {
   live++;
   const ok = known.has(pin.openrouter_model_id);
   if (!ok) bad++;
-  console.log(`${ok ? 'OK  ' : 'GONE'} ${pin.pin_id.padEnd(22)} ${pin.openrouter_model_id}`);
+  const params = byId.get(pin.openrouter_model_id)?.supported_parameters ?? [];
+  // Not every model implements schema-enforced replies. The gateway steps
+  // down to plain JSON mode when the router says so, but knowing which seats
+  // will take that path beats finding out mid-round.
+  const structured = params.includes('structured_outputs') || params.includes('response_format');
+  console.log(
+    `${ok ? 'OK  ' : 'GONE'} ${pin.pin_id.padEnd(22)} ${pin.openrouter_model_id.padEnd(46)}` +
+      (ok ? (structured ? 'structured outputs' : 'plain JSON mode (gateway steps down)') : ''),
+  );
   if (!ok) {
     // A stale pin is only half a diagnosis; the other half is what to put in
     // its place. The prefix before the slash is the vendor namespace, so the
