@@ -39,13 +39,16 @@ const server = app.listen(port, () => {
     // Every pinned id, checked against the router's own list at boot. A pin
     // that is not a model is a 400 on first use, and finding that at startup
     // beats finding it when someone clicks a button.
-    void validatePins().then((result) => {
+    void validatePins(fetch, { disableInvalid: true }).then((result) => {
       if (result.ok) {
         console.log(`Pins: all ${result.checked} live model ids resolve against openrouter.ai.`);
         return;
       }
-      console.error('PINS INVALID. Model calls using these will fail:');
+      console.error('PINS INVALID. Model calls using these would fail:');
       for (const problem of result.problems) console.error(`  ${problem}`);
+      if (result.disabled.length > 0) {
+        console.error(`Stood down for this process: ${result.disabled.join(', ')}. The panel runs on the families that remain.`);
+      }
       console.error('Fix them in server/pins.ts, or run npm run pins:check for the full list.');
     });
   }

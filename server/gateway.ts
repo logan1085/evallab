@@ -93,9 +93,23 @@ export interface GatewayOptions {
   roundId?: string;
   /** Injectable for tests; defaults to jittered backoff. */
   sleep?: (ms: number) => Promise<void>;
+  /** Per-request deadline. Creator calls set a tighter one than graders. */
+  timeoutMs?: number;
 }
 
 const MAX_ATTEMPTS = 4;
+
+/** Models observed to refuse json_schema, so the doomed attempt happens once. */
+const NO_SCHEMA_SUPPORT = new Set<string>();
+
+/**
+ * Forget what has been learned about model capabilities. Process-lifetime
+ * memory is right in production and wrong across tests, where one case
+ * teaching the gateway about a model would silently change the next.
+ */
+export function resetLearnedCapabilities(): void {
+  NO_SCHEMA_SUPPORT.clear();
+}
 
 export function buildRequestBody(pin: Pin, req: ModelCallRequest): object {
   return {
@@ -232,9 +246,16 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
   const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
   if (!apiKey) return errorResult(req, pin, callId, 'auth', 'No OpenRouter key on this request and none in the environment.');
 
-  const transport = opts.transport ?? httpTransport();
+  const transport = opts.transport ?? httpTransport(opts.timeoutMs);
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  let body = buildRequestBody(pin, req);
+  // A model that refused json_schema once will refuse it every time, and
+  // paying a doomed request before every real one doubles the latency of the
+  // whole creator path. Remembered per process, per model.
+  const schemaUnsupported = NO_SCHEMA_SUPPORT.has(pin.openrouter_model_id);
+  let body = buildRequestBody(
+    pin,
+    schemaUnsupported && usesJsonSchema(req) ? { ...req, response_format: { type: 'json_object' } } : req,
+  );
   // Strict structured outputs are not universal. A six-family panel will meet
   // models that implement plain JSON mode but refuse a json_schema, and that
   // refusal is a 400 on the request, not a bad answer: without this, adding a
@@ -319,8 +340,9 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
       // router says the model does not support the format, never when it says
       // our schema is malformed, because masking that is how the last outage
       // stayed invisible for a week.
-      if (!degradedFormat && usesJsonSchema(req) && saysFormatUnsupported(detail)) {
+      if (!degradedFormat && !schemaUnsupported && usesJsonSchema(req) && saysFormatUnsupported(detail)) {
         degradedFormat = true;
+        NO_SCHEMA_SUPPORT.add(pin.openrouter_model_id);
         body = buildRequestBody(pin, { ...req, response_format: { type: 'json_object' } });
         lastMessage = detail;
         continue;
@@ -382,7 +404,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.GR_REQUEST_TIMEOUT_MS ?? 45_000);
 /** Set GR_LOG_MODEL_CALLS=1 to print every request and reply, server-side. */
 const LOG_CALLS = process.env.GR_LOG_MODEL_CALLS === '1';
 
-function httpTransport(): GatewayTransport {
+function httpTransport(timeoutMs = REQUEST_TIMEOUT_MS): GatewayTransport {
   return {
     async post(body, apiKey) {
       const started = Date.now();
@@ -392,7 +414,7 @@ function httpTransport(): GatewayTransport {
         console.log(`[model] -> ${sent.model} ${JSON.stringify(body).length}B`, JSON.stringify(body).slice(0, 2000));
       }
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
@@ -412,9 +434,7 @@ function httpTransport(): GatewayTransport {
       } catch (error) {
         const aborted = error instanceof Error && error.name === 'AbortError';
         if (LOG_CALLS) console.log(`[model] !! ${sent.model} ${aborted ? 'timeout' : 'network'} after ${Date.now() - started}ms`);
-        throw aborted
-          ? new Error(`No answer from the router within ${REQUEST_TIMEOUT_MS}ms.`)
-          : error;
+        throw aborted ? new Error(`No answer from the router within ${timeoutMs}ms.`) : error;
       } finally {
         clearTimeout(timer);
       }

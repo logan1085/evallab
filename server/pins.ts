@@ -96,7 +96,12 @@ export const PIN_REGISTRY: Pin[] = [
   {
     pin_id: 'mistral-small-1',
     family: 'mistral',
-    openrouter_model_id: 'mistralai/mistral-small-3.1-24b-instruct-2503',
+    // Repinned after the boot check caught the dated id going unlisted. This
+    // one is a best guess at the canonical entry and has not been confirmed
+    // against the live list from here; if it is wrong the boot check disables
+    // it and the panel runs on five families instead of six, which is the
+    // point of the check.
+    openrouter_model_id: 'mistralai/mistral-small',
     provider_slug: null,
     tier: 'small',
     status: 'live',
@@ -130,7 +135,8 @@ export function pinIsVersionSafe(pin: Pin): boolean {
  */
 export async function validatePins(
   fetchImpl: typeof fetch = fetch,
-): Promise<{ ok: boolean; problems: string[]; checked: number }> {
+  opts: { disableInvalid?: boolean } = {},
+): Promise<{ ok: boolean; problems: string[]; checked: number; disabled: string[] }> {
   const unsafe = PIN_REGISTRY.filter((p) => !pinIsVersionSafe(p)).map(
     (p) => `${p.pin_id}: "${p.openrouter_model_id}" is an alias or not a namespaced id`,
   );
@@ -138,19 +144,25 @@ export async function validatePins(
   let known: Set<string>;
   try {
     const res = await fetchImpl('https://openrouter.ai/api/v1/models');
-    if (!res.ok) return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0 };
+    if (!res.ok) {
+      return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0, disabled: [] };
+    }
     const body = (await res.json()) as { data: { id: string }[] };
     known = new Set(body.data.map((m) => m.id));
   } catch (error) {
+    // Unreachable is not the same as invalid: a network blip must not disable
+    // the whole panel, so nothing is changed on this path.
     return {
       ok: false,
       problems: [...unsafe, `could not read the model list: ${error instanceof Error ? error.message : 'unreachable'}`],
       checked: 0,
+      disabled: [],
     };
   }
 
   const live = PIN_REGISTRY.filter((p) => p.status === 'live');
   const problems = [...unsafe];
+  const disabled: string[] = [];
   for (const pin of live) {
     if (known.has(pin.openrouter_model_id)) continue;
     const namespace = pin.openrouter_model_id.split('/')[0]!;
@@ -159,8 +171,16 @@ export async function validatePins(
       `${pin.pin_id}: "${pin.openrouter_model_id}" is not a model the router lists.` +
         (candidates.length > 0 ? ` Live under ${namespace}/: ${candidates.join(', ')}` : ` Nothing lives under ${namespace}/.`),
     );
+    if (opts.disableInvalid) {
+      // Disable, never substitute. A seat that silently moved to a different
+      // model would make every comparison on that pin meaningless; a seat that
+      // stands down costs one family and says so. The panel needs three, and
+      // this cannot take it below that without the round refusing outright.
+      pin.status = 'deprecated';
+      disabled.push(pin.pin_id);
+    }
   }
-  return { ok: problems.length === 0, problems, checked: live.length };
+  return { ok: problems.length === 0, problems, checked: live.length, disabled };
 }
 
 export class PinError extends Error {

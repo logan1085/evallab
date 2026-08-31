@@ -12,7 +12,7 @@
  * whatever the product actually puts on the wire, so a schema that regresses
  * fails here rather than in production.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { strictSchemaProblems } from '../shared/schema.js';
 import { scenarioJsonSchema } from '../shared/scenarios.js';
 import { panelJsonSchema } from '../shared/panel.js';
@@ -20,7 +20,7 @@ import { draftJsonSchema } from '../shared/drafting.js';
 import { SEAT_VERDICT_SCHEMA } from '../shared/panel.js';
 import { judgeJsonSchema } from '../shared/rubric.js';
 import { ABSTAIN, DEFAULT_SCALE } from '../shared/types.js';
-import { callModel, type GatewayTransport } from '../server/gateway.js';
+import { callModel, resetLearnedCapabilities, type GatewayTransport } from '../server/gateway.js';
 import { CREATOR_PIN } from '../server/openrouter.js';
 
 const SCHEMAS: [string, unknown][] = [
@@ -181,6 +181,10 @@ describe('the creator call against a router that enforces strict', () => {
  * family to the registry could take out every seat it sits in.
  */
 describe('a model that cannot do strict structured outputs', () => {
+  // The gateway remembers which models refuse schemas, which is right in a
+  // long-lived process and wrong between tests.
+  beforeEach(() => resetLearnedCapabilities());
+
   /** Refuses json_schema the way a model without the capability does. */
   function noSchemaSupport(seen: { formats: string[] }): GatewayTransport {
     return {
@@ -225,6 +229,16 @@ describe('a model that cannot do strict structured outputs', () => {
     expect(JSON.parse(result.text).verdict).toBe('pass');
     // Exactly one step down, not a loop.
     expect(seen.formats).toEqual(['json_schema', 'json_object']);
+  });
+
+  it('asks once and remembers, so the doomed attempt is not paid on every call', async () => {
+    const seen = { formats: [] as string[] };
+    const transport = noSchemaSupport(seen);
+    const opts = { apiKey: 'sk-or-test', transport, sleep: async () => undefined };
+    await callModel(request(SEAT_VERDICT_SCHEMA), opts);
+    await callModel(request(SEAT_VERDICT_SCHEMA), opts);
+    // First call learns; the second goes straight to the format that works.
+    expect(seen.formats).toEqual(['json_schema', 'json_object', 'json_object']);
   });
 
   it('does not step down when the router says our schema is malformed', async () => {

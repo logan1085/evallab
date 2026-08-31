@@ -166,8 +166,8 @@ export function createApp(db: DB) {
   const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
 
   /** One pin validation per instance, reused by every later health check. */
-  let pinCheck: Promise<{ ok: boolean; problems: string[]; checked: number }> | null = null;
-  const cachedPinCheck = () => (pinCheck ??= validatePins());
+  let pinCheck: Promise<Awaited<ReturnType<typeof validatePins>>> | null = null;
+  const cachedPinCheck = () => (pinCheck ??= validatePins(fetch, { disableInvalid: true }));
 
   /** The credential, wherever the caller put it: Bearer, header, or link. */
   function credentialOf(req: Request): string | null {
