@@ -13,10 +13,13 @@
  * arXiv 2404.13076). Six families is the cheapest way to make disagreement
  * mean something. OpenRouter is the whole point: one key buys all of them.
  *
- * The version discipline: never a latest-alias. The exact slugs must be
- * verified against openrouter.ai/models before the first live round, which is
- * what `npm run pins:check` does; a wrong slug fails loudly as a provider
- * error, which is the correct failure.
+ * The version discipline, corrected by production: pin the canonical
+ * OpenRouter id, and never a floating alias. Adding a provider's dated suffix
+ * does NOT make a pin more specific: openrouter.ai/api/v1/models lists
+ * `anthropic/claude-opus-5`, and `anthropic/claude-opus-5-20260129` is simply
+ * not a model, so the router answers "not a valid model ID" with a 400. What
+ * makes a pin a pin here is that it names one exact id from that list and
+ * never an alias that drifts. Validated at boot and by `npm run pins:check`.
  */
 
 export interface Pin {
@@ -24,7 +27,15 @@ export interface Pin {
   family: string;
   /** Explicit version, never an alias that resolves to latest. */
   openrouter_model_id: string;
-  provider_slug: string;
+  /**
+   * Lock to a single upstream provider, or null to let the router choose.
+   * First-party models have exactly one provider, so locking costs nothing
+   * and buys determinism. Open-weight models are served by many hosts, and
+   * naming one that does not carry it is how a request hangs instead of
+   * failing; for those the actual provider is recorded per call in
+   * model_call, which keeps the round auditable without pretending.
+   */
+  provider_slug: string | null;
   tier: 'small' | 'mid' | 'frontier';
   status: 'live' | 'deprecated';
   /**
@@ -40,7 +51,7 @@ export const PIN_REGISTRY: Pin[] = [
   {
     pin_id: 'anthropic-small-1',
     family: 'anthropic',
-    openrouter_model_id: 'anthropic/claude-haiku-4.5-20251001',
+    openrouter_model_id: 'anthropic/claude-haiku-4.5',
     provider_slug: 'anthropic',
     tier: 'small',
     status: 'live',
@@ -49,7 +60,7 @@ export const PIN_REGISTRY: Pin[] = [
   {
     pin_id: 'openai-small-1',
     family: 'openai',
-    openrouter_model_id: 'openai/gpt-5-mini-2025-08-07',
+    openrouter_model_id: 'openai/gpt-5-mini',
     provider_slug: 'openai',
     tier: 'small',
     status: 'live',
@@ -58,7 +69,7 @@ export const PIN_REGISTRY: Pin[] = [
   {
     pin_id: 'google-small-1',
     family: 'google',
-    openrouter_model_id: 'google/gemini-2.5-flash-001',
+    openrouter_model_id: 'google/gemini-2.5-flash',
     provider_slug: 'google-ai-studio',
     tier: 'small',
     status: 'live',
@@ -68,7 +79,7 @@ export const PIN_REGISTRY: Pin[] = [
     pin_id: 'meta-small-1',
     family: 'meta',
     openrouter_model_id: 'meta-llama/llama-3.3-70b-instruct',
-    provider_slug: 'together',
+    provider_slug: null,
     tier: 'small',
     status: 'live',
     cost_hint: 0.5,
@@ -77,7 +88,7 @@ export const PIN_REGISTRY: Pin[] = [
     pin_id: 'deepseek-small-1',
     family: 'deepseek',
     openrouter_model_id: 'deepseek/deepseek-chat-v3-0324',
-    provider_slug: 'deepseek',
+    provider_slug: null,
     tier: 'small',
     status: 'live',
     cost_hint: 0.4,
@@ -86,7 +97,7 @@ export const PIN_REGISTRY: Pin[] = [
     pin_id: 'mistral-small-1',
     family: 'mistral',
     openrouter_model_id: 'mistralai/mistral-small-3.1-24b-instruct-2503',
-    provider_slug: 'mistral',
+    provider_slug: null,
     tier: 'small',
     status: 'live',
     cost_hint: 0.3,
@@ -94,7 +105,7 @@ export const PIN_REGISTRY: Pin[] = [
   {
     pin_id: 'anthropic-frontier-1',
     family: 'anthropic',
-    openrouter_model_id: 'anthropic/claude-opus-5-20260129',
+    openrouter_model_id: 'anthropic/claude-opus-5',
     provider_slug: 'anthropic',
     tier: 'frontier',
     status: 'live',
@@ -106,7 +117,50 @@ export const PIN_REGISTRY: Pin[] = [
 const LATEST_ALIASES = [/:latest$/i, /:free$/i, /\bauto\b/i, /:floor$/i, /:nitro$/i];
 
 export function pinIsVersionSafe(pin: Pin): boolean {
-  return !LATEST_ALIASES.some((re) => re.test(pin.openrouter_model_id)) && pin.provider_slug.length > 0;
+  return !LATEST_ALIASES.some((re) => re.test(pin.openrouter_model_id)) && pin.openrouter_model_id.includes('/');
+}
+
+/**
+ * Check every live pin against the router's own model list.
+ *
+ * This is the check that would have caught the outage: the dated ids read as
+ * careful pinning and were not models at all. Returns one line per problem,
+ * each naming a replacement where the namespace still exists, so a stale pin
+ * is a one-line edit rather than a search.
+ */
+export async function validatePins(
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: boolean; problems: string[]; checked: number }> {
+  const unsafe = PIN_REGISTRY.filter((p) => !pinIsVersionSafe(p)).map(
+    (p) => `${p.pin_id}: "${p.openrouter_model_id}" is an alias or not a namespaced id`,
+  );
+
+  let known: Set<string>;
+  try {
+    const res = await fetchImpl('https://openrouter.ai/api/v1/models');
+    if (!res.ok) return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0 };
+    const body = (await res.json()) as { data: { id: string }[] };
+    known = new Set(body.data.map((m) => m.id));
+  } catch (error) {
+    return {
+      ok: false,
+      problems: [...unsafe, `could not read the model list: ${error instanceof Error ? error.message : 'unreachable'}`],
+      checked: 0,
+    };
+  }
+
+  const live = PIN_REGISTRY.filter((p) => p.status === 'live');
+  const problems = [...unsafe];
+  for (const pin of live) {
+    if (known.has(pin.openrouter_model_id)) continue;
+    const namespace = pin.openrouter_model_id.split('/')[0]!;
+    const candidates = [...known].filter((id) => id.startsWith(`${namespace}/`)).sort().slice(0, 6);
+    problems.push(
+      `${pin.pin_id}: "${pin.openrouter_model_id}" is not a model the router lists.` +
+        (candidates.length > 0 ? ` Live under ${namespace}/: ${candidates.join(', ')}` : ` Nothing lives under ${namespace}/.`),
+    );
+  }
+  return { ok: problems.length === 0, problems, checked: live.length };
 }
 
 export class PinError extends Error {

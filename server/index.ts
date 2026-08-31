@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { createApp } from './app.js';
 import { openDb, resolveConnection } from './db.js';
+import { validatePins } from './pins.js';
 
 const port = Number(process.env.PORT ?? 8787);
 const conn = resolveConnection();
@@ -34,7 +35,29 @@ const server = app.listen(port, () => {
   console.log(`The Grading Room: ${mode} on http://localhost:${port}`);
   if (!process.env.OPENROUTER_API_KEY) {
     console.log('No OPENROUTER_API_KEY set: the panel runs as the labeled simulation, which is not judgment.');
+  } else {
+    // Every pinned id, checked against the router's own list at boot. A pin
+    // that is not a model is a 400 on first use, and finding that at startup
+    // beats finding it when someone clicks a button.
+    void validatePins().then((result) => {
+      if (result.ok) {
+        console.log(`Pins: all ${result.checked} live model ids resolve against openrouter.ai.`);
+        return;
+      }
+      console.error('PINS INVALID. Model calls using these will fail:');
+      for (const problem of result.problems) console.error(`  ${problem}`);
+      console.error('Fix them in server/pins.ts, or run npm run pins:check for the full list.');
+    });
   }
+});
+
+/**
+ * A backstop, not a strategy. Routes forward their own failures now, but an
+ * unhandled rejection from anywhere else should still not silently kill a
+ * server that is holding requests: it is logged and the process keeps serving.
+ */
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled rejection, still serving:', reason);
 });
 
 /**

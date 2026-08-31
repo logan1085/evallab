@@ -104,7 +104,10 @@ export function buildRequestBody(pin: Pin, req: ModelCallRequest): object {
     max_tokens: req.max_tokens ?? 1024,
     ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
     ...(req.response_format ? { response_format: req.response_format } : {}),
-    provider: { only: [pin.provider_slug], allow_fallbacks: false },
+    // Only lock the provider when the pin names one. Naming a host that does
+    // not serve the model is how a request hangs rather than fails; which
+    // provider actually answered is recorded per call either way.
+    ...(pin.provider_slug ? { provider: { only: [pin.provider_slug], allow_fallbacks: false } } : {}),
   };
 }
 
@@ -328,19 +331,55 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
   return errorResult(req, pin, callId, 'provider_error', lastMessage);
 }
 
+/**
+ * How long one request may take before it is abandoned.
+ *
+ * fetch has no default timeout: a connection the router accepts and never
+ * answers hangs forever, and four attempts of forever is a function that
+ * burns its whole wall clock and returns nothing. Every attempt now carries
+ * its own deadline, so the worst case is bounded and visible.
+ */
+const REQUEST_TIMEOUT_MS = Number(process.env.GR_REQUEST_TIMEOUT_MS ?? 45_000);
+
+/** Set GR_LOG_MODEL_CALLS=1 to print every request and reply, server-side. */
+const LOG_CALLS = process.env.GR_LOG_MODEL_CALLS === '1';
+
 function httpTransport(): GatewayTransport {
   return {
     async post(body, apiKey) {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
-          'x-title': 'The Grading Room',
-        },
-        body: JSON.stringify(body),
-      });
-      return { status: res.status, json: await res.json().catch(() => ({})) };
+      const started = Date.now();
+      const sent = body as { model?: string; max_tokens?: number };
+      if (LOG_CALLS) {
+        // The key is never in the body, so this is safe to print whole.
+        console.log(`[model] -> ${sent.model} ${JSON.stringify(body).length}B`, JSON.stringify(body).slice(0, 2000));
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${apiKey}`,
+            'x-title': 'The Grading Room',
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+        const json = await res.json().catch(() => ({}));
+        if (LOG_CALLS) {
+          console.log(`[model] <- ${sent.model} ${res.status} in ${Date.now() - started}ms`, JSON.stringify(json).slice(0, 2000));
+        }
+        return { status: res.status, json };
+      } catch (error) {
+        const aborted = error instanceof Error && error.name === 'AbortError';
+        if (LOG_CALLS) console.log(`[model] !! ${sent.model} ${aborted ? 'timeout' : 'network'} after ${Date.now() - started}ms`);
+        throw aborted
+          ? new Error(`No answer from the router within ${REQUEST_TIMEOUT_MS}ms.`)
+          : error;
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }

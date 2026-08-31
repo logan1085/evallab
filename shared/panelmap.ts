@@ -21,7 +21,18 @@ export interface SeatVote {
   reason: string;
 }
 
-export type CasePattern = 'settled' | 'persona-driven' | 'contested' | 'blind-spot';
+export type CasePattern =
+  | 'settled'
+  | 'persona-driven'
+  | 'contested'
+  | 'blind-spot'
+  /**
+   * Fewer than two panel verdicts, so there is nothing to read. Not a
+   * disagreement: an ungraded case counted as contested inflated the "your
+   * panel split N times" headline and, worse, sent the miner looking for a
+   * dissenting vote that did not exist.
+   */
+  | 'ungraded';
 
 export interface CaseReading {
   itemId: string;
@@ -59,7 +70,9 @@ export function readCase(itemId: string, votes: SeatVote[]): CaseReading {
   const distinct = [...new Set(real.map((v) => v.verdict))];
 
   if (real.length < 2) {
-    return { itemId, pattern: 'contested', dissenter: null, provisional: false };
+    // One voter cannot split, and no voters cannot vote. Either way this case
+    // says nothing about the rubric.
+    return { itemId, pattern: 'ungraded', dissenter: null, provisional: false };
   }
 
   if (distinct.length === 1) {

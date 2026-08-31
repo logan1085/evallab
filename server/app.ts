@@ -14,6 +14,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { newId, newSlug, newToken, resolveConnection } from './db.js';
+import { validatePins } from './pins.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
@@ -105,6 +106,28 @@ export function createApp(db: DB) {
   const api = express.Router();
 
   /**
+   * Express 4 does not forward a rejected promise from a handler to the error
+   * middleware: it surfaces as an unhandled rejection, which by default takes
+   * the process down. That is how a single bad dereference in patch mining
+   * became a two-minute silence in production instead of a 500. Wrapping
+   * registration once covers every route below without fifty try/catch blocks;
+   * error middleware (four arguments) is passed through untouched.
+   */
+  for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+    const original = api[method].bind(api) as (path: string, ...handlers: unknown[]) => unknown;
+    (api as unknown as Record<string, unknown>)[method] = (path: string, ...handlers: unknown[]) =>
+      original(
+        path,
+        ...handlers.map((handler) =>
+          typeof handler === 'function' && handler.length < 4
+            ? (req: Request, res: Response, next: NextFunction) =>
+                Promise.resolve((handler as (a: Request, b: Response, c: NextFunction) => unknown)(req, res, next)).catch(next)
+            : handler,
+        ),
+      );
+  }
+
+  /**
    * Liveness plus a real read, so a wedged database fails the check — and an
    * honest answer to "will anything I make here survive?". The in-memory
    * fallback is a developer convenience; reporting it as healthy in production
@@ -122,9 +145,13 @@ export function createApp(db: DB) {
     const deployed = !!process.env.VERCEL;
     try {
       await db.get('SELECT 1 AS ok');
+      // Pin validity is cached per instance: it is a network call, and every
+      // cold start paying for it would tax every request.
+      const pins = process.env.OPENROUTER_API_KEY ? await cachedPinCheck() : null;
       res.status(conn.url || !deployed ? 200 : 503).json({
         ok: !!conn.url || !deployed,
         judge: resolveProvider().id,
+        ...(pins ? { pins } : {}),
         database: conn.url
           ? { driver: 'postgres', via: conn.via, pooled: conn.pooled }
           : { driver: 'memory', warning: 'No Postgres connection string set. Data is lost when the process ends.' },
@@ -137,6 +164,10 @@ export function createApp(db: DB) {
   /* ---- Project scoping -------------------------------------------------- */
 
   const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
+
+  /** One pin validation per instance, reused by every later health check. */
+  let pinCheck: Promise<{ ok: boolean; problems: string[]; checked: number }> | null = null;
+  const cachedPinCheck = () => (pinCheck ??= validatePins());
 
   /** The credential, wherever the caller put it: Bearer, header, or link. */
   function credentialOf(req: Request): string | null {
@@ -1156,7 +1187,10 @@ export function createApp(db: DB) {
           ? isTheater(votes, reading.dissenter, litName)
           : false;
       if (theater) continue; // shown on the map, never mined into the rubric
-      if (reading.pattern === 'persona-driven' || reading.pattern === 'contested') {
+      // votes.length >= 2 is implied by these patterns, and the code below
+      // reads votes[0] directly; the guard keeps that true rather than
+      // trusting it.
+      if ((reading.pattern === 'persona-driven' || reading.pattern === 'contested') && votes.length >= 2) {
         contestedTotal++;
         const trace = await store.getTrace(db, item.traceId);
         disputed.push({
@@ -1306,6 +1340,24 @@ export function createApp(db: DB) {
     const project = (req as ProjectRequest).project;
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') return res.status(409).json({ error: 'Standards are written from a finished round.' });
+
+    // A round with no panel verdicts has nothing to mine. Saying so beats
+    // running the miner over empty vote lists, which is how this route used
+    // to throw: the demo project's own round is graded by people, not by a
+    // panel, and every case came back with zero seat votes.
+    const panelSeats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    if (panelSeats.length === 0) {
+      return res.status(409).json({
+        error: 'No panel has graded this round, so there are no splits to write from. Seat a panel and run a round first.',
+      });
+    }
+    const seatIds = new Set(panelSeats.map((s) => s.id));
+    const panelGrades = (await store.allGradesForRound(db, round.id)).filter((g) => seatIds.has(g.graderId));
+    if (panelGrades.length === 0) {
+      return res.status(409).json({
+        error: 'This round has a panel but no panel verdicts yet. Run the round before writing standards from it.',
+      });
+    }
 
     let patches = await store.listPatches(db, round.id);
     if (patches.length === 0) patches = (await minePatchesForRound(round)).stored;
@@ -2508,7 +2560,10 @@ export function createApp(db: DB) {
         ]);
       }
       for (const item of items) {
-        if (readCase(item.id, byItem.get(item.id) ?? []).pattern !== 'settled') splits++;
+        // Splits are disagreements, not absences: an ungraded case says
+        // nothing and must not inflate the number on the artifact.
+        const pattern = readCase(item.id, byItem.get(item.id) ?? []).pattern;
+        if (pattern !== 'settled' && pattern !== 'ungraded') splits++;
       }
     }
 
@@ -2670,6 +2725,19 @@ export function createApp(db: DB) {
     await store.setProjectPublic(db, project.id, makePublic);
     const k = typeof req.body?.k === 'string' ? req.body.k : '';
     res.redirect(`/s/${project.slug}${k ? `?k=${encodeURIComponent(k)}` : ''}`);
+  });
+
+  /**
+   * The last line: an unhandled throw in a route must become a 500, never a
+   * dead process. On a long-lived server a crash takes down every other
+   * request; on serverless the client gets no answer at all and waits out the
+   * platform timeout, which is what a two-minute "hang" turned out to be.
+   */
+  api.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (res.headersSent) return next(error);
+    const message = error instanceof Error ? error.message : 'Unknown failure.';
+    console.error('[route] unhandled', error);
+    res.status(500).json({ error: `Something failed on our side: ${message}` });
   });
 
   // One router, two mounts. /api/v1 is the versioned surface agents build

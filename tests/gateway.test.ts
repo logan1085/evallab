@@ -49,11 +49,21 @@ describe('the request body contract', () => {
   it('locks one provider and forbids fallbacks, and never carries a models array', () => {
     const body = buildRequestBody(resolvePin('google-small-1'), req()) as Record<string, unknown>;
     expect(body).toMatchObject({
-      model: 'google/gemini-2.5-flash-001',
+      model: 'google/gemini-2.5-flash',
       provider: { only: ['google-ai-studio'], allow_fallbacks: false },
     });
     expect((body.provider as { only: string[] }).only).toHaveLength(1);
     expect('models' in body).toBe(false);
+  });
+
+  it('omits the provider block entirely for a pin that locks no provider', () => {
+    // Open-weight models are served by many hosts. Naming one that does not
+    // carry the model is how a request hangs instead of failing, so those
+    // pins let the router choose and record which provider answered.
+    const body = buildRequestBody(resolvePin('meta-small-1'), req()) as Record<string, unknown>;
+    expect('provider' in body).toBe(false);
+    expect('models' in body).toBe(false);
+    expect(body.model).toBe('meta-llama/llama-3.3-70b-instruct');
   });
 });
 

@@ -52,8 +52,11 @@ describe('how a case reads', () => {
     expect(r.provisional).toBe(false);
   });
 
-  it('one real vote cannot settle anything', () => {
-    expect(readCase('i5', [vote('A', 'pass', 'x'), vote('B', 'abstain', '')]).pattern).toBe('contested');
+  it('one real vote cannot settle anything, and is not a disagreement either', () => {
+    // It used to read as contested, which both overstated the split count and
+    // sent the patch miner looking for a dissenting vote that did not exist.
+    expect(readCase('i5', [vote('A', 'pass', 'x'), vote('B', 'abstain', '')]).pattern).toBe('ungraded');
+    expect(readCase('i6', []).pattern).toBe('ungraded');
   });
 });
 
