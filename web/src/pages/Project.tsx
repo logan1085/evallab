@@ -260,7 +260,16 @@ function PanelSection({
             ) : (
               <>
                 <div className="between">
-                  <strong style={{ fontSize: 15 }}>{seat.name}</strong>
+                  <strong style={{ fontSize: 15 }}>
+                    {seat.name}
+                    {/* An edit is a record, and the record shows: the seat's
+                        origin flips to 'user' when its stake is rewritten. */}
+                    {seat.origin === 'user' ? (
+                      <span className="seat-note" style={{ marginLeft: 10, fontWeight: 400 }}>
+                        edited by you
+                      </span>
+                    ) : null}
+                  </strong>
                   {/* The model, named. "Six judges" is only a claim until you
                       can see that they are six different models. */}
                   <span className="seat-model shrink" title={`${seat.family} family`}>

@@ -24,6 +24,8 @@ export interface StandardsView {
   patches: { text: string; evidence: { seat: string; quote: string }[]; seatsSided: string[] }[];
   seats: { name: string; objective: string; failsFor: string; model: string }[];
   stats: { cases: number; splits: number; sentences: number; simulated: boolean };
+  /** The round the owner would run next; the Room's own count, not a guess. */
+  nextRound: number;
   /** True when the request carried the project's own key. */
   owner: boolean;
   /** Echoed into owner forms so the toggle round-trips. */
@@ -88,7 +90,9 @@ h2{font-size:15px;font-weight:600;font-family:Inter,system-ui,sans-serif;text-tr
 .ownerbar form{display:inline}
 .ownerbar button,.ownerbar a{font:inherit;background:none;border:1px solid var(--hairline);border-radius:8px;padding:6px 12px;color:var(--ink);cursor:pointer;text-decoration:none}
 .note{color:var(--muted);font-size:15px;font-style:italic}
-@media print{.ownerbar,.foot .btn{display:none}}
+.sharebar{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:16px;color:var(--muted)}
+.sharebar .copy{font-family:Inter,system-ui,sans-serif;font-size:13px;background:none;border:1px solid var(--hairline);border-radius:8px;padding:6px 12px;color:var(--ink);cursor:pointer}
+@media print{.ownerbar,.sharebar,.foot .btn{display:none}}
 `;
 
 export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
@@ -143,8 +147,15 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
           <input type="hidden" name="public" value="${v.project.isPublic ? '0' : '1'}" />
           <button type="submit">${v.project.isPublic ? 'Make it private' : 'Publish it'}</button>
         </form>
-        <a href="/p/${esc(v.project.slug)}?k=${encodeURIComponent(v.k ?? '')}">Back to the Room</a>
+        <a href="/p/${esc(v.project.slug)}?k=${encodeURIComponent(v.k ?? '')}">Run round ${v.nextRound}</a>
       </div>`
+    : '';
+
+  // The share control. Public pages share their clean path; a private page
+  // has nothing to share yet, so the owner sees the publish control instead.
+  const shareUrl = `${baseUrl}/s/${v.project.slug}`;
+  const copyLink = v.project.isPublic
+    ? `<div class="sharebar"><span class="mono">${esc(shareUrl)}</span><button type="button" class="copy" data-url="${esc(shareUrl)}">Copy link</button></div>`
     : '';
 
   return `<!doctype html>
@@ -179,6 +190,7 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
         ? 'A demonstration: no model key was set, so no model judged anything here.'
         : esc(modelLine(v))
     }</div>
+    ${copyLink}
     ${ownerBar}
   </header>
 
@@ -210,6 +222,16 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
     <a class="btn" href="/">Seat your own panel</a>
   </div>
 </div>
+${copyLink ? `<script>
+document.querySelectorAll('button.copy').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var url = b.getAttribute('data-url');
+    var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy link'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, function () { window.prompt('Copy this link', url); });
+    else window.prompt('Copy this link', url);
+  });
+});
+</script>` : ''}
 </body>
 </html>`;
 }

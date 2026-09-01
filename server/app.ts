@@ -2595,10 +2595,8 @@ export function createApp(db: DB) {
 
     // Split count from the round the version came from, or the latest closed
     // round when the framework predates its first patch.
-    const roundId =
-      patches[0]?.roundId ??
-      (await store.listRounds(db, project.id)).filter((r) => r.status === 'closed').at(-1)?.id ??
-      null;
+    const rounds = await store.listRounds(db, project.id);
+    const roundId = patches[0]?.roundId ?? rounds.filter((r) => r.status === 'closed').at(-1)?.id ?? null;
     let cases = 0;
     let splits = 0;
     if (roundId) {
@@ -2640,6 +2638,8 @@ export function createApp(db: DB) {
         sentences: addedIds.size,
         simulated: seats.length > 0 && seats.every((s) => s.model === 'simulated' || s.family === 'offline'),
       },
+      // Same arithmetic as the Room's masthead, so the two never disagree.
+      nextRound: rounds.length + 1,
       owner,
       k,
     };

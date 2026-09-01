@@ -20,7 +20,7 @@ import type { DraftDocument } from './drafting.js';
 
 export const MIN_SCENARIOS = 4;
 export const MAX_SCENARIOS = 16;
-export const DEFAULT_SCENARIOS = 10;
+export const DEFAULT_SCENARIOS = 12;
 
 export interface Scenario {
   title: string;

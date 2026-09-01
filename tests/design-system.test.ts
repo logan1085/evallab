@@ -49,6 +49,7 @@ const view: StandardsView = {
   patches: [{ text: 'The added sentence.', evidence: [{ seat: 'The literalist', quote: 'nothing settles it' }], seatsSided: [] }],
   seats: [{ name: 'The literalist', objective: 'Grades what is written.', failsFor: 'Fails gap-filling.', model: 'simulated' }],
   stats: { cases: 12, splits: 14, sentences: 1, simulated: true },
+  nextRound: 2,
   owner: false,
   k: null,
 };
