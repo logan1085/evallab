@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { parseModelJson } from '../shared/schema.js';
 import { openrouterJson, CREATOR_PIN } from '../server/openrouter.js';
 import { DrafterError } from '../server/drafter.js';
-import { resolvePin, validatePins, PIN_REGISTRY } from '../server/pins.js';
+import { cheapestPin, resolvePin, validatePins, PIN_REGISTRY } from '../server/pins.js';
 import type { GatewayTransport } from '../server/gateway.js';
 
 describe('reading what a model actually sends back', () => {
@@ -41,14 +41,18 @@ describe('reading what a model actually sends back', () => {
 });
 
 /** A model that answers well but wraps it, and one that never complies. */
-function replier(replies: string[]): { transport: GatewayTransport; calls: number } {
-  const state = { calls: 0 };
+function replier(replies: string[]): { transport: GatewayTransport; calls: number; bodies: unknown[] } {
+  const state = { calls: 0, bodies: [] as unknown[] };
   return {
     get calls() {
       return state.calls;
     },
+    get bodies() {
+      return state.bodies;
+    },
     transport: {
-      async post() {
+      async post(body) {
+        state.bodies.push(body);
         const text = replies[Math.min(state.calls, replies.length - 1)]!;
         state.calls++;
         return {
@@ -86,11 +90,22 @@ describe('the creator call', () => {
     expect(r.calls).toBe(1);
   });
 
-  it('nudges once when the reply is truly unparseable, then succeeds', async () => {
+  it('repairs an unparseable reply as a reformatting job on the cheapest seat', async () => {
     const r = replier(['I would rather explain it in prose.', '{"scenarios":[1]}']);
     const value = await ask(r.transport);
     expect(value.scenarios.length).toBe(1);
     expect(r.calls).toBe(2);
+
+    // The expensive work already happened; the repair must not rerun it. It
+    // goes to the cheapest live pin, carries the failed reply to reformat,
+    // and never re-sends the original writing prompt.
+    const first = r.bodies[0] as { model: string };
+    const repair = r.bodies[1] as { model: string; messages: { role: string; content: string }[] };
+    expect(repair.model).toBe(cheapestPin('small').openrouter_model_id);
+    expect(repair.model).not.toBe(first.model);
+    const repairText = repair.messages.map((m) => m.content).join('\n');
+    expect(repairText).toContain('I would rather explain it in prose.');
+    expect(repairText).not.toContain('six of them');
   });
 
   it('gives up after two calls and quotes what came back', async () => {

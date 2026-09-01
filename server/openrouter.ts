@@ -10,6 +10,7 @@
 import { callModel, type GatewayOptions } from './gateway.js';
 import { DrafterError } from './drafter.js';
 import { parseModelJson } from '../shared/schema.js';
+import { cheapestPin } from './pins.js';
 
 export function openrouterKey(): string | undefined {
   return process.env.OPENROUTER_API_KEY;
@@ -21,12 +22,19 @@ export const CREATOR_PIN = process.env.GR_CREATOR_PIN ?? 'anthropic-frontier-1';
 /**
  * A creator call is one model call, and a failure must not become four.
  *
- * The budget: one request, then local repair (free), then at most one nudge
- * request. Two model calls total, each under its own deadline, so the worst
- * case a user waits for a writer failure is bounded and roughly the same as
- * the best case for a success.
+ * The budget: one request, then local repair (free), then at most one repair
+ * request. Two model calls total, each under its own deadline.
+ *
+ * The repair request is deliberately not a rerun. The expensive work, writing
+ * the scenarios or the seats, already happened; what failed is the packaging.
+ * Reformatting existing text into JSON is a small-model job that takes a few
+ * seconds, so the repair goes to the cheapest live pin with a tight deadline
+ * instead of asking the frontier model to think everything through again.
+ * That is the difference between a failure that costs forty-five seconds and
+ * one that costs the original call plus single digits.
  */
 const CREATOR_TIMEOUT_MS = Number(process.env.GR_CREATOR_TIMEOUT_MS ?? 25_000);
+const REPAIR_TIMEOUT_MS = Number(process.env.GR_REPAIR_TIMEOUT_MS ?? 8_000);
 
 export async function openrouterJson<T>(args: {
   /** Which pin runs this task. Defaults to the creator pin. */
@@ -68,16 +76,38 @@ export async function openrouterJson<T>(args: {
   const parsed = parseModelJson<T>(first.text);
   if (parsed.ok) return parsed.value;
 
-  // One nudge, carrying the model's own reply back so it can see what it did.
-  const retry = await ask([
-    ...base,
-    { role: 'assistant', content: first.text.slice(0, 4000) },
-    {
-      role: 'user',
-      content:
-        'That reply could not be parsed as JSON. Reply again with only the JSON value, no prose before or after it and no code fences.',
-    },
-  ]);
+  // The paid repair. An empty reply has nothing to reformat, so that one case
+  // re-asks the original question; anything else goes to the cheapest seat as
+  // a pure reformatting job, schema in hand.
+  const retry =
+    first.text.trim() === ''
+      ? await ask(base)
+      : await callModel(
+          {
+            pin_id: cheapestPin('small').pin_id,
+            messages: [
+              {
+                role: 'system',
+                content:
+                  'You convert a reply into valid JSON. Output only the JSON value: no prose before or after it, no code fences. Preserve the reply’s content exactly; invent nothing.',
+              },
+              {
+                role: 'user',
+                content: [
+                  'Convert this reply into valid JSON.',
+                  args.schema ? `It must match this JSON schema:\n${JSON.stringify(args.schema).slice(0, 2500)}` : '',
+                  `The reply:\n${first.text.slice(0, 6000)}`,
+                ]
+                  .filter(Boolean)
+                  .join('\n\n'),
+              },
+            ],
+            max_tokens: args.maxTokens ?? 2048,
+            response_format: responseFormat,
+            caller: { kind: 'creator' },
+          },
+          { ...gateway, timeoutMs: REPAIR_TIMEOUT_MS },
+        );
   if (retry.error) throw asDrafterError(retry.error);
 
   const repaired = parseModelJson<T>(retry.text);

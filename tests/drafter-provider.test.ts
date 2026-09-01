@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fakeTransport } from '../server/gateway.js';
 import { CREATOR_PIN } from '../server/openrouter.js';
 import { DrafterError, resolveDrafter } from '../server/drafter.js';
+import { cheapestPin } from '../server/pins.js';
 import { MAX_QUESTIONS } from '../shared/drafting.js';
 
 const saved = process.env.OPENROUTER_API_KEY;
@@ -65,10 +66,20 @@ describe('the drafter through the router', () => {
   it('reports unparseable output as a parse failure rather than an empty rubric', async () => {
     const drafter = resolveDrafter();
     const error = await drafter
-      .draft(REQUEST, { transport: fakeTransport([{ pin_id: CREATOR_PIN, text: 'not json at all' }]) })
+      .draft(REQUEST, {
+        // The writer answers prose, and so does the cheap seat the repair
+        // goes to: only then is the failure allowed to surface, and it must
+        // surface as a parse failure that quotes the reply.
+        transport: fakeTransport([
+          { pin_id: CREATOR_PIN, text: 'not json at all' },
+          { pin_id: cheapestPin('small').pin_id, text: 'still not json' },
+        ]),
+        sleep: async () => undefined,
+      })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DrafterError);
     expect((error as DrafterError).code).toBe('parse');
+    expect((error as DrafterError).message).toContain('still not json');
   });
 
   it('retries a rate limit and succeeds, rather than surfacing the first 429', async () => {
