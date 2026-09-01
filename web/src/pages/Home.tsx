@@ -156,7 +156,7 @@ function ArtifactCard() {
     <div className="l-artifact" data-reveal style={{ ['--d' as string]: '90ms' }}>
       <div className="t">Standards v2</div>
       <div className="s">Meridian Outfitters support agent</div>
-      <div className="stamp">Graded by 5 experts + the literalist · 12 cases · 14 splits · Aug 2026</div>
+      <div className="stamp">Graded by 5 experts + the literalist · 6 cases · 6 splits · Sep 2026</div>
       <div className="clause">
         Refunds up to $50 are issued without asking; a request above $50 is declined and routed to a human, never
         improvised.

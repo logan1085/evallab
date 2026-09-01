@@ -391,7 +391,7 @@ function OperationsTab({ slug, token, onError }: { slug: string; token: string; 
   }
 
   return (
-    <section className="rail-grid">
+    <section>
       <div className="col">
         <div className="panel">
           <h3 style={{ marginTop: 0 }}>What you already have written down</h3>
@@ -608,7 +608,7 @@ function TracesTab({
   }
 
   return (
-    <section className="rail-grid">
+    <section>
       <div className="col">
         <div className="sec-title">
           <span className="no">2</span>
@@ -1093,7 +1093,7 @@ function RubricTab({
   }
 
   return (
-    <section className="rail-grid">
+    <section>
       <div className="col">
         <DraftPanel
           slug={slug}
@@ -1124,7 +1124,7 @@ function RubricTab({
             <div className="warn">
               <span className="metric-k">Drafted, not calibrated</span>
               <p style={{ margin: '6px 0 0' }}>
-                {draftedFrom.provider === 'anthropic'
+                {draftedFrom.provider !== 'offline'
                   ? `A model wrote this from ${draftedFrom.exampleCount} of your conversations.`
                   : 'This is a starting skeleton, not a draft from your conversations.'}{' '}
                 Nobody has yet checked whether two people apply it the same way. Run a round before trusting any number

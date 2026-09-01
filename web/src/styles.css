@@ -233,12 +233,6 @@ code {
   gap: 0 28px;
 }
 
-.rail-grid {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 24px;
-}
-
 .scroll-x {
   overflow-x: auto;
 }
@@ -718,10 +712,6 @@ td {
 }
 
 @media (max-width: 640px) {
-  .rail-grid {
-    grid-template-columns: 1fr;
-  }
-
   .masthead h1 {
     font-size: 30px;
   }

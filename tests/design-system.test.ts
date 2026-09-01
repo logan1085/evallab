@@ -10,8 +10,8 @@
  * The scroll-pin guards below outlived the prototype they were written for:
  * the landing carries the same technique, so it inherits the same traps.
  *
- * (The retired direction-two prototype at web/public/agent.html is a dark
- * design the launch spec replaced; it is no longer held to this palette.)
+ * (The retired direction-two prototype that lived at web/public/agent.html
+ * was a dark design the launch spec replaced; it has been deleted.)
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';

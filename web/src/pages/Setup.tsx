@@ -94,9 +94,14 @@ export function SetupPage() {
     // owner's own words, not prose folded into the description.
     const limits = done[2]!.trim().toLowerCase() === 'skip' ? '' : done[2]!.trim();
     let current = project;
+    // Tracked locally, not read back from state: state reads inside this
+    // closure are stale, and blaming the wrong step would make "try again"
+    // re-run a step that succeeded — for seating, that replaces the panel.
+    let reached: Step = from;
 
     try {
       if (from === 'creating') {
+        reached = 'creating';
         setPhase('creating');
         setFailure(null);
         const res = await api.createProject(done[0]!, description, limits);
@@ -107,6 +112,7 @@ export function SetupPage() {
       if (!current) throw new Error('The project is missing.');
 
       if (from === 'creating' || from === 'seating') {
+        reached = 'seating';
         setPhase('seating');
         setFailure(null);
         const seated = await api.generatePanel(current.slug, current.token);
@@ -114,25 +120,18 @@ export function SetupPage() {
         setSeatingFallback(seated.fallbackReason ?? null);
       }
 
+      reached = 'writing';
       setPhase('writing');
       setFailure(null);
       const written = await api.generateScenarios(current.slug, current.token, { description });
       setCaseCount(written.scenarios.length);
       setPhase('done');
     } catch (err) {
-      const failedAt: Step = phaseToStep(current, seats.length);
       setFailure({
-        step: failedAt,
-        message: err instanceof Error && err.message ? err.message : STEP_COPY[failedAt].failed,
+        step: reached,
+        message: err instanceof Error && err.message ? err.message : STEP_COPY[reached].failed,
       });
     }
-  }
-
-  /** Which step to resume from, given what already exists. */
-  function phaseToStep(current: Project | null, seatCount: number): Step {
-    if (!current) return 'creating';
-    if (seatCount === 0) return 'seating';
-    return 'writing';
   }
 
   function submit(e: React.FormEvent) {
@@ -249,7 +248,8 @@ export function SetupPage() {
           {benchSeated && seatingFallback ? (
             <p className="progress-line">
               These are the stock seats, not seats written for your product: the writer failed with
-              {' '}{seatingFallback} You can edit any of them in the Room, or retry the seating there.
+              {' '}{seatingFallback.trim().replace(/\.?$/, '.')} You can edit any of them in the Room, or retry the
+              seating there.
             </p>
           ) : null}
           {benchSeated ? (

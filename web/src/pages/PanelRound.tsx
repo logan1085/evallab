@@ -28,6 +28,10 @@ const PATTERN_COPY: Record<PanelCaseView['pattern'], { label: string; hint: stri
     label: 'Settled',
     hint: 'The panel agrees. Provisional until you have checked some yourself: a panel can be confidently wrong together.',
   },
+  ungraded: {
+    label: 'Ungraded',
+    hint: 'Fewer than two seats returned a verdict on these. An absence is not agreement or disagreement; it counts as nothing.',
+  },
 };
 
 export function PanelRoundPage() {
@@ -97,8 +101,9 @@ export function PanelRoundPage() {
     );
   }
 
-  const ordered: PanelCaseView['pattern'][] = ['persona-driven', 'contested', 'blind-spot', 'settled'];
+  const ordered: PanelCaseView['pattern'][] = ['persona-driven', 'contested', 'blind-spot', 'settled', 'ungraded'];
   const disagreements = map.counts.personaDriven + map.counts.contested;
+  const ungraded = map.cases.filter((c) => c.pattern === 'ungraded').length;
 
   return (
     <main className="sheet sheet--wide">
@@ -109,18 +114,22 @@ export function PanelRoundPage() {
           <span>{map.round.name}</span>
         </div>
         <h1>
-          {disagreements === 0 ? (
-            'The panel agreed on everything.'
-          ) : (
+          {disagreements > 0 ? (
             <>
               Your panel split <span style={{ color: 'var(--signal)' }}>{disagreements}</span> time{disagreements === 1 ? '' : 's'}.
             </>
+          ) : map.counts.settled + map.counts.blindSpots === 0 ? (
+            'The panel has not graded these cases.'
+          ) : (
+            'The panel agreed on everything.'
           )}
         </h1>
         <p className="standfirst">
-          {disagreements === 0
-            ? 'Either your rubric decides every case, or this case set avoided the hard ones. Check your ten below before believing it.'
-            : 'Where the panel splits is where your rubric is silent. Each split below shows who disagreed and why.'}
+          {disagreements > 0
+            ? 'Where the panel splits is where your rubric is silent. Each split below shows who disagreed and why.'
+            : map.counts.settled + map.counts.blindSpots === 0
+              ? 'No case has two panel verdicts yet, so there is no agreement or disagreement to read. Run the panel to fill the map.'
+              : 'Either your rubric decides every case, or this case set avoided the hard ones. Check your ten below before believing it.'}
         </p>
       </header>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
@@ -144,6 +153,7 @@ export function PanelRoundPage() {
           { k: 'Contested', v: map.counts.contested },
           { k: 'Agreed by accident', v: map.counts.blindSpots },
           { k: 'Settled', v: map.counts.settled },
+          ...(ungraded > 0 ? [{ k: 'Ungraded', v: ungraded }] : []),
         ].map((t) => (
           <div key={t.k} className="panel" style={{ margin: 0 }}>
             <div style={{ fontSize: 30, fontWeight: 650 }}>{t.v}</div>
@@ -377,6 +387,9 @@ function SelfCheckSection({
   const { data, reload } = useAsync(() => api.selfCheck(roundId, token), [roundId, token]);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [alignment, setAlignment] = useState<Awaited<ReturnType<typeof api.alignment>> | null>(null);
+  // Outcomes of deliberate actions, not failures: these render as plain
+  // statements, because a success in an error banner reads as a bug.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const cases = data?.cases ?? [];
   const done = cases.filter((c) => c.myVerdict).length;
@@ -413,7 +426,7 @@ function SelfCheckSection({
           <div className="transcript" style={{ maxHeight: 180 }}>{c.content}</div>
           <div className="verdict-picker" style={{ marginTop: 10 }}>
             {['pass', 'recoverable', 'fail'].map((v) => (
-              <button key={v} className={c.myVerdict === v ? 'selected' : ''} onClick={() => grade(c.itemId, v)}>
+              <button key={v} aria-pressed={c.myVerdict === v} onClick={() => grade(c.itemId, v)}>
                 {v}
               </button>
             ))}
@@ -444,7 +457,7 @@ function SelfCheckSection({
               onClick={async () => {
                 try {
                   const res = await api.reweight(roundId, token);
-                  onError(
+                  setNotice(
                     res.changes.length === 0
                       ? 'No weights changed: the panel already matches your taste.'
                       : `Reweighted: ${res.changes.map((c) => `${c.seat} ${c.from} to ${c.to}`).join(', ')}. Applies to future rounds; history keeps its weights.`,
@@ -457,6 +470,7 @@ function SelfCheckSection({
               Reweight the panel toward the seats that share your taste
             </button>
           </p>
+          {notice ? <p className="tiny">{notice}</p> : null}
           <div className="scroll-x">
             <table>
               <thead>
@@ -496,7 +510,7 @@ function SelfCheckSection({
                     onClick={async () => {
                       try {
                         await api.falseSettlePatch(roundId, token, f.itemId);
-                        onError('Turned into a proposed patch. Find it in the missing-sentences list above.');
+                        setNotice('Turned into a proposed patch. Find it in the missing-sentences list above.');
                       } catch (err) {
                         onError(err instanceof Error ? err.message : 'Could not make the patch.');
                       }

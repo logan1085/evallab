@@ -110,11 +110,14 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
     })
     .join('\n');
 
+  // Two identical quotes read as a rendering mistake, not corroboration:
+  // dedupe on seat + words before capping the list at two.
   const evidence = v.patches
     .map(
       (p) => `<div class="split">
       <div class="sentence"><span class="add">+ ${esc(p.text)}</span></div>
       ${p.evidence
+        .filter((e, i, all) => all.findIndex((x) => x.seat === e.seat && x.quote === e.quote) === i)
         .slice(0, 2)
         .map((e) => `<div class="quote"><b>${esc(e.seat)}:</b> “${esc(e.quote)}”</div>`)
         .join('\n')}
@@ -140,7 +143,7 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
           <input type="hidden" name="public" value="${v.project.isPublic ? '0' : '1'}" />
           <button type="submit">${v.project.isPublic ? 'Make it private' : 'Publish it'}</button>
         </form>
-        <a href="/p/${esc(v.project.slug)}?k=${encodeURIComponent(v.k ?? '')}">Run round ${'2'}</a>
+        <a href="/p/${esc(v.project.slug)}?k=${encodeURIComponent(v.k ?? '')}">Back to the Room</a>
       </div>`
     : '';
 
@@ -166,8 +169,16 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
   <header class="head">
     <h1>Standards v${v.version.version}</h1>
     <div class="sub">${esc(v.project.name)}</div>
-    <div class="stamp mono">Graded by ${v.seats.length} ${v.stats.simulated ? 'simulated ' : ''}expert judges across ${familyCount(v)} model famil${familyCount(v) === 1 ? 'y' : 'ies'} · ${v.stats.cases} cases · ${v.stats.splits} splits · ${date}</div>
-    <div class="stamp mono">${esc(modelLine(v))}</div>
+    <div class="stamp mono">${
+      v.stats.simulated
+        ? `Graded by a simulated panel of ${v.seats.length} seats · ${v.stats.cases} cases · ${v.stats.splits} splits · ${date}`
+        : `Graded by ${v.seats.length} expert judges across ${familyCount(v)} model famil${familyCount(v) === 1 ? 'y' : 'ies'} · ${v.stats.cases} cases · ${v.stats.splits} splits · ${date}`
+    }</div>
+    <div class="stamp mono">${
+      v.stats.simulated
+        ? 'A demonstration: no model key was set, so no model judged anything here.'
+        : esc(modelLine(v))
+    }</div>
     ${ownerBar}
   </header>
 
@@ -179,7 +190,13 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
 
   <section>
     <h2>2 · Why you can trust it</h2>
-    <p style="margin-bottom:18px">${v.stats.cases} cases graded blind by ${v.seats.length} judges with conflicting stakes, running on ${familyCount(v)} different model famil${familyCount(v) === 1 ? 'y' : 'ies'} so that agreement between them is not one model agreeing with itself. The panel split ${v.stats.splits} time${v.stats.splits === 1 ? '' : 's'}; ${v.stats.sentences} of those splits survived the grounding rule and became the sentences below. Every sentence quotes the room verbatim.</p>
+    <p style="margin-bottom:18px">${v.stats.cases} cases graded blind by ${v.seats.length} judges with conflicting stakes, ${
+      v.stats.simulated
+        ? 'run as a deterministic simulation: this page demonstrates the loop, not judgment.'
+        : familyCount(v) === 1
+          ? 'all running on a single model family, which is worth knowing: agreement between them can be one model agreeing with itself.'
+          : `running on ${familyCount(v)} different model families so that agreement between them is not one model agreeing with itself.`
+    } The panel split ${v.stats.splits} time${v.stats.splits === 1 ? '' : 's'}; ${v.stats.sentences} of those splits survived the grounding rule and became the sentence${v.stats.sentences === 1 ? '' : 's'} below. Every sentence quotes the room verbatim.</p>
     ${evidence || '<p class="note">Version 1 predates the first round. The evidence arrives with the first splits.</p>'}
   </section>
 
