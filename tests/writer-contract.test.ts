@@ -164,3 +164,47 @@ describe('a pin the router stops listing', () => {
     expect(target.status).toBe(original);
   });
 });
+
+/**
+ * Creator calls are metered. They were the unmetered ones: panel grading
+ * carried telemetry and the spend guard from the start, while the expensive
+ * frontier calls on the credential-free creation path carried neither.
+ */
+describe('the meter on creator calls', () => {
+  it('records every attempt through the recorder', async () => {
+    const rows: { caller_kind: string; cost_credits: number }[] = [];
+    const r = replier(['{"scenarios":[{"title":"T","content":"C","probe":"P"}]}']);
+    await openrouterJson<{ scenarios: unknown[] }>({
+      system: 'write',
+      user: 'six',
+      gateway: {
+        apiKey: 'sk-or-test',
+        transport: r.transport,
+        recorder: async (attempt) => {
+          rows.push({ caller_kind: attempt.caller_kind, cost_credits: attempt.cost_credits });
+        },
+      },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.caller_kind).toBe('creator');
+  });
+
+  it('is refused by the spend guard before any request goes out', async () => {
+    const r = replier(['{"scenarios":[]}']);
+    const error = await openrouterJson({
+      system: 'write',
+      user: 'six',
+      gateway: {
+        apiKey: 'sk-or-test',
+        transport: r.transport,
+        guard: {
+          check: async () => ({ kind: 'budget_exceeded' as const, message: 'The daily ceiling is spent.' }),
+        },
+      },
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DrafterError);
+    expect((error as DrafterError).message).toContain('ceiling');
+    // Refused means refused: nothing reached the transport.
+    expect(r.calls).toBe(0);
+  });
+});

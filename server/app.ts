@@ -165,6 +165,20 @@ export function createApp(db: DB) {
 
   const hashKey = (key: string) => createHash('sha256').update(key).digest('hex');
 
+  /**
+   * Telemetry and the spend ceiling for creator calls. Panel grading has
+   * carried these from the start; the creator paths (scenarios, the panel
+   * writer, the drafter, the judge) did not, which meant the expensive
+   * frontier calls were the unmetered ones, on the one route that needs no
+   * credential. Every model call now lands in model_call and counts against
+   * the daily ceiling, so GR_DAILY_COST_CEILING_CREDITS actually caps what an
+   * anonymous visitor can spend.
+   */
+  const meter = () => ({
+    recorder: (attempt: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, attempt),
+    guard: createSpendGuard(db),
+  });
+
   /** One pin validation per instance, reused by every later health check. */
   let pinCheck: Promise<Awaited<ReturnType<typeof validatePins>>> | null = null;
   const cachedPinCheck = () => (pinCheck ??= validatePins(fetch, { disableInvalid: true }));
@@ -232,7 +246,42 @@ export function createApp(db: DB) {
    * company still gets its project and writes scenarios from the tab instead of
    * losing the sign-up to a provider error.
    */
+  /**
+   * A light brake on the one route that needs no credential. Per instance and
+   * in memory, so on serverless it is per warm container and resets on cold
+   * start: that is understood, and it is still enough to stop a naive loop.
+   * The durable defense against spend is the daily ceiling, which the creator
+   * calls now count against.
+   */
+  // Twenty per ten minutes stops a loop without ever biting a person; tests
+  // hammer this route from one address by design, so they default it off and
+  // opt in explicitly where the throttle itself is under test.
+  const CREATE_LIMIT = Number(process.env.GR_CREATE_LIMIT ?? (process.env.NODE_ENV === 'test' ? 0 : 20));
+  const CREATE_WINDOW_MS = 10 * 60 * 1000;
+  const recentCreates = new Map<string, number[]>();
+  function createThrottled(ip: string): boolean {
+    if (CREATE_LIMIT <= 0) return false;
+    const now = Date.now();
+    const stamps = (recentCreates.get(ip) ?? []).filter((t) => now - t < CREATE_WINDOW_MS);
+    if (stamps.length >= CREATE_LIMIT) {
+      recentCreates.set(ip, stamps);
+      return true;
+    }
+    stamps.push(now);
+    recentCreates.set(ip, stamps);
+    // The map cannot grow without bound off one instance's traffic.
+    if (recentCreates.size > 10_000) recentCreates.clear();
+    return false;
+  }
+
   api.post('/projects', async (req, res) => {
+    const ip = (req.header('x-forwarded-for') ?? req.ip ?? 'unknown').split(',')[0]!.trim();
+    if (createThrottled(ip)) {
+      return res.status(429).json({
+        error: 'Too many new projects from this address in the last few minutes. Wait a little and try again.',
+      });
+    }
+
     const body = z
       .object({
         name: z.string().min(1).max(120),
@@ -524,11 +573,14 @@ export function createApp(db: DB) {
     const scenarist = resolveScenarist();
     try {
       const prepared = prepareDocuments(chosen.map((d) => ({ title: d.title, kind: d.kind, content: d.content })));
-      const scenarios = await scenarist.write({
-        description: body.data.description,
-        documents: prepared.documents,
-        count: body.data.count,
-      });
+      const scenarios = await scenarist.write(
+        {
+          description: body.data.description,
+          documents: prepared.documents,
+          count: body.data.count,
+        },
+        meter(),
+      );
       if (scenarios.length === 0) {
         return res.status(502).json({ error: 'No usable scenarios came back. Try a more specific description.' });
       }
@@ -691,7 +743,7 @@ export function createApp(db: DB) {
     // rather than from the call. The caller reports it now.
     let fallbackReason: string | null = null;
     try {
-      proposed = await writer.write(project.description || project.name, 5);
+      proposed = await writer.write(project.description || project.name, 5, meter());
     } catch (error) {
       // Explicitly the offline writer, not another resolve: re-resolving would
       // hand back the same writer that just failed and retry the identical
@@ -1874,11 +1926,14 @@ export function createApp(db: DB) {
     const drafter = resolveDrafter();
 
     try {
-      const draft = await drafter.draft({
-        description: body.data.description,
-        documents: preparedDocs.documents,
-        examples: prepared.examples,
-      });
+      const draft = await drafter.draft(
+        {
+          description: body.data.description,
+          documents: preparedDocs.documents,
+          examples: prepared.examples,
+        },
+        meter(),
+      );
       res.json({
         draft,
         provider: { id: drafter.id, model: drafter.model, real: drafter.real },
@@ -2458,7 +2513,7 @@ export function createApp(db: DB) {
       const results = await mapLimit(items, 4, async (item) => {
         const trace = await store.getTrace(db, item.traceId);
         if (!trace) return { itemId: item.id, verdict: ABSTAIN, rationale: 'Trace missing.' };
-        const graded = await provider.grade(rubric, trace);
+        const graded = await provider.grade(rubric, trace, meter());
         return { itemId: item.id, ...graded };
       });
       for (const r of results) await store.saveJudgeVerdict(db, runId, r.itemId, r.verdict, r.rationale);

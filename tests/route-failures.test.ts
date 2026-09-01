@@ -90,3 +90,26 @@ describe('an unhandled throw in any route', () => {
     await request(app).get('/api/v1/health').expect(200);
   });
 });
+
+describe('the brake on anonymous creation', () => {
+  it('throttles a loop and answers a person', async () => {
+    process.env.GR_CREATE_LIMIT = '2';
+    try {
+      const throttled = createApp(db);
+      const make = () =>
+        request(throttled).post('/api/v1/projects').set('x-forwarded-for', '203.0.113.9').send({ name: 'Loop' });
+      await make().expect(201);
+      await make().expect(201);
+      const refused = await make().expect(429);
+      expect(refused.body.error).toMatch(/wait/i);
+      // A different address is not punished for someone else's loop.
+      await request(throttled)
+        .post('/api/v1/projects')
+        .set('x-forwarded-for', '198.51.100.7')
+        .send({ name: 'Neighbor' })
+        .expect(201);
+    } finally {
+      delete process.env.GR_CREATE_LIMIT;
+    }
+  });
+});

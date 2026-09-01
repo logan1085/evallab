@@ -19,6 +19,7 @@
 import { ABSTAIN, type RubricVersion, type Trace } from '../shared/types.js';
 import { buildJudgeSystemPrompt, buildJudgeUserPrompt, judgeJsonSchema } from '../shared/rubric.js';
 import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import type { GatewayOptions } from './gateway.js';
 import { resolvePin } from './pins.js';
 import { DrafterError } from './drafter.js';
 
@@ -34,7 +35,7 @@ export interface JudgeProvider {
   model: string;
   /** True when this provider is a real model. The UI gates claims on it. */
   real: boolean;
-  grade(rubric: RubricVersion, trace: Pick<Trace, 'title' | 'content'>): Promise<JudgeResult>;
+  grade(rubric: RubricVersion, trace: Pick<Trace, 'title' | 'content'>, gateway?: GatewayOptions): Promise<JudgeResult>;
 }
 
 export function resolveProvider(_model = process.env.GR_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL): JudgeProvider {
@@ -50,7 +51,7 @@ function openrouterProvider(): JudgeProvider {
     id: 'openrouter',
     model: pin.openrouter_model_id,
     real: true,
-    async grade(rubric, trace) {
+    async grade(rubric, trace, gateway) {
       const allowed = [...rubric.scale].sort((a, b) => b.rank - a.rank).map((s) => s.id);
 
       // Structured outputs rather than "reply with JSON" plus a parser: the
@@ -66,6 +67,7 @@ function openrouterProvider(): JudgeProvider {
           schema,
           // Sized for reasoning plus a two-field object, not just the object.
           maxTokens: 4096,
+          gateway,
         });
       } catch (error) {
         // The drafter taxonomy and the judge taxonomy are the same taxonomy

@@ -19,6 +19,7 @@ import {
 } from '../shared/scenarios.js';
 import { DrafterError } from './drafter.js';
 import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import type { GatewayOptions } from './gateway.js';
 import { resolvePin } from './pins.js';
 
 export const DEFAULT_SCENARIO_MODEL = 'openrouter';
@@ -28,7 +29,7 @@ export interface ScenarioProvider {
   model: string;
   /** True when a model actually read the description and documents. */
   real: boolean;
-  write(req: ScenarioRequest): Promise<Scenario[]>;
+  write(req: ScenarioRequest, gateway?: GatewayOptions): Promise<Scenario[]>;
 }
 
 export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_SCENARIO_MODEL): ScenarioProvider {
@@ -42,13 +43,14 @@ function openrouterScenarist(): ScenarioProvider {
     id: 'openrouter',
     model: resolvePin(CREATOR_PIN).openrouter_model_id,
     real: true,
-    async write(req) {
+    async write(req, gateway) {
       const count = clampScenarioCount(req.count);
       const parsed = await openrouterJson<unknown>({
         system: buildScenarioSystemPrompt(),
         user: buildScenarioUserPrompt(req),
         schema: scenarioJsonSchema(count),
         maxTokens: 8192,
+        gateway,
       });
       return normalizeScenarios(parsed, count);
     },

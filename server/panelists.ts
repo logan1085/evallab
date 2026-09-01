@@ -198,7 +198,11 @@ function hash(s: string): number {
 export interface PanelWriter {
   id: string;
   real: boolean;
-  write(description: string, count: number): Promise<{ name: string; objective: string; failsFor: string }[]>;
+  write(
+    description: string,
+    count: number,
+    gateway?: GatewayOptions,
+  ): Promise<{ name: string; objective: string; failsFor: string }[]>;
 }
 
 export function resolvePanelWriter(): PanelWriter {
@@ -206,12 +210,13 @@ export function resolvePanelWriter(): PanelWriter {
     return {
       id: 'openrouter',
       real: true,
-      async write(description, count) {
+      async write(description, count, gateway) {
         const parsed = await openrouterJson<{ seats: { name: string; objective: string; failsFor: string }[] }>({
           system: buildPanelSystemPrompt(),
           user: buildPanelUserPrompt(description, count),
           schema: panelJsonSchema(count),
           maxTokens: 4096,
+          gateway,
         });
         return parsed.seats.slice(0, count);
       },
