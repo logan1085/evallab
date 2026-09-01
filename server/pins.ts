@@ -96,12 +96,12 @@ export const PIN_REGISTRY: Pin[] = [
   {
     pin_id: 'mistral-small-1',
     family: 'mistral',
-    // Repinned after the boot check caught the dated id going unlisted. This
-    // one is a best guess at the canonical entry and has not been confirmed
-    // against the live list from here; if it is wrong the boot check disables
-    // it and the panel runs on five families instead of six, which is the
-    // point of the check.
-    openrouter_model_id: 'mistralai/mistral-small',
+    // Production caught "mistralai/mistral-small" unlisted (pins.ok=false on
+    // /api/health). This is Mistral Small 3.2's registry slug. If it is wrong
+    // too, the boot check stands the seat down and /api/health names it, and
+    // GR_PIN_MISTRAL_SMALL_1=<id from openrouter.ai/api/v1/models> repins it
+    // from the environment without a code change.
+    openrouter_model_id: 'mistralai/mistral-small-3.2-24b-instruct',
     provider_slug: null,
     tier: 'small',
     status: 'live',
@@ -120,6 +120,37 @@ export const PIN_REGISTRY: Pin[] = [
 
 /** Aliases that resolve to "whatever is newest": banned from the registry. */
 const LATEST_ALIASES = [/:latest$/i, /:free$/i, /\bauto\b/i, /:floor$/i, /:nitro$/i];
+
+/** The environment key that repins a seat: GR_PIN_MISTRAL_SMALL_1, and so on. */
+export function pinEnvKey(pinId: string): string {
+  return `GR_PIN_${pinId.toUpperCase().replace(/-/g, '_')}`;
+}
+
+/**
+ * Repin from the environment, so a stale slug is an env var and a redeploy
+ * rather than a code change. A pin found unlisted at boot is the case this
+ * exists for: set GR_PIN_<ID> to an id from openrouter.ai/api/v1/models. Only
+ * the model id moves; the family, tier, and provider lock stay, so the seat
+ * is still the same seat. Aliases are refused here as everywhere.
+ */
+export function applyPinOverrides(env: NodeJS.ProcessEnv = process.env): { pin_id: string; from: string; to: string }[] {
+  const applied: { pin_id: string; from: string; to: string }[] = [];
+  for (const pin of PIN_REGISTRY) {
+    const value = env[pinEnvKey(pin.pin_id)]?.trim();
+    if (!value || value === pin.openrouter_model_id) continue;
+    if (!pinIsVersionSafe({ ...pin, openrouter_model_id: value })) {
+      console.error(`${pinEnvKey(pin.pin_id)}="${value}" ignored: an alias or not a namespaced model id.`);
+      continue;
+    }
+    applied.push({ pin_id: pin.pin_id, from: pin.openrouter_model_id, to: value });
+    pin.openrouter_model_id = value;
+    pin.status = 'live';
+  }
+  return applied;
+}
+
+/** Applied once at load, before any caller resolves a pin. */
+export const PIN_OVERRIDES = applyPinOverrides();
 
 export function pinIsVersionSafe(pin: Pin): boolean {
   return !LATEST_ALIASES.some((re) => re.test(pin.openrouter_model_id)) && pin.openrouter_model_id.includes('/');
@@ -169,7 +200,8 @@ export async function validatePins(
     const candidates = [...known].filter((id) => id.startsWith(`${namespace}/`)).sort().slice(0, 6);
     problems.push(
       `${pin.pin_id}: "${pin.openrouter_model_id}" is not a model the router lists.` +
-        (candidates.length > 0 ? ` Live under ${namespace}/: ${candidates.join(', ')}` : ` Nothing lives under ${namespace}/.`),
+        (candidates.length > 0 ? ` Live under ${namespace}/: ${candidates.join(', ')}.` : ` Nothing lives under ${namespace}/.`) +
+        ` Repin with ${pinEnvKey(pin.pin_id)}=<id> or in server/pins.ts.`,
     );
     if (opts.disableInvalid) {
       // Disable, never substitute. A seat that silently moved to a different

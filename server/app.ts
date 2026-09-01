@@ -14,7 +14,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { z } from 'zod';
 import type { DB } from './db.js';
 import { newId, newSlug, newToken, resolveConnection } from './db.js';
-import { validatePins } from './pins.js';
+import { PIN_OVERRIDES, validatePins } from './pins.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
@@ -143,6 +143,19 @@ export function createApp(db: DB) {
   api.get('/health', async (_req, res) => {
     const conn = resolveConnection();
     const deployed = !!process.env.VERCEL;
+    // Which build is answering. "Did the deploy promote" is a question this
+    // endpoint can settle: the commit and environment come from Vercel's own
+    // variables, so a preview URL says preview and production says
+    // production, with the sha to match against git.
+    const deploy = deployed
+      ? {
+          env: process.env.VERCEL_ENV ?? null,
+          url: process.env.VERCEL_URL ?? null,
+          commit: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+          ref: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+          deploymentId: process.env.VERCEL_DEPLOYMENT_ID ?? null,
+        }
+      : { env: 'local', url: null, commit: null, ref: null, deploymentId: null };
     try {
       await db.get('SELECT 1 AS ok');
       // Pin validity is cached per instance: it is a network call, and every
@@ -150,8 +163,9 @@ export function createApp(db: DB) {
       const pins = process.env.OPENROUTER_API_KEY ? await cachedPinCheck() : null;
       res.status(conn.url || !deployed ? 200 : 503).json({
         ok: !!conn.url || !deployed,
+        deploy,
         judge: resolveProvider().id,
-        ...(pins ? { pins } : {}),
+        ...(pins ? { pins: { ...pins, overrides: PIN_OVERRIDES } } : {}),
         database: conn.url
           ? { driver: 'postgres', via: conn.via, pooled: conn.pooled }
           : { driver: 'memory', warning: 'No Postgres connection string set. Data is lost when the process ends.' },

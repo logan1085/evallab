@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { createApp } from './app.js';
 import { openDb, resolveConnection } from './db.js';
-import { validatePins } from './pins.js';
+import { PIN_OVERRIDES, pinEnvKey, validatePins } from './pins.js';
 
 const port = Number(process.env.PORT ?? 8787);
 const conn = resolveConnection();
@@ -39,6 +39,7 @@ const server = app.listen(port, () => {
     // Every pinned id, checked against the router's own list at boot. A pin
     // that is not a model is a 400 on first use, and finding that at startup
     // beats finding it when someone clicks a button.
+    for (const o of PIN_OVERRIDES) console.log(`Pin ${o.pin_id} repinned by ${pinEnvKey(o.pin_id)}: ${o.from} -> ${o.to}`);
     void validatePins(fetch, { disableInvalid: true }).then((result) => {
       if (result.ok) {
         console.log(`Pins: all ${result.checked} live model ids resolve against openrouter.ai.`);

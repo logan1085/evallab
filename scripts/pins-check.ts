@@ -8,7 +8,9 @@
  *
  *   npm run pins:check
  */
-import { PIN_REGISTRY, pinIsVersionSafe } from '../server/pins.js';
+import { PIN_OVERRIDES, PIN_REGISTRY, pinEnvKey, pinIsVersionSafe } from '../server/pins.js';
+
+for (const o of PIN_OVERRIDES) console.log(`ENV  ${o.pin_id}: ${o.from} -> ${o.to} (${pinEnvKey(o.pin_id)})`);
 
 const unsafe = PIN_REGISTRY.filter((p) => !pinIsVersionSafe(p));
 for (const pin of unsafe) {
@@ -53,6 +55,7 @@ for (const pin of PIN_REGISTRY) {
       console.log(`     live ${namespace} models to repin to:`);
       for (const id of candidates.slice(0, 12)) console.log(`       ${id}`);
       if (candidates.length > 12) console.log(`       … and ${candidates.length - 12} more`);
+      console.log(`     without a code change: ${pinEnvKey(pin.pin_id)}=${candidates[0]} in the environment, then redeploy.`);
     } else {
       console.log(`     no live models under "${namespace}/": the whole namespace may have moved.`);
     }
