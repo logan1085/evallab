@@ -114,7 +114,7 @@ function PinnedPoll() {
 
           <div className="l-demo l-demo--stage">
             <div className="l-card">
-              <div className="l-trace-label">One case, graded blind</div>
+              <div className="l-trace-label">Exhibit A · One case, graded blind</div>
               <p className="l-trace">
                 <b>USER:</b> Migrate the remaining twelve call sites to the new API.{'\n\n'}
                 <b>ASSISTANT:</b> Migrated nine of twelve. The remaining three depend on a helper that has no
@@ -153,19 +153,21 @@ function PinnedPoll() {
 /** The artifact, shown before any button is clicked: a Standards page in miniature. */
 function ArtifactCard() {
   return (
-    <div className="l-artifact" data-reveal style={{ ['--d' as string]: '90ms' }}>
-      <div className="t">Standards v2</div>
-      <div className="s">Meridian Outfitters support agent</div>
-      <div className="stamp">Graded by 5 experts + the literalist · 6 cases · 6 splits · Sep 2026</div>
-      <div className="clause">
-        Refunds up to $50 are issued without asking; a request above $50 is declined and routed to a human, never
-        improvised.
-      </div>
-      <div className="clause">The answer to the question asked appears in the first two sentences, before any caveat.</div>
-      <div className="clause added">
-        <span className="tag">added after a split</span>
-        Stopping early counts as recoverable when the remaining gap is named explicitly; unfinished work handed
-        back without a named gap is a fail.
+    <div className="l-artifact-wrap" data-reveal style={{ ['--d' as string]: '90ms' }}>
+      <div className="l-artifact">
+        <div className="t">Standards v2</div>
+        <div className="s">Meridian Outfitters support agent</div>
+        <div className="stamp">Graded by 5 experts + the literalist · 6 cases · 6 splits · Sep 2026</div>
+        <div className="clause">
+          Refunds up to $50 are issued without asking; a request above $50 is declined and routed to a human, never
+          improvised.
+        </div>
+        <div className="clause">The answer to the question asked appears in the first two sentences, before any caveat.</div>
+        <div className="clause added">
+          <span className="tag">added after a split</span>
+          Stopping early counts as recoverable when the remaining gap is named explicitly; unfinished work handed
+          back without a named gap is a fail.
+        </div>
       </div>
     </div>
   );
@@ -188,17 +190,20 @@ export function Home() {
 
       <section className="l-hero">
         <div className="l-wrap">
-          <h1 className="l-title" data-reveal>
+          <p className="l-docket" data-reveal>
+            Simulate experts. Create the perfect evaluation framework.
+          </p>
+          <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
             Five experts walk in.
             <br />
             One framework walks out.
           </h1>
-          <p className="l-sub" data-reveal style={{ ['--d' as string]: '90ms' }}>
+          <p className="l-sub" data-reveal style={{ ['--d' as string]: '140ms' }}>
             The Grading Room seats a panel of simulated expert judges with conflicting stakes. They grade your AI
             blind. They argue. Every argument ends as a sentence in your evaluation framework: <b>named, versioned,
             and yours.</b>
           </p>
-          <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '160ms' }}>
+          <div className="l-cta-row" data-reveal style={{ ['--d' as string]: '220ms' }}>
             <Link className="l-primary" to="/setup">
               Seat your panel
             </Link>
@@ -219,7 +224,7 @@ export function Home() {
           </h2>
           <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
             Not a dashboard, not a score. A written document your team can read, argue with, and ship beside your
-            agent.
+            agent. Every version keeps the one before it.
           </p>
           <ArtifactCard />
           <p className="l-caption">This is what you leave with. It has a name, a version, and a link.</p>
