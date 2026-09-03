@@ -40,6 +40,10 @@ export type ModelErrorKind = 'auth' | 'rate_limited' | 'provider_error' | 'timeo
 export interface ModelCallResult {
   text: string;
   raw: object;
+  /** The router's finish_reason, when it sent one: 'stop', 'length', 'error'… */
+  finish_reason: string | null;
+  /** True when the reply hit max_tokens: the text is a fragment, not an answer. */
+  truncated: boolean;
   usage: ModelUsage;
   pin_id: string;
   model_id: string;
@@ -174,6 +178,69 @@ function saysFormatUnsupported(detail: string): boolean {
   return aboutFormat && unsupported;
 }
 
+/**
+ * What a 200 from the router actually carried.
+ *
+ * Both writers failed identically with "the reply was empty" while the router
+ * was answering 200 with a body, which is the tell that the text was being
+ * read from one field and every other shape was silently an empty string:
+ * a top-level `error` after routing, `choices[0].error` with
+ * finish_reason "error", a structured reply delivered as a tool call's
+ * arguments, or content as an array of parts. Each is read here, and a 200
+ * with no text is an error that quotes the body rather than a blank reply
+ * that gets retried as-is.
+ */
+export function readReply(json: unknown): {
+  text: string;
+  finish_reason: string | null;
+  error: string | null;
+} {
+  if (typeof json !== 'object' || json === null) return { text: '', finish_reason: null, error: 'the router sent no JSON body' };
+  const body = json as {
+    error?: unknown;
+    choices?: {
+      finish_reason?: string;
+      native_finish_reason?: string;
+      error?: unknown;
+      message?: {
+        content?: unknown;
+        refusal?: unknown;
+        tool_calls?: { function?: { arguments?: unknown } }[];
+      };
+    }[];
+  };
+  const topError = routerErrorMessage(json);
+  if (body.error !== undefined && topError) return { text: '', finish_reason: null, error: topError };
+
+  const choice = body.choices?.[0];
+  if (!choice) return { text: '', finish_reason: null, error: topError || 'the router sent no choices' };
+  const finish = choice.finish_reason ?? choice.native_finish_reason ?? null;
+  if (choice.error !== undefined) {
+    const detail = routerErrorMessage({ error: choice.error });
+    return { text: '', finish_reason: finish, error: detail || 'the provider reported an error on this choice' };
+  }
+
+  const message = choice.message ?? {};
+  let text = '';
+  if (typeof message.content === 'string') text = message.content;
+  else if (Array.isArray(message.content)) {
+    text = message.content
+      .map((part) => (typeof part === 'string' ? part : typeof (part as { text?: unknown })?.text === 'string' ? (part as { text: string }).text : ''))
+      .join('');
+  }
+  if (text.trim() === '') {
+    // Structured output from some providers arrives as a forced tool call.
+    const args = message.tool_calls?.[0]?.function?.arguments;
+    if (typeof args === 'string' && args.trim() !== '') text = args;
+    else if (typeof args === 'object' && args !== null) text = JSON.stringify(args);
+  }
+  if (text.trim() === '' && typeof message.refusal === 'string' && message.refusal.trim() !== '') {
+    return { text: '', finish_reason: finish, error: `the model refused: ${message.refusal}` };
+  }
+  if (finish === 'content_filter') return { text, finish_reason: finish, error: 'the provider filtered the reply' };
+  return { text, finish_reason: finish, error: null };
+}
+
 function readUsage(json: unknown): { usage: ModelUsage; generationId: string | null } {
   const body = json as {
     id?: string;
@@ -210,6 +277,8 @@ function errorResult(
   return {
     text: '',
     raw: {},
+    finish_reason: null,
+    truncated: false,
     usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_credits: 0 },
     pin_id: req.pin_id,
     model_id: pin?.openrouter_model_id ?? '',
@@ -360,9 +429,18 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
       };
     }
 
-    const parsed = json as { choices?: { message?: { content?: string } }[] };
-    const text = parsed.choices?.[0]?.message?.content ?? '';
+    const reply = readReply(json);
     const { usage, generationId } = readUsage(json);
+    const empty = reply.error === null && reply.text.trim() === '';
+    // The raw reply, before anything parses it. One line, always, so a
+    // production log answers "what did the model actually send" without a
+    // redeploy; the whole body under GR_LOG_MODEL_CALLS=1.
+    console.log(
+      `[model] reply ${pin.openrouter_model_id} ${req.caller.kind} status=${status} finish=${reply.finish_reason ?? '-'} ` +
+        `chars=${reply.text.length} tokens=${usage.completion_tokens}` +
+        (reply.error ? ` error=${JSON.stringify(reply.error.slice(0, 300))}` : '') +
+        (empty ? ` body=${JSON.stringify(json).slice(0, 600)}` : ` text=${JSON.stringify(reply.text.slice(0, 240))}`),
+    );
     await record({
       attempt_no: attemptNo,
       prompt_tokens: usage.prompt_tokens,
@@ -373,11 +451,24 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
       generation_id: generationId,
       latency_ms: latency,
       http_status: status,
-      error_kind: null,
+      error_kind: reply.error !== null || empty ? 'provider_error' : null,
     });
+    if (reply.error !== null || empty) {
+      // A 200 that carries no answer is a failed call, said in the router's
+      // words, with the body quoted when the router had none. Retrying the
+      // identical request is the caller's decision, not a reflex here.
+      const shape = JSON.stringify(json).slice(0, 400);
+      const message =
+        reply.error !== null
+          ? `The router answered 200 for ${pin.openrouter_model_id} but the reply carried an error: ${reply.error}`
+          : `The router answered 200 for ${pin.openrouter_model_id} with no text (finish_reason=${reply.finish_reason ?? 'none'}). Body: ${shape}`;
+      return { ...errorResult(req, pin, callId, 'provider_error', message), raw: (json ?? {}) as object, usage, latency_ms: latency, finish_reason: reply.finish_reason };
+    }
     return {
-      text,
+      text: reply.text,
       raw: (json ?? {}) as object,
+      finish_reason: reply.finish_reason,
+      truncated: reply.finish_reason === 'length',
       usage,
       pin_id: pin.pin_id,
       model_id: pin.openrouter_model_id,

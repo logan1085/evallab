@@ -68,17 +68,29 @@ export async function openrouterJson<T>(args: {
     { role: 'user', content: args.user },
   ];
 
+  // Two stages, named in every failure: the call (did the router hand back an
+  // answer) and the parse (was that answer the JSON asked for). "The writer
+  // did not return JSON" covered both and pointed at neither, which is how a
+  // router-side error read as a prompt problem for a week.
   const first = await ask(base);
-  if (first.error) throw asDrafterError(first.error);
+  if (first.error) throw asDrafterError(first.error, 'call');
+  if (first.truncated) {
+    throw new DrafterError(
+      'api',
+      `Model call failed: the reply from ${first.model_id} was cut off at max_tokens=${args.maxTokens ?? 2048} after ${first.usage.completion_tokens} tokens. Raise the limit or ask for less.`,
+    );
+  }
 
   // Free repair before paid repair: fences and throat-clearing are the common
   // failures and cost nothing to undo.
   const parsed = parseModelJson<T>(first.text);
   if (parsed.ok) return parsed.value;
+  console.warn(`[writer] parse failed on ${first.model_id} (${parsed.reason}); raw reply: ${JSON.stringify(first.text.slice(0, 800))}`);
 
-  // The paid repair. An empty reply has nothing to reformat, so that one case
-  // re-asks the original question; anything else goes to the cheapest seat as
-  // a pure reformatting job, schema in hand.
+  // The paid repair. The gateway now turns a 200 with no text into a call
+  // error, so an empty string here is the model genuinely answering nothing;
+  // that one case re-asks the original question once. Anything else goes to
+  // the cheapest seat as a pure reformatting job, schema in hand.
   const retry =
     first.text.trim() === ''
       ? await ask(base)
@@ -108,21 +120,22 @@ export async function openrouterJson<T>(args: {
           },
           { ...gateway, timeoutMs: REPAIR_TIMEOUT_MS },
         );
-  if (retry.error) throw asDrafterError(retry.error);
+  if (retry.error) throw asDrafterError(retry.error, 'call');
 
   const repaired = parseModelJson<T>(retry.text);
   if (repaired.ok) return repaired.value;
+  console.warn(`[writer] repair parse failed on ${retry.model_id} (${repaired.reason}); raw reply: ${JSON.stringify(retry.text.slice(0, 800))}`);
 
   // Fail clean, and say what actually came back: "not the expected JSON" with
   // nothing else is unactionable, which is how this cost an evening.
   const sample = retry.text.trim().slice(0, 160).replace(/\s+/g, ' ');
   throw new DrafterError(
     'parse',
-    `The writer did not return JSON after two attempts (${repaired.reason}). It answered: ${sample || '(nothing)'}`,
+    `Parse failed: ${retry.model_id} answered, but not with the JSON asked for, twice (${repaired.reason}). It said: ${sample || '(nothing)'}`,
   );
 }
 
-function asDrafterError(error: { kind: string; message: string }): DrafterError {
+function asDrafterError(error: { kind: string; message: string }, stage: 'call' | 'parse'): DrafterError {
   const kind = error.kind === 'rate_limited' ? 'rate_limited' : error.kind === 'auth' ? 'auth' : 'api';
-  return new DrafterError(kind, error.message);
+  return new DrafterError(kind, `${stage === 'call' ? 'Model call failed' : 'Parse failed'}: ${error.message}`);
 }
