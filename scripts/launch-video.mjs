@@ -224,7 +224,7 @@ await scene('08-round', async (page) => {
   await page.goto(projectLink, { waitUntil: 'networkidle' });
   await dress(page);
   await sleep(900);
-  await page.locator('button:has-text("Run the round")').click();
+  await page.locator('button:has-text("Run round")').click();
   await caption(page, 'Verdicts land one seat at a time. No seat sees another seat.');
   await page.waitForSelector('text=/split|agreed on everything/i', { timeout: 180000 });
   await sleep(1800);

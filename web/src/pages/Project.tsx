@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
 import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
 import { api, recallKey, type DraftResponse, type ProjectView } from '../api';
@@ -56,21 +56,15 @@ export function ProjectPage() {
 
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <div className="panel">
-        <div className="between" style={{ alignItems: 'center' }}>
-          <div style={{ flex: '1 1 340px', minWidth: 0 }}>
-            <p style={{ margin: '0 0 6px', fontWeight: 550 }}>This link is your key. Keep it.</p>
-            <div className="link-box">{link}</div>
-          </div>
-          <div className="shrink">
-            <button className="ghost" onClick={() => navigator.clipboard?.writeText(link)}>
-              Copy link
-            </button>
-          </div>
-        </div>
+      <div className="keyline">
+        <span>Your key link</span>
+        <span className="url" title={link}>{link}</span>
+        <button className="ghost tiny-btn" onClick={() => navigator.clipboard?.writeText(link)}>
+          Copy
+        </button>
       </div>
 
-      <PanelSection slug={slug!} token={token} seats={seats} caseCount={caseCount} onChange={reload} onError={setError} />
+      <PanelSection slug={slug!} token={token} seats={seats} onChange={reload} onError={setError} />
 
       <TracesTab
         slug={slug!}
@@ -80,6 +74,8 @@ export function ProjectPage() {
         onChange={refresh}
         onError={setError}
       />
+
+      <RunSection slug={slug!} token={token} seats={seats} caseCount={caseCount} rounds={data.rounds} onError={setError} />
 
       <details className="deep">
         <summary>Your documents: the rules you already have written down</summary>
@@ -106,14 +102,12 @@ function PanelSection({
   slug,
   token,
   seats,
-  caseCount,
   onChange,
   onError,
 }: {
   slug: string;
   token: string;
   seats: ProjectView['graders'];
-  caseCount: number;
   onChange: () => void;
   onError: (m: string) => void;
 }) {
@@ -122,7 +116,6 @@ function PanelSection({
   const [draft, setDraft] = useState({ name: '', objective: '', failsFor: '' });
   const [adding, setAdding] = useState(false);
   const [archetypes, setArchetypes] = useState<{ id: string; name: string; objective: string; failsFor: string }[]>([]);
-  const navigate = useNavigate();
 
   async function generate() {
     setBusy('generate');
@@ -132,17 +125,6 @@ function PanelSection({
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Could not seat the panel.');
     } finally {
-      setBusy(null);
-    }
-  }
-
-  async function run() {
-    setBusy('run');
-    try {
-      const res = await api.createPanelRound(slug, token);
-      navigate(`/p/${slug}/round/${res.round.id}`);
-    } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not start the round.');
       setBusy(null);
     }
   }
@@ -181,29 +163,18 @@ function PanelSection({
   }
 
   const simulatedPanel = seats.every((s) => s.family === 'offline' || s.model === 'simulated');
-  const roundEstimate = simulatedPanel ? '~2 min · free, simulated' : '~12 min · est. under $1';
 
   return (
     <div className="panel">
-      <div className="between">
-        <div>
-          <div className="sec-title">
-            <span className="no">1</span>
-            <h2>The panel</h2>
-          </div>
-          <p className="sec-sub" style={{ margin: '2px 0 0' }}>
-            Five perspectives with conflicting stakes, plus the literalist, who grades only what the rubric says.
-            Where the literalist and everyone else split, your rubric is missing a sentence. Every seat is editable;
-            every edit is signal.
-          </p>
-        </div>
-        <div className="shrink" style={{ textAlign: 'right' }}>
-          <button onClick={run} disabled={busy !== null || caseCount < 2 || seats.length < 3}>
-            {busy === 'run' ? 'Starting…' : 'Run the round'}
-          </button>
-          <p className="mono tiny" style={{ margin: '6px 0 0' }}>{roundEstimate}</p>
-        </div>
+      <div className="sec-title">
+        <span className="no">1</span>
+        <h2>The panel</h2>
       </div>
+      <p className="sec-sub" style={{ margin: '2px 0 0' }}>
+        Five perspectives with conflicting stakes, plus the literalist, who grades only what the rubric says.
+        Where the literalist and everyone else split, your rubric is missing a sentence. Every seat is editable;
+        every edit is signal.
+      </p>
 
       <p className="tiny" style={{ margin: '10px 0 0' }}>
         {simulatedPanel
@@ -216,84 +187,87 @@ function PanelSection({
 
       <div style={{ marginTop: 14 }}>
         {seats.map((seat) => (
-          <div key={seat.id} className="seat-row" style={{ display: 'block' }}>
+          <div key={seat.id} className="seat-row">
             {editing === seat.id ? (
-              <>
-                <input
-                  value={draft.name}
-                  onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                  aria-label="Seat name"
-                  style={{ marginBottom: 6, width: '100%' }}
-                />
-                <textarea
-                  rows={2}
-                  value={draft.objective}
-                  onChange={(e) => setDraft((d) => ({ ...d, objective: e.target.value }))}
-                  aria-label="What this seat optimizes for"
-                  style={{ marginBottom: 6, width: '100%' }}
-                />
-                <textarea
-                  rows={2}
-                  value={draft.failsFor}
-                  onChange={(e) => setDraft((d) => ({ ...d, failsFor: e.target.value }))}
-                  aria-label="What it fails an answer for"
-                  style={{ marginBottom: 6, width: '100%' }}
-                />
-                <button
-                  className="tiny-btn"
-                  onClick={async () => {
-                    try {
-                      await api.updateSeat(slug, token, seat.id, draft);
-                      setEditing(null);
-                      onChange();
-                    } catch (err) {
-                      onError(err instanceof Error ? err.message : 'Could not save the seat.');
-                    }
-                  }}
-                >
-                  Save
-                </button>{' '}
-                <button className="ghost tiny-btn" onClick={() => setEditing(null)}>
-                  Cancel
-                </button>
-              </>
+              <div className="seat-edit">
+                <div>
+                  <label htmlFor={`seat-name-${seat.id}`}>Name</label>
+                  <input
+                    id={`seat-name-${seat.id}`}
+                    value={draft.name}
+                    onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label htmlFor={`seat-wants-${seat.id}`}>Wants</label>
+                  <textarea
+                    id={`seat-wants-${seat.id}`}
+                    rows={2}
+                    value={draft.objective}
+                    onChange={(e) => setDraft((d) => ({ ...d, objective: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label htmlFor={`seat-fails-${seat.id}`}>Fails</label>
+                  <textarea
+                    id={`seat-fails-${seat.id}`}
+                    rows={2}
+                    value={draft.failsFor}
+                    onChange={(e) => setDraft((d) => ({ ...d, failsFor: e.target.value }))}
+                  />
+                </div>
+                <div className="row">
+                  <button
+                    className="tiny-btn"
+                    onClick={async () => {
+                      try {
+                        await api.updateSeat(slug, token, seat.id, draft);
+                        setEditing(null);
+                        onChange();
+                      } catch (err) {
+                        onError(err instanceof Error ? err.message : 'Could not save the seat.');
+                      }
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button className="ghost tiny-btn" onClick={() => setEditing(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
-                <div className="between">
-                  <strong style={{ fontSize: 15 }}>
-                    {seat.name}
-                    {/* An edit is a record, and the record shows: the seat's
-                        origin flips to 'user' when its stake is rewritten. */}
-                    {seat.origin === 'user' ? (
-                      <span className="seat-note" style={{ marginLeft: 10, fontWeight: 400 }}>
-                        edited by you
-                      </span>
-                    ) : null}
-                  </strong>
-                  {/* The model, named. "Six judges" is only a claim until you
-                      can see that they are six different models. */}
-                  <span className="seat-model shrink" title={`${seat.family} family`}>
-                    {seat.model === 'simulated' || seat.family === 'offline' ? 'simulated' : seat.model}
-                  </span>
-                </div>
-                <p className="tiny" style={{ margin: '6px 0 0' }}>{seat.objective}</p>
-                <p className="tiny" style={{ margin: '4px 0 8px', opacity: 0.75 }}>{seat.failsFor}</p>
-                {seat.sameFamilyAsSut ? (
-                  <p className="tiny" style={{ margin: '0 0 8px', color: 'var(--split)' }}>
-                    Same family as your system: excluded from settled-case math by default, because judges favor their own family.
-                  </p>
-                ) : null}
+                <span className="seat-name">
+                  {seat.name}
+                  {/* An edit is a record, and the record shows: the seat's
+                      origin flips to 'user' when its stake is rewritten. */}
+                  {seat.origin === 'user' ? <span className="seat-note" style={{ marginLeft: 10 }}>edited by you</span> : null}
+                </span>
+                <span className="seat-stake">
+                  {seat.objective}
+                  <span className="fails">{seat.failsFor}</span>
+                  {seat.sameFamilyAsSut ? (
+                    <span className="fails" style={{ color: 'var(--split)' }}>
+                      Same family as your system: excluded from settled-case math by default, because judges favor their own family.
+                    </span>
+                  ) : null}
+                </span>
+                {/* The model, named. "Six judges" is only a claim until you
+                    can see that they are six different models. */}
+                <span className="seat-model" title={`${seat.family} family`}>
+                  {seat.model === 'simulated' || seat.family === 'offline' ? 'simulated' : seat.model}
+                </span>
+                <span className="seat-actions">
                 <button
-                  className="ghost tiny-btn"
                   onClick={() => {
                     setEditing(seat.id);
                     setDraft({ name: seat.name, objective: seat.objective, failsFor: seat.failsFor });
                   }}
                 >
                   edit
-                </button>{' '}
+                </button>
                 <button
-                  className="ghost tiny-btn"
                   onClick={async () => {
                     if (
                       /literalist/i.test(seat.name) &&
@@ -313,6 +287,7 @@ function PanelSection({
                 >
                   remove
                 </button>
+                </span>
               </>
             )}
           </div>
@@ -355,6 +330,93 @@ function PanelSection({
         </p>
       )}
     </div>
+  );
+}
+
+/* ---- Run the round, and the rounds already run --------------------------- */
+
+/**
+ * Section 3 is one button with its cost and time beside it; section 4 lists
+ * the rounds that exist, each a link to its spread. The button lives here
+ * rather than beside the panel because the order on the page is the order
+ * of the work: seats, cases, then the round.
+ */
+function RunSection({
+  slug,
+  token,
+  seats,
+  caseCount,
+  rounds,
+  onError,
+}: {
+  slug: string;
+  token: string;
+  seats: ProjectView['graders'];
+  caseCount: number;
+  rounds: ProjectView['rounds'];
+  onError: (m: string) => void;
+}) {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const simulatedPanel = seats.length > 0 && seats.every((s) => s.family === 'offline' || s.model === 'simulated');
+  const roundEstimate = simulatedPanel ? '~2 min · free, simulated' : '~12 min · est. under $1';
+  const next = rounds.length + 1;
+  const blocked = seats.length < 3 ? 'Seat at least three judges first.' : caseCount < 2 ? 'Add at least two cases first.' : null;
+
+  async function run() {
+    setBusy(true);
+    try {
+      const res = await api.createPanelRound(slug, token);
+      navigate(`/p/${slug}/round/${res.round.id}`);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not start the round.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="panel">
+        <div className="between">
+          <div>
+            <div className="sec-title">
+              <span className="no">3</span>
+              <h2>Run round {next}</h2>
+            </div>
+            <p className="sec-sub" style={{ margin: '2px 0 0' }}>
+              Every seat grades every case, blind. Verdicts land one seat at a time, and you can watch the panel
+              disagree as it happens.
+            </p>
+            {blocked ? <p className="tiny" style={{ margin: '8px 0 0' }}>{blocked}</p> : null}
+          </div>
+          <div className="shrink" style={{ textAlign: 'right' }}>
+            <button onClick={run} disabled={busy || blocked !== null}>
+              {busy ? 'Starting…' : `Run round ${next}`}
+            </button>
+            <p className="mono tiny" style={{ margin: '6px 0 0' }}>{roundEstimate}</p>
+          </div>
+        </div>
+      </div>
+
+      {rounds.length > 0 ? (
+        <div className="panel">
+          <div className="sec-title">
+            <span className="no">4</span>
+            <h2>The spread</h2>
+          </div>
+          <p className="sec-sub" style={{ margin: '2px 0 0' }}>Each round, and where the panel split in it.</p>
+          <ul className="plain" style={{ marginTop: 10 }}>
+            {rounds.map((r) => (
+              <li key={r.id} className="mono">
+                <Link to={`/p/${slug}/round/${r.id}`}>{r.name}</Link> · {r.items} case{r.items === 1 ? '' : 's'} ·{' '}
+                {r.status}
+                {r.rubricVersion !== null ? ` · graded against Standards v${r.rubricVersion}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -595,6 +657,7 @@ function TracesTab({
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [pasting, setPasting] = useState(false);
 
   const stubScenarios = traces.filter((t) => t.meta?.generated === true && t.meta?.real === false).length;
 
@@ -617,16 +680,25 @@ function TracesTab({
   }
 
   return (
-    <section>
+    <section className="panel">
       <div className="col">
-        <div className="sec-title">
-          <span className="no">2</span>
-          <h2>The cases</h2>
+        <div className="between">
+          <div>
+            <div className="sec-title">
+              <span className="no">2</span>
+              <h2>The cases</h2>
+            </div>
+            <p className="sec-sub" style={{ margin: '2px 0 0' }}>
+              The clear cases, the boundary cases, and the ones your documents never imagined. Your own transcript
+              is the one that proves the product on your actual problem.
+            </p>
+          </div>
+          <div className="shrink">
+            <button type="button" className="ghost" onClick={() => setPasting((p) => !p)} aria-expanded={pasting}>
+              Paste a real transcript
+            </button>
+          </div>
         </div>
-        <p className="sec-sub">
-          The clear cases, the boundary cases, and the ones your documents never imagined. Your own transcript is
-          the one that proves the product on your actual problem: paste one below.
-        </p>
         {stubScenarios > 0 ? (
           <div className="warn">
             <span className="metric-k">Placeholder scenarios</span>
@@ -638,54 +710,12 @@ function TracesTab({
           </div>
         ) : null}
 
-        {loading && traces.length === 0 ? (
-          <Loading what="scenarios" />
-        ) : traces.length === 0 ? (
-          <div className="empty">No scenarios yet. Describe your AI below and they will be written for you.</div>
-        ) : (
-          traces.map((trace) => {
-            const probe = typeof trace.meta?.probe === 'string' ? trace.meta.probe : '';
-            return (
-              <div className="panel" key={trace.id}>
-                <div className="between" style={{ marginBottom: 8 }}>
-                  <h3 style={{ margin: 0 }}>{trace.title}</h3>
-                  <span className="tiny shrink">{sourceLabel(trace.source)}</span>
-                </div>
-                {probe ? (
-                  <p className="tiny" style={{ marginTop: 0 }}>
-                    Probes: {probe}
-                  </p>
-                ) : null}
-                <div className="transcript" style={{ maxHeight: 220 }}>{trace.content}</div>
-
-                <p className="tiny" style={{ margin: '10px 0 0' }}>
-                  <button
-                    className="ghost tiny-btn"
-                    onClick={async () => {
-                      try {
-                        await api.deleteTrace(slug, token, trace.id);
-                        onChange();
-                      } catch (err) {
-                        onError(err instanceof Error ? err.message : 'Could not remove that scenario.');
-                      }
-                    }}
-                  >
-                    remove
-                  </button>
-                </p>
-              </div>
-            );
-          })
-        )}
-
-        <ScenarioWriter slug={slug} token={token} onDone={onChange} onError={onError} />
-
-        <details className="deep">
-          <summary>Paste a real transcript</summary>
+        {pasting ? (
           <div className="panel" style={{ marginTop: 14 }}>
+            <h3 style={{ marginTop: 0 }}>Paste a real transcript</h3>
             <p className="tiny" style={{ marginTop: 0 }}>
-              Already have transcripts of your AI at work? They make scenarios too. You judge what actually
-              happened instead of a written situation.
+              Transcripts of your AI at work make the best cases. You judge what actually happened instead of a
+              written situation.
             </p>
             <form onSubmit={importTraces}>
               <div className="pill-row">
@@ -724,10 +754,54 @@ function TracesTab({
               <button type="submit" disabled={busy || !body.trim()}>
                 {busy ? 'Parsing…' : 'Import'}
               </button>
+              <button type="button" className="ghost" style={{ marginLeft: 8 }} onClick={() => setPasting(false)}>
+                Close
+              </button>
               {result ? <span className="tiny" style={{ marginLeft: 12 }}>{result}</span> : null}
             </form>
           </div>
-        </details>
+        ) : null}
+
+        {loading && traces.length === 0 ? (
+          <Loading what="scenarios" />
+        ) : traces.length === 0 ? (
+          <div className="empty">No cases yet. Describe your AI below and they will be written for you, or paste a transcript.</div>
+        ) : (
+          <div style={{ marginTop: 14 }}>
+            {traces.map((trace, i) => {
+              const probe = typeof trace.meta?.probe === 'string' ? trace.meta.probe : '';
+              return (
+                <div className="case-row" key={trace.id}>
+                  <span className="no">{String(i + 1).padStart(2, '0')}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="case-head">
+                      <h3>{trace.title}</h3>
+                      <span className="tiny shrink">{sourceLabel(trace.source)}</span>
+                    </div>
+                    {probe ? <p className="probe">probes: {probe}</p> : null}
+                    <div className="body">{trace.content}</div>
+                    <div className="case-actions">
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.deleteTrace(slug, token, trace.id);
+                            onChange();
+                          } catch (err) {
+                            onError(err instanceof Error ? err.message : 'Could not remove that scenario.');
+                          }
+                        }}
+                      >
+                        remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <ScenarioWriter slug={slug} token={token} onDone={onChange} onError={onError} />
       </div>
     </section>
   );

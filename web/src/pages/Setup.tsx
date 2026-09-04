@@ -163,6 +163,23 @@ export function SetupPage() {
 
   const benchSeated = seats.length > 0 && revealed >= seats.length;
   const working = phase === 'creating' || phase === 'seating' || phase === 'writing';
+  const STEPS: { id: Step; label: string }[] = [
+    { id: 'creating', label: '1 Project' },
+    { id: 'seating', label: '2 Panel' },
+    { id: 'writing', label: '3 Scenarios' },
+  ];
+  const stepState = (id: Step): 'todo' | 'doing' | 'done' | 'failed' => {
+    if (failure?.step === id) return 'failed';
+    const order: Phase[] = ['creating', 'seating', 'writing', 'done'];
+    const at = order.indexOf(phase);
+    const mine = order.indexOf(id);
+    if (at > mine) return 'done';
+    if (at === mine) return 'doing';
+    return 'todo';
+  };
+  // The bench is drawn before anyone sits: five empty seats and the
+  // literalist's, filled in sequence once the seats are real.
+  const EMPTY_BENCH = ['The literalist', 'Second seat', 'Third seat', 'Fourth seat', 'Fifth seat', 'Sixth seat'];
 
   return (
     <main className="sheet">
@@ -208,12 +225,17 @@ export function SetupPage() {
         ) : null}
       </section>
 
-      {working && !failure ? (
-        <section className="panel">
-          <div className="sec-title">
-            <h2>{phase === 'seating' ? 'Seating your panel' : phase === 'writing' ? 'Writing your scenarios' : 'Opening your project'}</h2>
-          </div>
-          <p className="progress-line">{STEP_COPY[phase as Step].doing}</p>
+      {phase !== 'interview' ? (
+        <section className="panel" aria-label="Progress">
+          <ol className="stepper" aria-label="Setup steps">
+            {STEPS.map((s) => (
+              <li key={s.id} data-state={stepState(s.id)}>
+                {stepState(s.id) === 'done' ? '✓ ' : ''}
+                {s.label}
+              </li>
+            ))}
+          </ol>
+          {working && !failure ? <p className="progress-line">{STEP_COPY[phase as Step].doing}</p> : null}
         </section>
       ) : null}
 
@@ -229,21 +251,30 @@ export function SetupPage() {
         </section>
       ) : null}
 
-      {seats.length > 0 ? (
+      {phase !== 'interview' ? (
         <section className="panel" aria-label="The bench">
           <div className="sec-title">
-            <h2>{benchSeated ? 'Your panel is seated.' : 'Taking their seats.'}</h2>
+            <h2>{benchSeated ? 'Your panel is seated.' : seats.length > 0 ? 'Taking their seats.' : 'The bench.'}</h2>
           </div>
           <div>
-            {seats.map((s, i) => (
-              <div key={s.id} className={`bench-seat${i < revealed ? ' seated' : ''}`}>
-                <span className="seat-name">{s.name}</span>
-                <span className="seat-stake">
-                  {s.objective} · fails: {s.failsFor.replace(/^Fails /i, '')}
-                </span>
-                <span className="seat-model">{s.model === 'simulated' ? 'simulated' : s.model}</span>
-              </div>
-            ))}
+            {seats.length > 0
+              ? seats.map((s, i) => (
+                  <div key={s.id} className={`seat-row bench-seat${i < revealed ? ' seated' : ''}`}>
+                    <span className="seat-name">{s.name}</span>
+                    <span className="seat-stake">
+                      {s.objective}
+                      <span className="fails">fails: {s.failsFor.replace(/^Fails /i, '')}</span>
+                    </span>
+                    <span className="seat-model">{s.model === 'simulated' ? 'simulated' : s.model}</span>
+                  </div>
+                ))
+              : EMPTY_BENCH.map((name) => (
+                  <div key={name} className="seat-row empty">
+                    <span className="seat-name">{name}</span>
+                    <span className="seat-stake">{phase === 'seating' ? 'being written for your product' : 'waiting'}</span>
+                    <span className="seat-model" />
+                  </div>
+                ))}
           </div>
           {benchSeated && seatingFallback ? (
             <p className="progress-line">
@@ -270,36 +301,38 @@ export function SetupPage() {
           <p className="sec-sub">
             Your panel and your cases are waiting in the Room. Every seat and every case is editable there.
           </p>
-          <h3 style={{ marginTop: 18 }}>This link is the only way back to your project. Keep it.</h3>
-          <div className="link-box">{`${window.location.origin}/p/${project.slug}?k=${project.token}`}</div>
-          <div className="row" style={{ marginTop: 10 }}>
-            <button
-              className="ghost"
-              onClick={() =>
-                navigator.clipboard?.writeText(`${window.location.origin}/p/${project.slug}?k=${project.token}`)
-              }
-            >
-              Copy link
-            </button>
-            <form onSubmit={noteEmail} className="row" style={{ gap: 8 }}>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@company.com"
-                aria-label="Email for your link"
-                style={{ width: 220 }}
-              />
-              <button type="submit" className="ghost" disabled={!email.trim() || emailNoted}>
-                {emailNoted ? 'Noted' : 'Keep my email with it'}
+          <div className="idcard">
+            <h3>This link is the only way back to your project. Keep it.</h3>
+            <div className="link-box">{`${window.location.origin}/p/${project.slug}?k=${project.token}`}</div>
+            <div className="row">
+              <button
+                className="ghost"
+                onClick={() =>
+                  navigator.clipboard?.writeText(`${window.location.origin}/p/${project.slug}?k=${project.token}`)
+                }
+              >
+                Copy link
               </button>
-            </form>
+              <form onSubmit={noteEmail} className="row" style={{ gap: 8 }}>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@company.com"
+                  aria-label="Email for your link"
+                  style={{ width: 220 }}
+                />
+                <button type="submit" className="ghost" disabled={!email.trim() || emailNoted}>
+                  {emailNoted ? 'Noted' : 'Email it to me'}
+                </button>
+              </form>
+            </div>
+            {emailNoted ? (
+              <p className="tiny" style={{ marginTop: 8, marginBottom: 0 }}>
+                Noted on the project. The link stays the key, so copy it too.
+              </p>
+            ) : null}
           </div>
-          {emailNoted ? (
-            <p className="tiny" style={{ marginTop: 8 }}>
-              Noted on the project. The link stays the key, so copy it too.
-            </p>
-          ) : null}
           <div style={{ marginTop: 22 }}>
             <button onClick={() => navigate(`/p/${project.slug}`)}>Enter the Room</button>
           </div>

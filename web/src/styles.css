@@ -423,9 +423,13 @@ textarea::placeholder {
 
 /* ---- The bench ---------------------------------------------------------- */
 
+/* One seat row, everywhere a seat is shown: name in serif, stake in mono,
+   the model at the margin. Setup, the Room, and the spread share it so the
+   panel looks like the same panel on every page. */
 .seat-row {
-  display: flex;
-  gap: 18px;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) auto;
+  gap: 8px 22px;
   align-items: baseline;
   border-top: 1px solid var(--hairline);
   padding: 16px 0;
@@ -437,15 +441,71 @@ textarea::placeholder {
 
 .seat-name {
   font-family: var(--serif);
-  font-size: 20px;
-  min-width: 200px;
+  font-size: 21px;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  min-width: 0;
 }
 
 .seat-stake {
   font-family: var(--mono);
   font-size: 13px;
+  line-height: 1.55;
   color: var(--muted);
-  flex: 1;
+  min-width: 0;
+}
+
+.seat-stake .fails {
+  display: block;
+  margin-top: 2px;
+}
+
+.seat-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.seat-actions button {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+}
+
+.seat-actions button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--hairline);
+  opacity: 1;
+}
+
+/* An empty seat, waiting to be filled: dashed rule, muted name. */
+.seat-row.empty .seat-name {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.seat-row.empty {
+  border-top-style: dashed;
+}
+
+.seat-edit {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+}
+
+.seat-edit label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
 }
 
 .seat-note {
@@ -461,6 +521,176 @@ textarea::placeholder {
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+/* ---- The key, once you are inside ---------------------------------------- */
+
+/* Inside the Room the key is a line, not a card: it matters once, in Setup,
+   and after that it should be findable without taking the top of the page. */
+.keyline {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.keyline .url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* ---- The identity card, in Setup ----------------------------------------- */
+
+.idcard {
+  border: 1px solid var(--ink);
+  padding: 22px 24px;
+  margin-top: 18px;
+  background: #fff;
+}
+
+.idcard h3 {
+  margin: 0 0 10px;
+}
+
+.idcard .link-box {
+  margin: 0 0 12px;
+}
+
+/* ---- The step line, in Setup --------------------------------------------- */
+
+.stepper {
+  list-style: none;
+  display: flex;
+  gap: 0;
+  padding: 0;
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stepper li {
+  padding: 6px 16px 6px 0;
+  margin-right: 16px;
+  border-bottom: 2px solid var(--hairline);
+}
+
+.stepper li[data-state='doing'] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.stepper li[data-state='done'] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.stepper li[data-state='failed'] {
+  color: var(--fail);
+  border-bottom-color: var(--fail);
+}
+
+/* ---- The cases, as a numbered list --------------------------------------- */
+
+.case-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 6px 14px;
+  border-top: 1px solid var(--hairline);
+  padding: 16px 0;
+}
+
+.case-row .no {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  padding-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.case-row .case-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.case-row h3 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.case-row .probe {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.case-row .body {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  margin: 6px 0 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.case-row .case-actions {
+  margin-top: 6px;
+}
+
+.case-row .case-actions button {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+}
+
+.case-row .case-actions button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--hairline);
+  opacity: 1;
+}
+
+/* ---- Votes in the spread ------------------------------------------------- */
+
+.vote-row {
+  display: grid;
+  grid-template-columns: 200px auto minmax(0, 1fr);
+  gap: 6px 12px;
+  align-items: baseline;
+  padding: 4px 0;
+}
+
+.vote-row .who {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.vote-row .who.dissenter {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.vote-row .why {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  min-width: 0;
 }
 
 /* ---- Verdicts ----------------------------------------------------------- */
@@ -649,12 +879,8 @@ td {
 
 /* ---- The setup bench sequence ------------------------------------------ */
 
+/* Layout comes from .seat-row; this only owns the arrival. */
 .bench-seat {
-  display: flex;
-  gap: 16px;
-  align-items: baseline;
-  border-top: 1px solid var(--hairline);
-  padding: 14px 0;
   opacity: 0;
   transform: translateY(4px);
   transition: opacity 0.5s ease, transform 0.5s ease;
@@ -716,7 +942,31 @@ td {
     font-size: 30px;
   }
 
-  .seat-name {
-    min-width: 0;
+  .seat-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .seat-row .seat-stake {
+    grid-column: 1 / -1;
+  }
+
+  .seat-actions {
+    grid-column: 1 / -1;
+  }
+
+  .vote-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .vote-row .why {
+    grid-column: 1 / -1;
+  }
+
+  .stepper {
+    flex-wrap: wrap;
+  }
+
+  .case-row {
+    grid-template-columns: 32px minmax(0, 1fr);
   }
 }

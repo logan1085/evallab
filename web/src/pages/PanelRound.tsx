@@ -147,17 +147,19 @@ export function PanelRoundPage() {
         </div>
       ) : null}
 
-      <div className="tiles" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, margin: '18px 0 8px' }}>
+      <div className="metrics" style={{ margin: '18px 0 8px', borderTop: '1px solid var(--hairline)', paddingTop: 16 }}>
         {[
-          { k: 'Split on one stake', v: map.counts.personaDriven },
-          { k: 'Contested', v: map.counts.contested },
-          { k: 'Agreed by accident', v: map.counts.blindSpots },
-          { k: 'Settled', v: map.counts.settled },
-          ...(ungraded > 0 ? [{ k: 'Ungraded', v: ungraded }] : []),
+          { k: 'Split on one stake', v: map.counts.personaDriven, split: true },
+          { k: 'Contested', v: map.counts.contested, split: true },
+          { k: 'Agreed by accident', v: map.counts.blindSpots, split: false },
+          { k: 'Settled', v: map.counts.settled, split: false },
+          ...(ungraded > 0 ? [{ k: 'Ungraded', v: ungraded, split: false }] : []),
         ].map((t) => (
-          <div key={t.k} className="panel" style={{ margin: 0 }}>
-            <div style={{ fontSize: 30, fontWeight: 650 }}>{t.v}</div>
-            <div className="tiny">{t.k}</div>
+          <div key={t.k} className="metric">
+            <span className="metric-k">{t.k}</span>
+            <span className={`metric-big${t.split && t.v > 0 ? ' split-count' : ''}`}>
+              {t.split && t.v > 0 ? <span className="n">{t.v}</span> : t.v}
+            </span>
           </div>
         ))}
       </div>
@@ -181,36 +183,34 @@ export function PanelRoundPage() {
             <p className="note" style={{ marginTop: 0 }}>{copy.hint}</p>
             {cases.map((c) => (
               <div key={c.itemId} className={`panel${pattern === 'persona-driven' || pattern === 'contested' ? ' is-split' : ''}`}>
-                <div className="between">
-                  <h3 style={{ margin: 0 }}>{c.title}</h3>
-                  {c.pattern === 'settled' ? (
-                    <span className="tiny shrink">{c.checkedByOwner ? 'checked by you' : 'provisional'}</span>
-                  ) : c.dissenter ? (
-                    <span className="tiny shrink">
-                      dissenter: {c.dissenter}
-                      {c.theater ? ' · theater: the rubric as written decided this, so it will not become a patch' : ''}
-                    </span>
-                  ) : null}
-                </div>
+                <h3 style={{ margin: 0 }}>{c.title}</h3>
+                {c.pattern === 'settled' ? (
+                  <p className="split-reason" style={{ margin: '4px 0 0' }}>{c.checkedByOwner ? 'checked by you' : 'provisional'}</p>
+                ) : c.dissenter ? (
+                  <p className="split-reason" style={{ margin: '4px 0 0' }}>
+                    dissenter: <span className="split-dissent">{c.dissenter}</span>
+                    {c.theater ? ' · theater: the rubric as written decided this, so it will not become a patch' : ''}
+                  </p>
+                ) : null}
                 <details style={{ margin: '8px 0' }}>
                   <summary className="tiny" style={{ cursor: 'pointer' }}>the case</summary>
                   <div className="transcript" style={{ maxHeight: 200, marginTop: 8 }}>{c.content}</div>
                 </details>
-                <div style={{ display: 'grid', gap: 6 }}>
+                <div>
                   {c.votes.map((v) => {
                     const seatMeta = map.seats.find((s) => s.id === v.seatId);
                     const downWeighted = seatMeta !== undefined && seatMeta.weight < 1;
                     return (
-                    <div key={v.seatId} className="between" style={{ gap: 12 }}>
-                      <span className="tiny" style={{ flex: '0 0 220px', fontWeight: v.seatName === c.dissenter ? 650 : 400 }}>
-                        {v.seatName}
-                        {downWeighted ? ` (down-weighted x${seatMeta.weight})` : ''}
-                      </span>
-                      <span className={`verdict v-${v.verdict === 'pass' ? 'pass' : v.verdict === 'fail' ? 'fail' : 'mid'}`}>
-                        {v.verdict}
-                      </span>
-                      <span className="tiny" style={{ flex: 1 }}>{v.reason}</span>
-                    </div>
+                      <div key={v.seatId} className="vote-row">
+                        <span className={`who${v.seatName === c.dissenter ? ' dissenter' : ''}`}>
+                          {v.seatName}
+                          {downWeighted ? ` (down-weighted x${seatMeta.weight})` : ''}
+                        </span>
+                        <span className={`verdict v-${v.verdict === 'pass' ? 'pass' : v.verdict === 'fail' ? 'fail' : 'mid'}`}>
+                          {v.verdict}
+                        </span>
+                        <span className="why">{v.reason}</span>
+                      </div>
                     );
                   })}
                 </div>
@@ -343,12 +343,16 @@ function PatchesSection({ roundId, token, onError }: { roundId: string; token: s
           {note ? <p className="tiny">{note}</p> : null}
           {patches.map((p) => (
             <div key={p.id} className="panel">
-              <p style={{ marginTop: 0, fontWeight: 550 }}>{p.text}</p>
-              {p.evidence.map((e, i) => (
-                <p key={i} className="tiny" style={{ margin: '4px 0' }}>
-                  “{e.quote}” <span style={{ opacity: 0.7 }}>· {e.seat}</span>
-                </p>
-              ))}
+              <p className="mono" style={{ marginTop: 0, fontSize: 14, lineHeight: 1.6 }}>
+                <span className="split-dissent">+</span> {p.text}
+              </p>
+              {p.evidence
+                .filter((e, i, all) => all.findIndex((x) => x.seat === e.seat && x.quote === e.quote) === i)
+                .map((e, i) => (
+                  <p key={i} className="quote" style={{ margin: '4px 0' }}>
+                    <span className="quote-src">{e.seat}:</span> “{e.quote}”
+                  </p>
+                ))}
               <p className="tiny">
                 {p.seatsSided.length > 0 ? `Sides with ${p.seatsSided.join(', ')}. ` : ''}
                 {p.projectedLift !== null ? `Would settle about ${pct(p.projectedLift, 0)} of the contested cases.` : ''}

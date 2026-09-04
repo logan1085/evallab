@@ -57,7 +57,7 @@ ok('run has a cost and time estimate', /~\d+ min/.test(room));
 await page.screenshot({ path: `${out}/journey-3-room.png`, fullPage: true });
 
 // 4. Run the round; verdicts land per seat, then the spread.
-await page.getByRole('button', { name: 'Run the round' }).click();
+await page.getByRole('button', { name: /Run round/ }).click();
 await page.waitForURL('**/round/**', { timeout: 30000 });
 // A real 6-seat round is ~36 model calls; give it room.
 await page.waitForSelector('text=/split|agreed on everything/', { timeout: 240000 });

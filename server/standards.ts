@@ -88,7 +88,8 @@ h2{font-size:15px;font-weight:600;font-family:Inter,system-ui,sans-serif;text-tr
 .btn{display:inline-block;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:500;background:var(--ink);color:var(--paper);padding:10px 20px;border:none;border-radius:8px;text-decoration:none;cursor:pointer;margin-top:12px}
 .ownerbar{font-family:Inter,system-ui,sans-serif;font-size:13px;color:var(--muted);display:flex;gap:16px;justify-content:center;align-items:center;margin:18px 0 0}
 .ownerbar form{display:inline}
-.ownerbar button,.ownerbar a{font:inherit;background:none;border:1px solid var(--hairline);border-radius:8px;padding:6px 12px;color:var(--ink);cursor:pointer;text-decoration:none}
+.ownerbar{flex-wrap:wrap}
+.ownerbar button,.ownerbar a{font:inherit;background:none;border:1px solid var(--hairline);border-radius:8px;padding:6px 12px;color:var(--ink);cursor:pointer;text-decoration:none;white-space:nowrap}
 .note{color:var(--muted);font-size:15px;font-style:italic}
 .sharebar{display:flex;gap:10px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:16px;color:var(--muted)}
 .sharebar .copy{font-family:Inter,system-ui,sans-serif;font-size:13px;background:none;border:1px solid var(--hairline);border-radius:8px;padding:6px 12px;color:var(--ink);cursor:pointer}
