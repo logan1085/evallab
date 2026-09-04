@@ -167,7 +167,17 @@ export function pinIsVersionSafe(pin: Pin): boolean {
 export async function validatePins(
   fetchImpl: typeof fetch = fetch,
   opts: { disableInvalid?: boolean } = {},
-): Promise<{ ok: boolean; problems: string[]; checked: number; disabled: string[] }> {
+): Promise<{
+  ok: boolean;
+  problems: string[];
+  checked: number;
+  disabled: string[];
+  /**
+   * The live ids that share each pin's namespace, from the router's own
+   * list, so a replacement can be chosen from /api/health without a guess.
+   */
+  siblings: Record<string, string[]>;
+}> {
   const unsafe = PIN_REGISTRY.filter((p) => !pinIsVersionSafe(p)).map(
     (p) => `${p.pin_id}: "${p.openrouter_model_id}" is an alias or not a namespaced id`,
   );
@@ -176,7 +186,7 @@ export async function validatePins(
   try {
     const res = await fetchImpl('https://openrouter.ai/api/v1/models');
     if (!res.ok) {
-      return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0, disabled: [] };
+      return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0, disabled: [], siblings: {} };
     }
     const body = (await res.json()) as { data: { id: string }[] };
     known = new Set(body.data.map((m) => m.id));
@@ -188,16 +198,19 @@ export async function validatePins(
       problems: [...unsafe, `could not read the model list: ${error instanceof Error ? error.message : 'unreachable'}`],
       checked: 0,
       disabled: [],
+      siblings: {},
     };
   }
 
   const live = PIN_REGISTRY.filter((p) => p.status === 'live');
   const problems = [...unsafe];
   const disabled: string[] = [];
+  const siblings: Record<string, string[]> = {};
   for (const pin of live) {
-    if (known.has(pin.openrouter_model_id)) continue;
     const namespace = pin.openrouter_model_id.split('/')[0]!;
-    const candidates = [...known].filter((id) => id.startsWith(`${namespace}/`)).sort().slice(0, 6);
+    siblings[pin.pin_id] = [...known].filter((id) => id.startsWith(`${namespace}/`)).sort().slice(0, 16);
+    if (known.has(pin.openrouter_model_id)) continue;
+    const candidates = siblings[pin.pin_id]!.slice(0, 6);
     problems.push(
       `${pin.pin_id}: "${pin.openrouter_model_id}" is not a model the router lists.` +
         (candidates.length > 0 ? ` Live under ${namespace}/: ${candidates.join(', ')}.` : ` Nothing lives under ${namespace}/.`) +
@@ -212,7 +225,7 @@ export async function validatePins(
       disabled.push(pin.pin_id);
     }
   }
-  return { ok: problems.length === 0, problems, checked: live.length, disabled };
+  return { ok: problems.length === 0, problems, checked: live.length, disabled, siblings };
 }
 
 export class PinError extends Error {

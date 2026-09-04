@@ -15,6 +15,8 @@ import { z } from 'zod';
 import type { DB } from './db.js';
 import { newId, newSlug, newToken, resolveConnection } from './db.js';
 import { PIN_OVERRIDES, validatePins } from './pins.js';
+import { writerCheck } from './openrouter.js';
+import type { GatewayOptions } from './gateway.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
@@ -97,7 +99,14 @@ function splitIntoClauses(text: string): string[] {
     .slice(0, 5);
 }
 
-export function createApp(db: DB) {
+export interface AppOptions {
+  /** Gateway options for the health canary: tests inject a transport here. */
+  writerGateway?: GatewayOptions;
+  /** fetch used for the pin list check; tests inject a stand-in. */
+  pinFetch?: typeof fetch;
+}
+
+export function createApp(db: DB, appOpts: AppOptions = {}) {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
   // The public Standards page uses plain HTML forms for its owner controls.
@@ -160,12 +169,19 @@ export function createApp(db: DB) {
       await db.get('SELECT 1 AS ok');
       // Pin validity is cached per instance: it is a network call, and every
       // cold start paying for it would tax every request.
-      const pins = process.env.OPENROUTER_API_KEY ? await cachedPinCheck() : null;
-      res.status(conn.url || !deployed ? 200 : 503).json({
-        ok: !!conn.url || !deployed,
+      const keyed = !!process.env.OPENROUTER_API_KEY;
+      const pins = keyed ? await cachedPinCheck() : null;
+      // The writer canary: a real call, because a listed id is not a working
+      // writer. Health is false when the writer cannot answer, so a dead
+      // writer pin fails the check that people actually look at.
+      const writer = keyed ? await cachedWriterCheck() : null;
+      const ok = (!!conn.url || !deployed) && (writer === null || writer.ok);
+      res.status(ok ? 200 : 503).json({
+        ok,
         deploy,
         judge: resolveProvider().id,
         ...(pins ? { pins: { ...pins, overrides: PIN_OVERRIDES } } : {}),
+        ...(writer ? { writer } : {}),
         database: conn.url
           ? { driver: 'postgres', via: conn.via, pooled: conn.pooled }
           : { driver: 'memory', warning: 'No Postgres connection string set. Data is lost when the process ends.' },
@@ -195,7 +211,28 @@ export function createApp(db: DB) {
 
   /** One pin validation per instance, reused by every later health check. */
   let pinCheck: Promise<Awaited<ReturnType<typeof validatePins>>> | null = null;
-  const cachedPinCheck = () => (pinCheck ??= validatePins(fetch, { disableInvalid: true }));
+  const cachedPinCheck = () => (pinCheck ??= validatePins(appOpts.pinFetch ?? fetch, { disableInvalid: true }));
+
+  /**
+   * The writer canary, cached: a good answer holds for ten minutes, a failure
+   * is retried after one, so a recovered writer shows recovered without a
+   * restart and a broken one does not get pinged on every probe.
+   */
+  let writerState: { at: number; result: Awaited<ReturnType<typeof writerCheck>> } | null = null;
+  let writerInFlight: Promise<Awaited<ReturnType<typeof writerCheck>>> | null = null;
+  const cachedWriterCheck = async () => {
+    const ttl = writerState?.result.ok ? 10 * 60_000 : 60_000;
+    if (writerState && Date.now() - writerState.at < ttl) return writerState.result;
+    writerInFlight ??= writerCheck({ ...meter(), ...(appOpts.writerGateway ?? {}) })
+      .then((result) => {
+        writerState = { at: Date.now(), result };
+        return result;
+      })
+      .finally(() => {
+        writerInFlight = null;
+      });
+    return writerInFlight;
+  };
 
   /** The credential, wherever the caller put it: Bearer, header, or link. */
   function credentialOf(req: Request): string | null {

@@ -10,7 +10,7 @@
 import { callModel, type GatewayOptions } from './gateway.js';
 import { DrafterError } from './drafter.js';
 import { parseModelJson } from '../shared/schema.js';
-import { cheapestPin } from './pins.js';
+import { cheapestPin, resolvePin } from './pins.js';
 
 export function openrouterKey(): string | undefined {
   return process.env.OPENROUTER_API_KEY;
@@ -133,6 +133,62 @@ export async function openrouterJson<T>(args: {
     'parse',
     `Parse failed: ${retry.model_id} answered, but not with the JSON asked for, twice (${repaired.reason}). It said: ${sample || '(nothing)'}`,
   );
+}
+
+/**
+ * The writer canary: one tiny real call through the creator pin.
+ *
+ * A pin can be on the router's model list and still not answer: the
+ * provider lock can miss, the format can be refused, the account can be out
+ * of credit. The list check cannot see any of that, which is how
+ * /api/health said pins.ok=true while onboarding failed. This asks the
+ * writer for the smallest possible JSON reply and reports what came back,
+ * so health is a statement about the writer, not about a string.
+ */
+export async function writerCheck(gateway: GatewayOptions = {}): Promise<{
+  pin_id: string;
+  model: string;
+  repair_pin_id: string;
+  repair_model: string;
+  ok: boolean;
+  latency_ms: number;
+  finish_reason: string | null;
+  error: string | null;
+}> {
+  const pin = resolvePin(CREATOR_PIN);
+  const repair = cheapestPin('small');
+  const res = await callModel(
+    {
+      pin_id: CREATOR_PIN,
+      messages: [
+        { role: 'system', content: 'Reply with JSON only.' },
+        { role: 'user', content: 'Return {"ok":true}.' },
+      ],
+      max_tokens: 32,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'canary',
+          strict: true,
+          schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false },
+        },
+      },
+      caller: { kind: 'creator' },
+    },
+    { timeoutMs: 15_000, ...gateway },
+  );
+  const parsed = res.error ? null : parseModelJson<{ ok?: unknown }>(res.text);
+  const ok = !res.error && parsed !== null && parsed.ok && typeof parsed.value === 'object' && parsed.value !== null;
+  return {
+    pin_id: pin.pin_id,
+    model: pin.openrouter_model_id,
+    repair_pin_id: repair.pin_id,
+    repair_model: repair.openrouter_model_id,
+    ok,
+    latency_ms: res.latency_ms,
+    finish_reason: res.finish_reason,
+    error: res.error ? res.error.message : ok ? null : `the writer answered but not with JSON: ${JSON.stringify(res.text.slice(0, 200))}`,
+  };
 }
 
 function asDrafterError(error: { kind: string; message: string }, stage: 'call' | 'parse'): DrafterError {

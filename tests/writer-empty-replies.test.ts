@@ -61,6 +61,22 @@ describe('readReply reads every shape a 200 arrives in', () => {
     expect(r.finish_reason).toBe('error');
   });
 
+  it('a 200 whose body was not JSON quotes the body and its content type', () => {
+    const r = readReply({ non_json_body: '<html><body>502 Bad Gateway</body></html>', content_type: 'text/html' });
+    expect(r.error).toContain('not JSON (text/html)');
+    expect(r.error).toContain('502 Bad Gateway');
+  });
+
+  it('an error object without a message is still an error, with the object quoted', () => {
+    const r = readReply({ error: { code: 400, type: 'invalid_request' } });
+    expect(r.error).toContain('without a message');
+    expect(r.error).toContain('invalid_request');
+  });
+
+  it('no choices names the keys that were there instead', () => {
+    expect(readReply({ id: 'gen-1', object: 'chat.completion' }).error).toContain('body keys: id, object');
+  });
+
   it('a refusal is an error, not an empty answer', () => {
     expect(readReply({ choices: [{ message: { content: '', refusal: 'I cannot help with that.' } }] }).error).toContain('refused');
   });
@@ -99,7 +115,7 @@ describe('callModel turns a 200 with no answer into a failed call', () => {
 describe('openrouterJson names the stage that failed', () => {
   it('a router-side failure is a call failure, and is not re-asked as-is', async () => {
     const s = scripted([{ error: { message: 'Provider returned error', metadata: { raw: 'overloaded' } }, choices: [] }]);
-    const err = await openrouterJson({ system: 's', user: 'u', schema: { type: 'object', properties: {}, additionalProperties: false, required: [] }, gateway: { ...env, transport: s.transport } }).catch((e) => e);
+    const err = await openrouterJson({ system: 's', user: 'u', schema: { type: 'object', properties: {}, additionalProperties: false, required: [] }, gateway: { ...env, transport: s.transport } }).catch((e: Error) => e) as Error;
     expect(err).toBeInstanceOf(DrafterError);
     expect(err.message).toMatch(/^Model call failed: /);
     expect(err.message).toContain('overloaded');
@@ -110,14 +126,14 @@ describe('openrouterJson names the stage that failed', () => {
 
   it('a truncated reply is a call failure that names max_tokens', async () => {
     const s = scripted([{ choices: [{ finish_reason: 'length', message: { content: '{"seats":[' } }], usage: { completion_tokens: 512 } }]);
-    const err = await openrouterJson({ system: 's', user: 'u', maxTokens: 512, gateway: { ...env, transport: s.transport } }).catch((e) => e);
+    const err = await openrouterJson({ system: 's', user: 'u', maxTokens: 512, gateway: { ...env, transport: s.transport } }).catch((e: Error) => e) as Error;
     expect(err.message).toMatch(/^Model call failed: .*cut off at max_tokens=512/);
     expect(s.sent).toHaveLength(1);
   });
 
   it('prose that never becomes JSON is a parse failure that quotes the reply', async () => {
     const s = scripted([{ choices: [{ finish_reason: 'stop', message: { content: 'Sure! Here you go, but in prose.' } }] }]);
-    const err = await openrouterJson({ system: 's', user: 'u', gateway: { ...env, transport: s.transport } }).catch((e) => e);
+    const err = await openrouterJson({ system: 's', user: 'u', gateway: { ...env, transport: s.transport } }).catch((e: Error) => e) as Error;
     expect(err.message).toMatch(/^Parse failed: /);
     expect(err.message).toContain('Sure! Here you go');
     expect(s.sent).toHaveLength(2);

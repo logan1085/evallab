@@ -197,6 +197,8 @@ export function readReply(json: unknown): {
 } {
   if (typeof json !== 'object' || json === null) return { text: '', finish_reason: null, error: 'the router sent no JSON body' };
   const body = json as {
+    non_json_body?: string;
+    content_type?: string;
     error?: unknown;
     choices?: {
       finish_reason?: string;
@@ -209,11 +211,15 @@ export function readReply(json: unknown): {
       };
     }[];
   };
+  if (typeof body.non_json_body === 'string') {
+    const sample = body.non_json_body.trim().replace(/\s+/g, ' ').slice(0, 300);
+    return { text: '', finish_reason: null, error: `the body was not JSON (${body.content_type ?? 'unknown'}): ${sample || '(empty body)'}` };
+  }
   const topError = routerErrorMessage(json);
-  if (body.error !== undefined && topError) return { text: '', finish_reason: null, error: topError };
+  if (body.error !== undefined) return { text: '', finish_reason: null, error: topError || `the router sent an error without a message: ${JSON.stringify(body.error).slice(0, 300)}` };
 
   const choice = body.choices?.[0];
-  if (!choice) return { text: '', finish_reason: null, error: topError || 'the router sent no choices' };
+  if (!choice) return { text: '', finish_reason: null, error: `the router sent no choices; body keys: ${Object.keys(body).join(', ') || 'none'}` };
   const finish = choice.finish_reason ?? choice.native_finish_reason ?? null;
   if (choice.error !== undefined) {
     const detail = routerErrorMessage({ error: choice.error });
@@ -517,7 +523,17 @@ function httpTransport(timeoutMs = REQUEST_TIMEOUT_MS): GatewayTransport {
           body: JSON.stringify(body),
           signal: controller.signal,
         });
-        const json = await res.json().catch(() => ({}));
+        // Read the body as text first. A 200 whose body is not JSON (an HTML
+        // page from a proxy, a stream, a truncated read) used to become {}
+        // and surface as "the router sent no choices", which named nothing.
+        // Now the body travels with the result and the error quotes it.
+        const text = await res.text().catch(() => '');
+        let json: unknown;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = { non_json_body: text.slice(0, 1500), content_type: res.headers.get('content-type') ?? 'unknown' };
+        }
         if (LOG_CALLS) {
           console.log(`[model] <- ${sent.model} ${res.status} in ${Date.now() - started}ms`, JSON.stringify(json).slice(0, 2000));
         }

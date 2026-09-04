@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { createApp } from './app.js';
 import { openDb, resolveConnection } from './db.js';
-import { PIN_OVERRIDES, pinEnvKey, validatePins } from './pins.js';
+import { PIN_OVERRIDES, pinEnvKey, resolvePin, validatePins } from './pins.js';
+import { CREATOR_PIN, writerCheck } from './openrouter.js';
 
 const port = Number(process.env.PORT ?? 8787);
 const conn = resolveConnection();
@@ -41,6 +42,12 @@ const server = app.listen(port, () => {
     // beats finding it when someone clicks a button.
     for (const o of PIN_OVERRIDES) console.log(`Pin ${o.pin_id} repinned by ${pinEnvKey(o.pin_id)}: ${o.from} -> ${o.to}`);
     void validatePins(fetch, { disableInvalid: true }).then((result) => {
+      // The writer's namespace, verified from the router's list, printed
+      // every boot: when the writer pin needs replacing, the choice is here
+      // rather than in a browser tab.
+      const writerPin = resolvePin(CREATOR_PIN);
+      const live = result.siblings[writerPin.pin_id];
+      if (live) console.log(`Writer pin ${writerPin.pin_id} = ${writerPin.openrouter_model_id}. Live under ${writerPin.openrouter_model_id.split('/')[0]}/: ${live.join(', ')}`);
       if (result.ok) {
         console.log(`Pins: all ${result.checked} live model ids resolve against openrouter.ai.`);
         return;
@@ -51,6 +58,12 @@ const server = app.listen(port, () => {
         console.error(`Stood down for this process: ${result.disabled.join(', ')}. The panel runs on the families that remain.`);
       }
       console.error('Fix them in server/pins.ts, or run npm run pins:check for the full list.');
+    });
+    // The writer canary at boot, once, so the log says whether onboarding
+    // can work before anyone tries it. /api/health repeats it on demand.
+    void writerCheck().then((w) => {
+      if (w.ok) console.log(`Writer: ${w.model} answered in ${w.latency_ms}ms. Repair seat: ${w.repair_model}.`);
+      else console.error(`WRITER DOWN: ${w.model} did not answer: ${w.error}. Repin with ${pinEnvKey(w.pin_id)}=<id> from the live list above.`);
     });
   }
 });
