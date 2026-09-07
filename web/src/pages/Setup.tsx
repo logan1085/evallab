@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, rememberKey } from '../api';
 import type { Grader, Project } from '@shared/types';
+import { DEFAULT_SCENARIOS } from '@shared/scenarios';
 
 /**
  * Setup: three questions to a seated panel. The chat format stays because it
@@ -44,13 +45,12 @@ const QUESTIONS = [
  * say "your panel is seated" when the panel is actually seated rather than
  * while it is still being written.
  */
-type Step = 'creating' | 'seating' | 'writing';
+type Step = 'creating' | 'seating';
 type Phase = 'interview' | Step | 'done';
 
 const STEP_COPY: Record<Step, { doing: string; failed: string }> = {
   creating: { doing: 'Opening your project.', failed: 'The project could not be created.' },
   seating: { doing: 'Writing five judges for your product, and seating the literalist with them.', failed: 'The judges could not be seated.' },
-  writing: { doing: 'Writing the scenarios they will grade.', failed: 'The scenarios could not be written.' },
 };
 
 export function SetupPage() {
@@ -63,7 +63,6 @@ export function SetupPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [seats, setSeats] = useState<Grader[]>([]);
   const [seatingFallback, setSeatingFallback] = useState<string | null>(null);
-  const [caseCount, setCaseCount] = useState(0);
   const [revealed, setRevealed] = useState(0);
   const [email, setEmail] = useState('');
   const [emailNoted, setEmailNoted] = useState(false);
@@ -84,9 +83,11 @@ export function SetupPage() {
   }, [seats.length, revealed]);
 
   /**
-   * Run the three steps in order, resuming at whichever one failed. Each step
-   * announces itself before it starts and is only reported done when its own
-   * request has returned.
+   * Two steps here, in order, resuming at whichever one failed: the project,
+   * then the panel. The scenarios are written in the Room, as you arrive, so
+   * the slowest model call never stands between you and the product. Each
+   * step announces itself before it starts and is only reported done when
+   * its own request has returned.
    */
   async function run(done: string[], from: Step = 'creating') {
     const description = done[1]!.trim();
@@ -111,20 +112,12 @@ export function SetupPage() {
       }
       if (!current) throw new Error('The project is missing.');
 
-      if (from === 'creating' || from === 'seating') {
-        reached = 'seating';
-        setPhase('seating');
-        setFailure(null);
-        const seated = await api.generatePanel(current.slug, current.token);
-        setSeats(seated.seats);
-        setSeatingFallback(seated.fallbackReason ?? null);
-      }
-
-      reached = 'writing';
-      setPhase('writing');
+      reached = 'seating';
+      setPhase('seating');
       setFailure(null);
-      const written = await api.generateScenarios(current.slug, current.token, { description });
-      setCaseCount(written.scenarios.length);
+      const seated = await api.generatePanel(current.slug, current.token);
+      setSeats(seated.seats);
+      setSeatingFallback(seated.fallbackReason ?? null);
       setPhase('done');
     } catch (err) {
       setFailure({
@@ -166,11 +159,10 @@ export function SetupPage() {
   const STEPS: { id: Step; label: string }[] = [
     { id: 'creating', label: '1 Project' },
     { id: 'seating', label: '2 Panel' },
-    { id: 'writing', label: '3 Scenarios' },
   ];
   const stepState = (id: Step): 'todo' | 'doing' | 'done' | 'failed' => {
     if (failure?.step === id) return 'failed';
-    const order: Phase[] = ['creating', 'seating', 'writing', 'done'];
+    const order: Phase[] = ['creating', 'seating', 'done'];
     const at = order.indexOf(phase);
     const mine = order.indexOf(id);
     if (at > mine) return 'done';
@@ -247,7 +239,7 @@ export function SetupPage() {
           <p className="sec-sub">
             {failure.message} Nothing before this step was lost.
           </p>
-          <button onClick={() => void run(answers, failure.step)}>Try {failure.step === 'writing' ? 'the scenarios' : failure.step === 'seating' ? 'the seating' : 'again'}</button>
+          <button onClick={() => void run(answers, failure.step)}>Try {failure.step === 'seating' ? 'the seating' : 'again'}</button>
         </section>
       ) : null}
 
@@ -296,10 +288,11 @@ export function SetupPage() {
       {phase === 'done' && project ? (
         <section className="panel">
           <div className="sec-title">
-            <h2>{caseCount} scenarios written.</h2>
+            <h2>Your panel is seated.</h2>
           </div>
           <p className="sec-sub">
-            Your panel and your cases are waiting in the Room. Every seat and every case is editable there.
+            {DEFAULT_SCENARIOS} scenarios are written for your product as you enter the Room. Every seat and every
+            case is editable there.
           </p>
           <div className="idcard">
             <h3>This link is the only way back to your project. Keep it.</h3>
@@ -334,7 +327,11 @@ export function SetupPage() {
             ) : null}
           </div>
           <div style={{ marginTop: 22 }}>
-            <button onClick={() => navigate(`/p/${project.slug}`)}>Enter the Room</button>
+            {/* The Room writes the scenarios on arrival, with the description
+                carried in navigation state so nothing is re-asked. */}
+            <button onClick={() => navigate(`/p/${project.slug}`, { state: { writeScenarios: answers[1]?.trim() ?? '' } })}>
+              Enter the Room
+            </button>
           </div>
         </section>
       ) : null}

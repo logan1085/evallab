@@ -42,6 +42,7 @@ export function PanelRoundPage() {
   const [progress, setProgress] = useState<{ name: string; done: boolean }[]>([]);
   const [map, setMap] = useState<PanelMapView | null>(null);
   const [running, setRunning] = useState(false);
+  const [nextVersion, setNextVersion] = useState<number | null>(null);
   const startedRef = useRef(false);
 
   const loadMap = useCallback(async () => {
@@ -60,11 +61,12 @@ export function PanelRoundPage() {
     (async () => {
       try {
         const round = await api.round(roundId!, token);
+        const view = await api.project(slug!, token);
+        setNextVersion((view.rubric?.version ?? 1) + 1);
         if (round.round.status === 'closed') {
           await loadMap();
           return;
         }
-        const view = await api.project(slug!, token);
         const seats = view.graders.filter((g) => g.kind === 'panelist');
         setProgress(seats.map((s) => ({ name: s.name, done: false })));
         setRunning(true);
@@ -134,7 +136,7 @@ export function PanelRoundPage() {
       </header>
       <ErrorBanner message={error} onDismiss={() => setError(null)} />
 
-      <StandardsHandoff slug={slug!} roundId={roundId!} token={token} splits={disagreements} onError={setError} />
+      <StandardsHandoff slug={slug!} roundId={roundId!} token={token} splits={disagreements} nextVersion={nextVersion} onError={setError} />
 
       {map.simulated ? (
         <div className="warn">
@@ -170,7 +172,12 @@ export function PanelRoundPage() {
         {' '}· AC1 is reported beside alpha because alpha collapses under the skewed pass rates of a working system.
       </p>
 
-      <PatchesSection roundId={roundId!} token={token} onError={setError} />
+      {/* The one-by-one review is the slow road to the same document: kept,
+          but folded, so the handoff above is the path people take. */}
+      <details className="deep">
+        <summary>Review the sentences one by one before writing them</summary>
+        <PatchesSection roundId={roundId!} token={token} onError={setError} />
+      </details>
 
       {/* ---- The map, grouped by what to do about it ---- */}
       {ordered.map((pattern) => {
@@ -243,12 +250,14 @@ function StandardsHandoff({
   roundId,
   token,
   splits,
+  nextVersion,
   onError,
 }: {
   slug: string;
   roundId: string;
   token: string;
   splits: number;
+  nextVersion: number | null;
   onError: (m: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -274,11 +283,11 @@ function StandardsHandoff({
         <p style={{ margin: 0, maxWidth: 560 }}>
           {splits === 0
             ? 'No splits means no missing sentences from this round. Your standards stand as they are.'
-            : 'Every split drafts the sentence your rubric was missing. Nothing is edited here; you read and approve the result on your Standards page.'}
+            : `Every split drafts the sentence your rubric was missing, and all of them go into Standards v${nextVersion ?? 'next'} at once. Nothing is edited here; you read and approve the result on your Standards page.`}
         </p>
         <div className="shrink">
           <button onClick={write} disabled={busy || splits === 0}>
-            {busy ? 'Writing…' : 'Write the next Standards'}
+            {busy ? 'Writing…' : `Write Standards v${nextVersion ?? ''}`.trim()}
           </button>
         </div>
       </div>

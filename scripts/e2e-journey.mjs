@@ -46,6 +46,8 @@ await page.screenshot({ path: `${out}/journey-2-setup.png`, fullPage: true });
 // 3. The Room: numbered sections, the version stamp always visible.
 await page.getByRole('button', { name: 'Enter the Room' }).click();
 await page.waitForURL('**/p/**', { timeout: 30000 });
+// The Room writes the cases on arrival: placeholders first, then the list.
+await page.waitForSelector('.case-row:not([style*="dashed"])', { timeout: 180000 });
 await page.waitForTimeout(900);
 const room = await page.textContent('body');
 const simulated = room.includes('Placeholder scenarios');
@@ -69,7 +71,7 @@ ok('agreement reported with AC1 beside alpha', spread.includes('AC1'));
 await page.screenshot({ path: `${out}/journey-4-spread.png`, fullPage: true });
 
 // 5. The handoff: write the next Standards and land on the document.
-const handoff = page.getByRole('button', { name: 'Write the next Standards' });
+const handoff = page.getByRole('button', { name: /Write Standards v\d+/ });
 ok('the handoff is offered', (await handoff.count()) === 1);
 await handoff.click();
 await page.waitForURL('**/s/**', { timeout: 60000 });

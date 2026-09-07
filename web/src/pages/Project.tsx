@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
+import { DEFAULT_SCENARIOS } from '@shared/scenarios';
 import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
 import { api, recallKey, type DraftResponse, type ProjectView } from '../api';
 import { ErrorBanner, Loading, Masthead, useAsync } from '../ui';
@@ -18,6 +19,10 @@ export function ProjectPage() {
   const { slug } = useParams<{ slug: string }>();
   const token = recallKey(slug!) ?? '';
   const [error, setError] = useState<string | null>(null);
+  // Setup hands over the description in navigation state; the Room writes
+  // the scenarios on arrival so the slowest call never gates the page.
+  const location = useLocation();
+  const handedOver = (location.state as { writeScenarios?: string } | null)?.writeScenarios ?? null;
 
   const { data, error: loadError, loading, reload } = useAsync<ProjectView>(() => api.project(slug!, token), [slug, token]);
   const tracesQ = useAsync<{ traces: Trace[] }>(() => api.traces(slug!, token), [slug, token]);
@@ -36,6 +41,10 @@ export function ProjectPage() {
   // would flash "0 cases" over a project that has eight.
   const caseCount = tracesQ.data ? traces.length : data.traceCount;
   const seats = data.graders.filter((g) => g.kind === 'panelist');
+  // A fresh project with a description and no round yet writes its cases on
+  // arrival, whether you came from Setup or opened the link in a new tab.
+  // The description is stored, so nothing depends on navigation state.
+  const autoWrite = handedOver ?? (data.rounds.length === 0 && data.project.description.trim() ? data.project.description : null);
   const refresh = () => {
     tracesQ.reload();
     reload();
@@ -71,6 +80,7 @@ export function ProjectPage() {
         token={token}
         traces={traces}
         loading={tracesQ.loading}
+        autoWrite={autoWrite}
         onChange={refresh}
         onError={setError}
       />
@@ -643,6 +653,7 @@ function TracesTab({
   token,
   traces,
   loading,
+  autoWrite,
   onChange,
   onError,
 }: {
@@ -650,6 +661,8 @@ function TracesTab({
   token: string;
   traces: Trace[];
   loading: boolean;
+  /** The description from Setup, when the Room should write the cases on arrival. */
+  autoWrite: string | null;
   onChange: () => void;
   onError: (m: string) => void;
 }) {
@@ -658,6 +671,40 @@ function TracesTab({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [pasting, setPasting] = useState(false);
+
+  // The arrival write: placeholders while it runs, the error in place with a
+  // retry if it fails, never a spinner with nothing to say.
+  const [arrival, setArrival] = useState<{ status: 'idle' | 'writing' | 'failed'; message: string }>({ status: 'idle', message: '' });
+  const startedRef = useRef(false);
+
+  async function writeOnArrival() {
+    if (!autoWrite) return;
+    setArrival({ status: 'writing', message: '' });
+    try {
+      await api.generateScenarios(slug, token, { description: autoWrite });
+      setArrival({ status: 'idle', message: '' });
+      onChange();
+    } catch (err) {
+      setArrival({ status: 'failed', message: err instanceof Error ? err.message : 'The scenarios could not be written.' });
+    }
+  }
+
+  useEffect(() => {
+    if (!autoWrite || loading || traces.length > 0 || startedRef.current) return;
+    // Once per project per browser session: deleting every case on purpose
+    // must not summon twelve more on the next reload.
+    const key = `grading-room:autowrote:${slug}`;
+    let already = false;
+    try {
+      already = sessionStorage.getItem(key) === '1';
+      sessionStorage.setItem(key, '1');
+    } catch {
+      // Storage blocked: write once per mount, which is the same promise.
+    }
+    startedRef.current = true;
+    if (!already) void writeOnArrival();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoWrite, loading, traces.length]);
 
   const stubScenarios = traces.filter((t) => t.meta?.generated === true && t.meta?.real === false).length;
 
@@ -762,7 +809,26 @@ function TracesTab({
           </div>
         ) : null}
 
-        {loading && traces.length === 0 ? (
+        {arrival.status === 'writing' ? (
+          <div style={{ marginTop: 14 }}>
+            <p className="progress-line" style={{ marginTop: 0 }}>
+              Writing {DEFAULT_SCENARIOS} scenarios for your product. They land here as a list; the first ones usually
+              take under a minute.
+            </p>
+            {Array.from({ length: DEFAULT_SCENARIOS }, (_, i) => (
+              <div className="case-row" key={i} style={{ borderTopStyle: 'dashed' }}>
+                <span className="no">{String(i + 1).padStart(2, '0')}</span>
+                <p className="probe" style={{ fontStyle: 'italic' }}>being written</p>
+              </div>
+            ))}
+          </div>
+        ) : arrival.status === 'failed' ? (
+          <div className="panel">
+            <h3 style={{ marginTop: 0 }}>The scenarios could not be written.</h3>
+            <p className="sec-sub">{arrival.message} Your panel is unaffected.</p>
+            <button onClick={() => void writeOnArrival()}>Try the scenarios again</button>
+          </div>
+        ) : loading && traces.length === 0 ? (
           <Loading what="scenarios" />
         ) : traces.length === 0 ? (
           <div className="empty">No cases yet. Describe your AI below and they will be written for you, or paste a transcript.</div>

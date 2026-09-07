@@ -188,8 +188,7 @@ await scene('04-setup', async (page) => {
   }
   await caption(page, 'Five judges are written for your product. The literalist sits with them.');
   // Seats fill one at a time; hold until the bench is full and the cases are written.
-  await page.waitForSelector('text=/scenarios written/i', { timeout: 120000 });
-  await page.waitForSelector('text=Your panel is seated.', { timeout: 30000 });
+  await page.waitForSelector('text=Your panel is seated.', { timeout: 120000 });
   await sleep(3800);
   await scrollToSel(page, '.link-box', 900);
   await caption(page, 'This link is the only way back. That is the entire account system.');
@@ -205,6 +204,8 @@ await card('05-card-room', { eyebrow: '2', title: 'The Room.', sub: 'Your panel,
 await scene('06-room', async (page) => {
   await page.goto(projectLink, { waitUntil: 'networkidle' });
   await dress(page);
+  // The cases are written on arrival; wait for the list before touring it.
+  await page.waitForSelector('.case-row:not([style*="dashed"])', { timeout: 180000 });
   await sleep(1400);
   await caption(page, 'Every seat is editable. Every edit is a record that feeds the diff.');
   await scrollBy(page, 420, 1400);
@@ -266,7 +267,7 @@ await scene('10-standards', async (page) => {
   await sleep(1200);
   await caption(page, 'One button. The framework page writes itself from the splits.');
   await sleep(1400);
-  await page.locator('button:has-text("Write the next Standards")').click();
+  await page.locator('button:has-text("Write Standards v")').click();
   await page.waitForURL(/\/s\//, { timeout: 60000 });
   await page.waitForLoadState('networkidle');
   await dress(page);
