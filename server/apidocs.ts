@@ -116,15 +116,27 @@ and never stored. With no key the run is a labeled simulation. Every call,
 including retries, lands in \`model_call\` with its usage read off the router,
 which is where the per-seat costs on the map come from.
 
+Then the stability pass, the mixture's second axis: every seat is asked again
+about the cases the panel did not settle, under two more phrasings of the
+same standard. A seat that flips is marked unstable on that case; its vote is
+shown on the map and never mined into the rubric. Unanimous cases are not
+rechecked. \`GR_PROMPT_VARIANTS\` sets the number of phrasings (default 3).
+
+\`\`\`bash
+curl -s -X POST ${v1}/rounds/$RID/stability -H "Authorization: Bearer $TOKEN"
+# -> { "checked": 5, "rechecked": 30, "unstable": 4, "variants": 3, "simulated": false }
+\`\`\`
+
 ### 6. Read the disagreement map
 
 \`\`\`bash
 curl -s ${v1}/rounds/$RID/map -H "Authorization: Bearer $TOKEN"
 \`\`\`
 
-Settled, persona-driven, contested, and blind-spot cases; agreement (alpha
-and AC1 with variance); per-seat weights and self-consistency; pinned models
-and running cost.
+Settled, persona-driven, contested, and blind-spot cases, read on the votes
+that survived paraphrase; each vote carries \`stable\` and \`agreement\`;
+agreement (alpha and AC1 with variance); per-seat weights and
+self-consistency; pinned models and running cost.
 
 ### 7. Mine and accept the rubric diff
 

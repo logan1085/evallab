@@ -263,6 +263,24 @@ CREATE TABLE IF NOT EXISTS user_verdicts (
 );
 
 /*
+ * One row per (case, seat, phrasing of the standard): the stability pass
+ * keeps every variant's verdict so a flip is a fact with provenance, not a
+ * number. The grade row above holds the seat's final word (the majority)
+ * and how much of it agreed.
+ */
+CREATE TABLE IF NOT EXISTS grade_variants (
+  id          TEXT PRIMARY KEY,
+  item_id     TEXT NOT NULL REFERENCES round_items(id) ON DELETE CASCADE,
+  grader_id   TEXT NOT NULL REFERENCES graders(id) ON DELETE CASCADE,
+  variant     INTEGER NOT NULL,
+  verdict     TEXT NOT NULL,
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  UNIQUE (item_id, grader_id, variant)
+);
+CREATE INDEX IF NOT EXISTS idx_grade_variants_item ON grade_variants(item_id);
+
+/*
  * One row per model-call attempt, retries and failures included, with the
  * numbers read straight off the router's usage object and never recomputed.
  * Nothing is rolled up: a round's spend is summed from these rows at read
@@ -337,6 +355,8 @@ ALTER TABLE graders         ADD COLUMN IF NOT EXISTS archetype_id TEXT;
 ALTER TABLE graders         ADD COLUMN IF NOT EXISTS weight       REAL NOT NULL DEFAULT 1;
 ALTER TABLE graders         ADD COLUMN IF NOT EXISTS same_family_as_sut BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE grades          ADD COLUMN IF NOT EXISTS output_length INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE grades          ADD COLUMN IF NOT EXISTS variant_count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE grades          ADD COLUMN IF NOT EXISTS variant_agreement DOUBLE PRECISION NOT NULL DEFAULT 1;
 ALTER TABLE rounds          ADD COLUMN IF NOT EXISTS pinned_models TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE rounds          ADD COLUMN IF NOT EXISTS false_settle_rate DOUBLE PRECISION;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS changelog TEXT NOT NULL DEFAULT '';

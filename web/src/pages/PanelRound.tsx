@@ -42,6 +42,7 @@ export function PanelRoundPage() {
   const [progress, setProgress] = useState<{ name: string; done: boolean }[]>([]);
   const [map, setMap] = useState<PanelMapView | null>(null);
   const [running, setRunning] = useState(false);
+  const [stabilizing, setStabilizing] = useState(false);
   const [nextVersion, setNextVersion] = useState<number | null>(null);
   const startedRef = useRef(false);
 
@@ -74,6 +75,14 @@ export function PanelRoundPage() {
           await api.runSeat(roundId!, token, seat.id);
           setProgress((p) => p.map((row) => (row.name === seat.name ? { ...row, done: true } : row)));
         }
+        // The second axis of the mixture: the non-unanimous cases, asked
+        // again under the other phrasings of the standard.
+        setStabilizing(true);
+        try {
+          await api.stability(roundId!, token);
+        } finally {
+          setStabilizing(false);
+        }
         setRunning(false);
         await loadMap();
       } catch (err) {
@@ -97,6 +106,12 @@ export function PanelRoundPage() {
                 {p.done ? '✓' : running ? '…' : '·'} {p.name}
               </p>
             ))}
+            {stabilizing ? (
+              <p className="progress-line">
+                Checking the split cases under two more phrasings of the standard. A seat that flips is marked unstable and
+                never writes a sentence.
+              </p>
+            ) : null}
           </div>
         )}
       </main>
@@ -192,7 +207,10 @@ export function PanelRoundPage() {
               <div key={c.itemId} className={`panel${pattern === 'persona-driven' || pattern === 'contested' ? ' is-split' : ''}`}>
                 <h3 style={{ margin: 0 }}>{c.title}</h3>
                 {c.pattern === 'settled' ? (
-                  <p className="split-reason" style={{ margin: '4px 0 0' }}>{c.checkedByOwner ? 'checked by you' : 'provisional'}</p>
+                  <p className="split-reason" style={{ margin: '4px 0 0' }}>
+                    {c.checkedByOwner ? 'checked by you' : 'provisional'}
+                    {c.unstableDissent ? ' · a dissent did not survive paraphrase, so it is not a split' : ''}
+                  </p>
                 ) : c.dissenter ? (
                   <p className="split-reason" style={{ margin: '4px 0 0' }}>
                     dissenter: <span className="split-dissent">{c.dissenter}</span>
@@ -216,7 +234,14 @@ export function PanelRoundPage() {
                         <span className={`verdict v-${v.verdict === 'pass' ? 'pass' : v.verdict === 'fail' ? 'fail' : 'mid'}`}>
                           {v.verdict}
                         </span>
-                        <span className="why">{v.reason}</span>
+                        <span className="why">
+                          {v.reason}
+                          {!v.stable ? (
+                            <span className="verdict v-mid" style={{ marginLeft: 8 }} title={`Agreed with itself on ${Math.round(v.agreement * 100)}% of phrasings`}>
+                              unstable
+                            </span>
+                          ) : null}
+                        </span>
                       </div>
                     );
                   })}

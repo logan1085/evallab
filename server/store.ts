@@ -792,6 +792,8 @@ export async function submitGrade(
     verdict: args.verdict,
     note: args.note ?? '',
     elapsedMs: args.elapsedMs ?? 0,
+    variantCount: 1,
+    variantAgreement: 1,
     createdAt: now(),
   };
   await db.run(`INSERT INTO grades (id, item_id, grader_id, verdict, note, elapsed_ms, output_length, created_at)
@@ -830,8 +832,48 @@ function toGrade(row: Row): Grade {
     verdict: str(row.verdict),
     note: str(row.note),
     elapsedMs: num(row.elapsed_ms),
+    variantCount: row.variant_count == null ? 1 : Math.max(1, num(row.variant_count)),
+    variantAgreement: row.variant_agreement == null ? 1 : Number(row.variant_agreement),
     createdAt: str(row.created_at),
   };
+}
+
+/* ---- The stability pass ---------------------------------------------------- */
+
+/** One verdict under one phrasing of the standard, kept for provenance. */
+export async function recordGradeVariant(
+  db: DB,
+  args: { itemId: string; graderId: string; variant: number; verdict: string; note: string },
+): Promise<void> {
+  await db.run(
+    `INSERT INTO grade_variants (id, item_id, grader_id, variant, verdict, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (item_id, grader_id, variant) DO UPDATE SET verdict = excluded.verdict, note = excluded.note, created_at = excluded.created_at`,
+    newId(), args.itemId, args.graderId, args.variant, args.verdict, args.note, now(),
+  );
+}
+
+export async function listGradeVariantsForRound(
+  db: DB,
+  roundId: string,
+): Promise<{ itemId: string; graderId: string; variant: number; verdict: string; note: string }[]> {
+  return (
+    await db.all(
+      `SELECT v.* FROM grade_variants v JOIN round_items ri ON ri.id = v.item_id WHERE ri.round_id = ? ORDER BY v.variant`,
+      roundId,
+    ) as Row[]
+  ).map((r) => ({ itemId: str(r.item_id), graderId: str(r.grader_id), variant: num(r.variant), verdict: str(r.verdict), note: str(r.note) }));
+}
+
+/** The seat's final word on a case after the stability pass: the majority, and how much of it agreed. */
+export async function setGradeStability(
+  db: DB,
+  args: { itemId: string; graderId: string; verdict: string; note: string; variantCount: number; variantAgreement: number },
+): Promise<void> {
+  await db.run(
+    'UPDATE grades SET verdict = ?, note = ?, variant_count = ?, variant_agreement = ? WHERE item_id = ? AND grader_id = ?',
+    args.verdict, args.note, args.variantCount, args.variantAgreement, args.itemId, args.graderId,
+  );
 }
 
 /**

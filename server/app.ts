@@ -52,8 +52,8 @@ import {
   gwetAC1,
   krippendorffAlpha,
 } from '../shared/index.js';
-import { ARCHETYPES, REQUIRED_SEAT, archetype } from '../shared/panel.js';
-import { groundEvidence, isTheater, patchIsGrounded, readCase, type SeatVote } from '../shared/panelmap.js';
+import { ARCHETYPES, PROMPT_VARIANTS, REQUIRED_SEAT, archetype } from '../shared/panel.js';
+import { groundEvidence, isTheater, patchIsGrounded, readCase, stableVotes, type SeatVote } from '../shared/panelmap.js';
 import { renderApiDocs } from './apidocs.js';
 
 interface ProjectRequest extends Request {
@@ -1149,6 +1149,81 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
   });
 
   /**
+   * The stability pass: the mixture's second axis.
+   *
+   * After every seat has graded under the canonical prompt, each seat is
+   * asked again about the non-unanimous cases under the other phrasings of
+   * the standard. A seat that answers the same way every time is stable; one
+   * that flips is marked unstable on that case, its final verdict is the
+   * majority across phrasings, and its vote there is shown but never mined.
+   * Unanimous cases are skipped: the whole panel agreeing under one prompt
+   * is not where paraphrase noise hides, and it is where most of the cost is.
+   */
+  api.post('/rounds/:roundId/stability', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'The stability pass runs once every seat has graded.' });
+    const variants = Math.max(1, Number(process.env.GR_PROMPT_VARIANTS ?? PROMPT_VARIANTS));
+    if (variants === 1) return res.json({ checked: 0, rechecked: 0, unstable: 0, variants: 1, simulated: true });
+
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatById = new Map(seats.map((s) => [s.id, s]));
+    const rubric = await store.getRubric(db, round.rubricVersionId);
+    const rubricMarkdown = rubric ? renderRubricMarkdown(rubric) : '';
+    const items = await store.listItems(db, round.id);
+    const grades = await store.allGradesForRound(db, round.id);
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) if (seatById.has(g.graderId)) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+
+    const byok = req.header('x-openrouter-key');
+    const gateway = {
+      ...(byok ? { apiKey: byok } : {}),
+      recorder: (a: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, a),
+      guard: createSpendGuard(db),
+      roundId: round.id,
+    };
+
+    // Only the cases the panel did not settle under the first phrasing.
+    const contested = items.filter((item) => {
+      const votes = (byItem.get(item.id) ?? []).filter((g) => g.verdict !== ABSTAIN);
+      return votes.length >= 2 && new Set(votes.map((g) => g.verdict)).size > 1;
+    });
+
+    let rechecked = 0;
+    let unstable = 0;
+    let simulated = true;
+    for (const item of contested) {
+      const trace = await store.getTrace(db, item.traceId);
+      if (!trace) continue;
+      const seatGrades = byItem.get(item.id) ?? [];
+      await mapLimit(seatGrades, 6, async (first) => {
+        const seat = seatById.get(first.graderId)!;
+        const adapter = adapterFor(seat.family);
+        if (adapter.real) simulated = false;
+        const answers: { variant: number; verdict: string; note: string }[] = [{ variant: 0, verdict: first.verdict, note: first.note }];
+        await store.recordGradeVariant(db, { itemId: item.id, graderId: seat.id, variant: 0, verdict: first.verdict, note: first.note });
+        for (let variant = 1; variant < variants; variant++) {
+          const v = await adapter.score(
+            { seat, rubricMarkdown, caseId: item.traceId, caseTitle: trace.title, caseContent: trace.content, variant },
+            gateway,
+          );
+          answers.push({ variant, verdict: v.verdict, note: v.reason });
+          await store.recordGradeVariant(db, { itemId: item.id, graderId: seat.id, variant, verdict: v.verdict, note: v.reason });
+        }
+        // The majority is the seat's word; ties fall to the canonical prompt.
+        const tally = new Map<string, number>();
+        for (const a of answers) tally.set(a.verdict, (tally.get(a.verdict) ?? 0) + 1);
+        const best = [...tally.entries()].sort((a, b) => b[1] - a[1] || (a[0] === first.verdict ? -1 : 1))[0]!;
+        const agreement = best[1] / answers.length;
+        const note = answers.find((a) => a.verdict === best[0])!.note;
+        await store.setGradeStability(db, { itemId: item.id, graderId: seat.id, verdict: best[0], note, variantCount: answers.length, variantAgreement: agreement });
+        rechecked++;
+        if (agreement < 1) unstable++;
+      });
+    }
+    res.json({ checked: contested.length, rechecked, unstable, variants, simulated });
+  });
+
+  /**
    * The disagreement map. Settled, persona-driven, contested, blind spot, per
    * case, with the agreement numbers that are honest under skew: AC1 next to
    * alpha, never alpha alone.
@@ -1184,28 +1259,40 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     const units: string[][] = [];
     for (const item of items) {
       const trace = await store.getTrace(db, item.traceId);
-      const votes: SeatVote[] = (byItem.get(item.id) ?? []).map((g) => ({
+      const votes: (SeatVote & { agreement: number })[] = (byItem.get(item.id) ?? []).map((g) => ({
         seatId: g.graderId,
         seatName: seatById.get(g.graderId)?.name ?? 'unknown seat',
         verdict: g.verdict,
         reason: g.note,
+        stable: g.variantAgreement >= 1,
+        agreement: g.variantAgreement,
       }));
-      const scoringVotes = votes.filter((v) => scoringSeatIds.has(v.seatId));
+      // The reading is taken on the votes that survived paraphrase. An
+      // unstable vote is on the map, with its chip, and out of the arithmetic.
+      const scoringVotes = stableVotes(votes.filter((v) => scoringSeatIds.has(v.seatId)));
       const reading = readCase(item.id, scoringVotes);
       const theater =
         reading.pattern === 'persona-driven' && reading.dissenter
           ? isTheater(scoringVotes, reading.dissenter, literalistName)
           : false;
+      // A split that only exists among the unstable votes did not survive
+      // paraphrase: reported as such, and the case is read without it.
+      const allScoring = votes.filter((v) => scoringSeatIds.has(v.seatId) && v.verdict !== ABSTAIN);
+      const unstableDissent =
+        allScoring.length >= 2 &&
+        new Set(allScoring.map((v) => v.verdict)).size > 1 &&
+        (reading.pattern === 'settled' || reading.pattern === 'blind-spot' || reading.pattern === 'ungraded');
       units.push(scoringVotes.map((v) => v.verdict));
       cases.push({
         itemId: item.id,
         traceId: item.traceId,
         title: trace?.title ?? 'Missing case',
         content: trace?.content ?? '',
-        votes,
+        votes: votes.map((v) => ({ ...v, stable: v.stable !== false })),
         pattern: reading.pattern,
         dissenter: reading.dissenter,
         theater,
+        unstableDissent,
         provisional: reading.provisional && !checked.has(item.id),
         checkedByOwner: checked.has(item.id),
       });
@@ -1277,12 +1364,18 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     const disputed: Disputed[] = [];
     let contestedTotal = 0;
     for (const item of items) {
-      const votes: SeatVote[] = (byItem.get(item.id) ?? []).map((g) => ({
-        seatId: g.graderId,
-        seatName: seatById.get(g.graderId)?.name ?? 'unknown',
-        verdict: g.verdict,
-        reason: g.note,
-      }));
+      // Mined from the votes that survived paraphrase only: a sentence
+      // written from prompt noise is the ungrounded rubric language this
+      // product exists to prevent.
+      const votes: SeatVote[] = stableVotes(
+        (byItem.get(item.id) ?? []).map((g) => ({
+          seatId: g.graderId,
+          seatName: seatById.get(g.graderId)?.name ?? 'unknown',
+          verdict: g.verdict,
+          reason: g.note,
+          stable: g.variantAgreement >= 1,
+        })),
+      );
       for (const v of votes) reasonIndex.set(`${item.id}|${v.seatName}`, v.reason);
       const reading = readCase(item.id, votes);
       const litName = seats.find((s) => s.archetypeId === 'literalist' || /literalist/i.test(s.name))?.name ?? null;
@@ -1904,7 +1997,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       mixture: {
         experts: seats.length,
         families: [...new Set(seats.map((s) => s.family))].length,
-        prompts: 1,
+        prompts: Math.max(1, Number(process.env.GR_PROMPT_VARIANTS ?? PROMPT_VARIANTS)),
         samples: 1,
         weights: Object.fromEntries(seats.map((s) => [s.name, s.weight])),
       },

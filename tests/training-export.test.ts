@@ -31,7 +31,7 @@ const seats = [seat('s1', 'The literalist', 'anthropic'), seat('s2', 'The impati
 const trace = (id: string, title: string): Trace => ({ id, projectId: 'p', title, content: `CASE ${title}`, source: 'scenario', meta: {}, createdAt: '' }) as Trace;
 const traces = new Map([['t1', trace('t1', 'Settled')], ['t2', trace('t2', 'Split')], ['t3', trace('t3', 'Overruled')]]);
 
-const grade = (itemId: string, graderId: string, verdict: string, note: string) => ({ id: `${itemId}-${graderId}`, itemId, graderId, verdict, note, elapsedMs: 0, createdAt: '' });
+const grade = (itemId: string, graderId: string, verdict: string, note: string) => ({ id: `${itemId}-${graderId}`, itemId, graderId, verdict, note, elapsedMs: 0, variantCount: 1, variantAgreement: 1, createdAt: '' });
 
 const round: TrainingRound = {
   id: 'r1',

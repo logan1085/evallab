@@ -42,6 +42,8 @@ export interface ScoreRequest {
   caseId: string;
   caseTitle: string;
   caseContent: string;
+  /** Which phrasing of the standard this call uses. 0 is canonical. */
+  variant?: number;
 }
 
 export interface FamilyAdapter {
@@ -69,11 +71,12 @@ export function openrouterAdapter(family: string): FamilyAdapter {
     model: pin.openrouter_model_id,
     real: true,
     async score(req, gateway = {}) {
+      const system = buildSeatSystemPrompt(req.seat, req.rubricMarkdown, req.variant ?? 0);
       const result = await callModel(
         {
           pin_id: pin.pin_id,
           messages: [
-            { role: 'system', content: buildSeatSystemPrompt(req.seat, req.rubricMarkdown) },
+            { role: 'system', content: system },
             { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
           ],
           max_tokens: 300,
@@ -92,7 +95,7 @@ export function openrouterAdapter(family: string): FamilyAdapter {
           {
             pin_id: pin.pin_id,
             messages: [
-              { role: 'system', content: buildSeatSystemPrompt(req.seat, req.rubricMarkdown) },
+              { role: 'system', content: system },
               { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
               { role: 'user', content: 'Your previous reply was missing the verdict or the one-sentence reason. Reply with both.' },
             ],
@@ -164,7 +167,11 @@ export function offlineAdapter(): FamilyAdapter {
           return { verdict: 'fail', reason: 'A claim was made without checking it, however right it turned out.' };
         }
       }
-      const roll = h % 10;
+      // Where no persona rule decides, the roll is keyed on the prompt
+      // variant too, so the simulation shows what a real panel shows: some
+      // seats holding under paraphrase and some flipping. Variant 0 keeps
+      // the historical key, so existing rounds replay identically.
+      const roll = (req.variant ? hash(`${req.seat.name}|${req.caseTitle}|v${req.variant}`) : h) % 10;
       if (roll < 6) return { verdict: 'pass', reason: `Acceptable on ${req.seat.name.toLowerCase()}’s terms.` };
       if (roll < 8) return { verdict: 'recoverable', reason: 'Flawed in a way one light edit would save.' };
       return { verdict: 'fail', reason: `Falls exactly where ${req.seat.name.toLowerCase()} draws the line.` };

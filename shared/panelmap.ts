@@ -19,6 +19,17 @@ export interface SeatVote {
   seatName: string;
   verdict: string;
   reason: string;
+  /**
+   * False when the seat flipped under paraphrase in the stability pass. An
+   * unstable vote is shown, never mined: prompt noise does not write
+   * sentences into the standard.
+   */
+  stable?: boolean;
+}
+
+/** The votes that survived paraphrase. Votes never checked count as stable. */
+export function stableVotes(votes: SeatVote[]): SeatVote[] {
+  return votes.filter((v) => v.stable !== false);
 }
 
 export type CasePattern =

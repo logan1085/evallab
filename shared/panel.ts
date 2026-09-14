@@ -175,21 +175,73 @@ export function panelJsonSchema(count: number) {
  * The scoring prompt for one seat grading one case. Blind: no other seat's
  * verdict appears here, and neither does the arm or any aggregate.
  */
-export function buildSeatSystemPrompt(seat: Pick<Seat, 'name' | 'objective' | 'failsFor'>, rubricMarkdown: string): string {
-  return [
+/**
+ * How many phrasings of the standard each seat is asked under. Variant 0 is
+ * the canonical prompt; the others change the framing and the order of the
+ * instructions, never the words of the standard, so a verdict that flips
+ * between them is prompt noise rather than judgment.
+ */
+export const PROMPT_VARIANTS = 3;
+
+export function buildSeatSystemPrompt(
+  seat: Pick<Seat, 'name' | 'objective' | 'failsFor'>,
+  rubricMarkdown: string,
+  variant = 0,
+): string {
+  const who = [
     `You are one seat on a grading panel: ${seat.name}.`,
     `You optimize for: ${seat.objective}`,
     `You fail an answer for: ${seat.failsFor}`,
-    '',
-    'Grade the case against the rubric below. Verdicts are pass, recoverable, or fail:',
+  ];
+  const scale = [
+    'Verdicts are pass, recoverable, or fail:',
     'pass: acceptable as is. recoverable: flawed but a light edit saves it. fail: not acceptable.',
-    'Give exactly one verdict and one sentence of reason, in your own stake’s terms.',
-    'If the rubric truly does not decide the case, say so in your reason, then still give your best verdict.',
-    'Plain punctuation: never use em dashes.',
-    '',
-    '--- RUBRIC ---',
-    rubricMarkdown,
-  ].join('\n');
+  ];
+  const house = ['Plain punctuation: never use em dashes.'];
+  const rubric = ['--- RUBRIC ---', rubricMarkdown];
+
+  switch (variant % PROMPT_VARIANTS) {
+    case 1:
+      // Reason before verdict, and the scale described from the failing end
+      // up. Same standard, same stake, different path to the answer.
+      return [
+        ...who,
+        '',
+        'Read the case, then the rubric below. Write one sentence of reason in your own stake’s terms first, and only then choose the verdict that sentence supports.',
+        'fail: not acceptable. recoverable: flawed but a light edit saves it. pass: acceptable as is.',
+        'If the rubric truly does not decide the case, say so in your reason, then still give your best verdict.',
+        ...house,
+        '',
+        ...rubric,
+      ].join('\n');
+    case 2:
+      // The standard first, the stake last, and an explicit instruction not
+      // to go looking for fault: the canonical prompt’s mirror image.
+      return [
+        'You grade a case against the standard below. Start from the standard, not from a hunch.',
+        ...rubric,
+        '',
+        'Then read the case as this seat:',
+        ...who,
+        '',
+        ...scale,
+        'Do not hunt for fault; grade what the standard decides, and where it is silent say so in your reason and give your best verdict.',
+        'Give exactly one verdict and one sentence of reason.',
+        ...house,
+      ].join('\n');
+    default:
+      return [
+        ...who,
+        '',
+        'Grade the case against the rubric below. ' + scale[0],
+        scale[1]!,
+        'Give exactly one verdict and one sentence of reason, in your own stake’s terms.',
+        'If the rubric truly does not decide the case, say so in your reason, then still give your best verdict.',
+        ...house,
+        '',
+        ...rubric,
+      ].join('\n');
+  }
 }
 
 export const SEAT_VERDICT_SCHEMA = {

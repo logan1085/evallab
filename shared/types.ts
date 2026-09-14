@@ -229,6 +229,14 @@ export interface Grade {
   note: string;
   /** Milliseconds of attention. Feeds the 30-minute budget readout. */
   elapsedMs: number;
+  /**
+   * How many phrasings of the standard this verdict was asked under, and the
+   * share that agreed with it. 1 and 1 until the stability pass has run; a
+   * verdict that flipped under paraphrase has agreement below 1 and is read
+   * as unstable.
+   */
+  variantCount: number;
+  variantAgreement: number;
   createdAt: string;
 }
 

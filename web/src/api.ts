@@ -95,6 +95,10 @@ export interface SeatVoteView {
   seatName: string;
   verdict: string;
   reason: string;
+  /** False when the seat flipped under paraphrase; shown, never mined. */
+  stable: boolean;
+  /** Share of prompt variants that agreed with this verdict. */
+  agreement: number;
 }
 
 export interface PanelCaseView {
@@ -106,6 +110,8 @@ export interface PanelCaseView {
   pattern: 'settled' | 'persona-driven' | 'contested' | 'blind-spot' | 'ungraded';
   dissenter: string | null;
   theater: boolean;
+  /** The split did not survive paraphrase: the dissent came from an unstable vote. */
+  unstableDissent: boolean;
   provisional: boolean;
   checkedByOwner: boolean;
 }
@@ -391,6 +397,12 @@ export const api = {
     }),
 
   panelMap: (roundId: string, token: string) => call<PanelMapView>(`/rounds/${roundId}/map`, { token }),
+
+  stability: (roundId: string, token: string) =>
+    call<{ checked: number; rechecked: number; unstable: number; variants: number; simulated: boolean }>(`/rounds/${roundId}/stability`, {
+      method: 'POST',
+      token,
+    }),
 
   minePatches: (roundId: string, token: string) =>
     call<{ patches: PatchView[]; dropped: number; contestedTotal?: number }>(`/rounds/${roundId}/patches`, {

@@ -22,7 +22,7 @@ const item = (id: string, traceId: string, arm: 'calibration' | 'heldout' = 'cal
 });
 const votes = (itemId: string, byGrader: Record<string, string>): ItemVerdicts => ({ itemId, byGrader });
 const note = (itemId: string, graderId: string, text: string): Grade => ({
-  id: `${itemId}-${graderId}`, itemId, graderId, verdict: 'pass', note: text, elapsedMs: 0, createdAt: '',
+  id: `${itemId}-${graderId}`, itemId, graderId, verdict: 'pass', note: text, elapsedMs: 0, variantCount: 1, variantAgreement: 1, createdAt: '',
 });
 
 describe('what becomes a test case', () => {
