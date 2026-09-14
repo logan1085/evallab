@@ -888,6 +888,65 @@ export async function listRuns(db: DB, projectId: string): Promise<RunRow[]> {
   return (await db.all('SELECT * FROM runs WHERE project_id = ? ORDER BY created_at', projectId) as Row[]).map(toRun);
 }
 
+/* ---- Bring-your-own endpoints ---------------------------------------------- */
+
+/** An endpoint as the API and the Room see it: never the key, only its hint. */
+export interface EndpointRow {
+  id: string;
+  projectId: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  keyHint: string;
+  /** True when a key was stored; the key itself never leaves the store row unsealed except into one model call. */
+  hasKey: boolean;
+  createdAt: string;
+}
+
+function toEndpoint(row: Row): EndpointRow {
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    name: str(row.name),
+    baseUrl: str(row.base_url),
+    model: str(row.model),
+    keyHint: str(row.key_hint),
+    hasKey: str(row.key_sealed) !== '',
+    createdAt: str(row.created_at),
+  };
+}
+
+export async function createEndpoint(
+  db: DB,
+  args: { projectId: string; name: string; baseUrl: string; model: string; keySealed: string; keyHint: string },
+): Promise<EndpointRow> {
+  const id = newId();
+  await db.run(
+    'INSERT INTO endpoints (id, project_id, name, base_url, model, key_sealed, key_hint, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    id, args.projectId, args.name.trim(), args.baseUrl, args.model, args.keySealed, args.keyHint, now(),
+  );
+  return (await getEndpoint(db, id))!;
+}
+
+export async function getEndpoint(db: DB, id: string): Promise<EndpointRow | null> {
+  const row = await db.get('SELECT * FROM endpoints WHERE id = ?', id) as Row | undefined;
+  return row ? toEndpoint(row) : null;
+}
+
+/** The sealed key, for the one place that opens it. Empty when none was stored. */
+export async function endpointSealedKey(db: DB, id: string): Promise<string> {
+  const row = await db.get('SELECT key_sealed FROM endpoints WHERE id = ?', id) as Row | undefined;
+  return str(row?.key_sealed);
+}
+
+export async function listEndpoints(db: DB, projectId: string): Promise<EndpointRow[]> {
+  return (await db.all('SELECT * FROM endpoints WHERE project_id = ? ORDER BY created_at, id', projectId) as Row[]).map(toEndpoint);
+}
+
+export async function deleteEndpoint(db: DB, projectId: string, id: string): Promise<void> {
+  await db.run('DELETE FROM endpoints WHERE id = ? AND project_id = ?', id, projectId);
+}
+
 /* ---- The stability pass ---------------------------------------------------- */
 
 /** One verdict under one phrasing of the standard, kept for provenance. */

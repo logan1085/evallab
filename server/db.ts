@@ -299,6 +299,24 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id);
 
 /*
+ * A company's own model as a seat. Any OpenAI-compatible chat endpoint (a
+ * fine-tune behind vLLM, an internal gateway, a vendor's API) registered per
+ * project. The key rests sealed (see secrets.ts); only its hint is readable.
+ */
+CREATE TABLE IF NOT EXISTS endpoints (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  base_url    TEXT NOT NULL,
+  model       TEXT NOT NULL,
+  key_sealed  TEXT NOT NULL DEFAULT '',
+  key_hint    TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  UNIQUE (project_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_endpoints_project ON endpoints(project_id);
+
+/*
  * One row per model-call attempt, retries and failures included, with the
  * numbers read straight off the router's usage object and never recomputed.
  * Nothing is rolled up: a round's spend is summed from these rows at read

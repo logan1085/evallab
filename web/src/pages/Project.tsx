@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
 import { DEFAULT_SCENARIOS } from '@shared/scenarios';
 import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
-import { api, recallKey, type DraftResponse, type ProjectView } from '../api';
+import { api, recallKey, type DraftResponse, type EndpointView, type ProjectView } from '../api';
 import { ErrorBanner, Loading, Masthead, useAsync } from '../ui';
 
 /** The stored source values are import formats; the owner reads provenance. */
@@ -127,9 +127,31 @@ function PanelSection({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ name: '', objective: '', failsFor: '' });
+  const [draft, setDraft] = useState({ name: '', objective: '', failsFor: '', endpointId: '' });
   const [adding, setAdding] = useState(false);
   const [archetypes, setArchetypes] = useState<{ id: string; name: string; objective: string; failsFor: string }[]>([]);
+  // The company's own endpoints, loaded beside the seats. Optional: a project
+  // with none registered sees only the offer to add one.
+  const [endpoints, setEndpoints] = useState<EndpointView[]>([]);
+  const [secrets, setSecrets] = useState<'env' | 'dev-default'>('env');
+  const [endpointsTick, setEndpointsTick] = useState(0);
+  useEffect(() => {
+    let live = true;
+    api
+      .endpoints(slug, token)
+      .then((r) => {
+        if (!live) return;
+        setEndpoints(r.endpoints);
+        setSecrets(r.secrets);
+      })
+      .catch(() => {
+        /* the seats still render without the endpoint list */
+      });
+    return () => {
+      live = false;
+    };
+  }, [slug, token, endpointsTick, seats]);
+  const endpointOf = (family: string) => (family.startsWith('endpoint:') ? family.slice('endpoint:'.length) : '');
 
   async function generate() {
     setBusy('generate');
@@ -230,12 +252,34 @@ function PanelSection({
                     onChange={(e) => setDraft((d) => ({ ...d, failsFor: e.target.value }))}
                   />
                 </div>
+                {endpoints.length > 0 ? (
+                  <div>
+                    <label htmlFor={`seat-runs-${seat.id}`}>Runs on</label>
+                    <select
+                      id={`seat-runs-${seat.id}`}
+                      value={draft.endpointId}
+                      onChange={(e) => setDraft((d) => ({ ...d, endpointId: e.target.value }))}
+                    >
+                      <option value="">A registry model ({endpointOf(seat.family) ? 'reassigned by position' : seat.model})</option>
+                      {endpoints.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          Your endpoint: {e.name} ({e.model})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
                 <div className="row">
                   <button
                     className="tiny-btn"
                     onClick={async () => {
                       try {
-                        await api.updateSeat(slug, token, seat.id, draft);
+                        const { endpointId, ...fields } = draft;
+                        await api.updateSeat(slug, token, seat.id, {
+                          ...fields,
+                          // Only a changed placement is sent; an unchanged one is not an edit.
+                          ...(endpointId !== endpointOf(seat.family) ? { endpointId: endpointId || null } : {}),
+                        });
                         setEditing(null);
                         onChange();
                       } catch (err) {
@@ -269,14 +313,18 @@ function PanelSection({
                 </span>
                 {/* The model, named. "Six judges" is only a claim until you
                     can see that they are six different models. */}
-                <span className="seat-model" title={`${seat.family} family`}>
+                <span
+                  className="seat-model"
+                  title={endpointOf(seat.family) ? `your endpoint: ${endpoints.find((e) => e.id === endpointOf(seat.family))?.name ?? 'removed'}` : `${seat.family} family`}
+                >
                   {seat.model === 'simulated' || seat.family === 'offline' ? 'simulated' : seat.model}
+                  {endpointOf(seat.family) ? <span className="seat-note" style={{ marginLeft: 8 }}>yours</span> : null}
                 </span>
                 <span className="seat-actions">
                 <button
                   onClick={() => {
                     setEditing(seat.id);
-                    setDraft({ name: seat.name, objective: seat.objective, failsFor: seat.failsFor });
+                    setDraft({ name: seat.name, objective: seat.objective, failsFor: seat.failsFor, endpointId: endpointOf(seat.family) });
                   }}
                 >
                   edit
@@ -340,6 +388,194 @@ function PanelSection({
         <p style={{ margin: '12px 0 0' }}>
           <button className="ghost tiny-btn" onClick={loadArchetypes}>
             add a seat
+          </button>
+        </p>
+      )}
+
+      <EndpointsBlock
+        slug={slug}
+        token={token}
+        endpoints={endpoints}
+        secrets={secrets}
+        onChange={() => {
+          setEndpointsTick((n) => n + 1);
+          onChange();
+        }}
+        onError={onError}
+      />
+    </div>
+  );
+}
+
+/* ---- Your own model in a seat ------------------------------------------- */
+
+/**
+ * The company's endpoints, listed under the panel: a fine-tune behind vLLM,
+ * an internal gateway, a vendor API. Register, check with one real call,
+ * then move a seat onto it from the seat's edit form. The key never comes
+ * back from the server; only its last four characters do.
+ */
+function EndpointsBlock({
+  slug,
+  token,
+  endpoints,
+  secrets,
+  onChange,
+  onError,
+}: {
+  slug: string;
+  token: string;
+  endpoints: EndpointView[];
+  secrets: 'env' | 'dev-default';
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ name: '', base_url: '', model: '', api_key: '' });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [checks, setChecks] = useState<Record<string, { ok: boolean; text: string }>>({});
+
+  const host = (url: string) => {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url;
+    }
+  };
+
+  async function add() {
+    setBusy('add');
+    try {
+      await api.addEndpoint(slug, token, {
+        name: form.name.trim(),
+        base_url: form.base_url.trim(),
+        model: form.model.trim(),
+        ...(form.api_key.trim() ? { api_key: form.api_key.trim() } : {}),
+      });
+      setForm({ name: '', base_url: '', model: '', api_key: '' });
+      setAdding(false);
+      onChange();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not add the endpoint.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function check(id: string) {
+    setBusy(`check:${id}`);
+    try {
+      const r = await api.checkEndpoint(slug, token, id);
+      setChecks((c) => ({
+        ...c,
+        [id]: r.ok
+          ? { ok: true, text: `answered in ${r.latency_ms ?? 0} ms` }
+          : { ok: false, text: r.error ?? 'did not answer' },
+      }));
+    } catch (err) {
+      setChecks((c) => ({ ...c, [id]: { ok: false, text: err instanceof Error ? err.message : 'did not answer' } }));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove(e: EndpointView) {
+    if (!window.confirm(`Remove ${e.name}? Rounds already graded keep its name in their pinned models.`)) return;
+    setBusy(`remove:${e.id}`);
+    try {
+      await api.deleteEndpoint(slug, token, e.id);
+      onChange();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not remove the endpoint.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <span className="metric-k">Your own model</span>
+      <p className="tiny" style={{ margin: '6px 0 0' }}>
+        Any OpenAI-compatible chat endpoint can take a seat: a fine-tune behind vLLM, an internal gateway, a vendor API.
+        Its verdicts sit beside the panel’s, graded blind like every other seat, so you can see where your model already
+        agrees with the standard and where it does not yet.
+        {secrets === 'dev-default' ? ' Keys are sealed under the development secret on this server; set GR_SECRET in production.' : ''}
+      </p>
+
+      {endpoints.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          {endpoints.map((e) => (
+            <div key={e.id} className="seat-row">
+              <span className="seat-name">
+                {e.name}
+                {e.seats.length > 0 ? <span className="seat-note" style={{ marginLeft: 10 }}>seats: {e.seats.join(', ')}</span> : null}
+              </span>
+              <span className="seat-stake">
+                {host(e.baseUrl)}
+                <span className="fails">
+                  {e.hasKey ? `key ${e.keyHint}` : 'no key'}
+                  {checks[e.id] ? (
+                    <span style={{ marginLeft: 10, color: checks[e.id]!.ok ? 'inherit' : 'var(--split)' }}>{checks[e.id]!.text}</span>
+                  ) : null}
+                </span>
+              </span>
+              <span className="seat-model" title="the model name sent to your endpoint">{e.model}</span>
+              <span className="seat-actions">
+                <button onClick={() => check(e.id)} disabled={busy !== null}>
+                  {busy === `check:${e.id}` ? 'calling…' : 'check'}
+                </button>
+                <button onClick={() => remove(e)} disabled={busy !== null}>
+                  remove
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {adding ? (
+        <div className="seat-edit" style={{ marginTop: 10 }}>
+          <div>
+            <label htmlFor="ep-name">Name</label>
+            <input id="ep-name" placeholder="our support fine-tune" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div>
+            <label htmlFor="ep-url">Base URL</label>
+            <input
+              id="ep-url"
+              placeholder="https://llm.example.com/v1"
+              value={form.base_url}
+              onChange={(e) => setForm((f) => ({ ...f, base_url: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label htmlFor="ep-model">Model</label>
+            <input id="ep-model" placeholder="acme-support-7b" value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))} />
+          </div>
+          <div>
+            <label htmlFor="ep-key">API key (optional)</label>
+            <input
+              id="ep-key"
+              type="password"
+              autoComplete="off"
+              placeholder="sealed at rest, never shown again"
+              value={form.api_key}
+              onChange={(e) => setForm((f) => ({ ...f, api_key: e.target.value }))}
+            />
+          </div>
+          <div className="row">
+            <button className="tiny-btn" onClick={add} disabled={busy !== null || !form.name.trim() || !form.base_url.trim() || !form.model.trim()}>
+              {busy === 'add' ? 'Adding…' : 'Add the endpoint'}
+            </button>
+            <button className="ghost tiny-btn" onClick={() => setAdding(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p style={{ margin: '10px 0 0' }}>
+          <button className="ghost tiny-btn" onClick={() => setAdding(true)}>
+            add your own endpoint
           </button>
         </p>
       )}

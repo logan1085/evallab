@@ -28,7 +28,7 @@ import {
 } from '../shared/panel.js';
 import { DrafterError } from './drafter.js';
 import { openrouterJson, openrouterKey } from './openrouter.js';
-import { callModel, type GatewayOptions } from './gateway.js';
+import { callModel, type GatewayOptions, type OwnEndpoint } from './gateway.js';
 import { pinsByFamily } from './pins.js';
 
 export interface SeatVerdict {
@@ -63,6 +63,44 @@ export function availableFamilies(): FamilyAdapter[] {
   return [...pinsByFamily('small').keys()].map((family) => openrouterAdapter(family));
 }
 
+/**
+ * One seat's verdict through the gateway, whichever model answers: a
+ * registry pin or the company's own endpoint. One repair retry with the
+ * requirement restated, then the schema failure stands as a recorded
+ * failure for this case.
+ */
+async function scoreThroughGateway(
+  target: { pin_id: string; endpoint?: OwnEndpoint },
+  req: ScoreRequest,
+  gateway: GatewayOptions,
+): Promise<SeatVerdict> {
+  const system = buildSeatSystemPrompt(req.seat, req.rubricMarkdown, req.variant ?? 0);
+  const ask = (extra: { role: 'user'; content: string }[]) =>
+    callModel(
+      {
+        ...target,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
+          ...extra,
+        ],
+        max_tokens: 300,
+        response_format: { type: 'json_schema', json_schema: { name: 'verdict', strict: true, schema: SEAT_VERDICT_SCHEMA } },
+        caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.caseId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
+      },
+      gateway,
+    );
+  const result = await ask([]);
+  if (result.error) throw new DrafterError('api', result.error.message);
+  try {
+    return normalizeVerdict(JSON.parse(result.text));
+  } catch {
+    const retry = await ask([{ role: 'user', content: 'Your previous reply was missing the verdict or the one-sentence reason. Reply with both.' }]);
+    if (retry.error) throw new DrafterError('api', retry.error.message);
+    return normalizeVerdict(JSON.parse(retry.text));
+  }
+}
+
 export function openrouterAdapter(family: string): FamilyAdapter {
   const pin = pinsByFamily('small').get(family);
   if (!pin) return offlineAdapter();
@@ -70,49 +108,52 @@ export function openrouterAdapter(family: string): FamilyAdapter {
     family,
     model: pin.openrouter_model_id,
     real: true,
-    async score(req, gateway = {}) {
-      const system = buildSeatSystemPrompt(req.seat, req.rubricMarkdown, req.variant ?? 0);
-      const result = await callModel(
-        {
-          pin_id: pin.pin_id,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
-          ],
-          max_tokens: 300,
-          response_format: { type: 'json_schema', json_schema: { name: 'verdict', strict: true, schema: SEAT_VERDICT_SCHEMA } },
-          caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.caseId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
-        },
-        gateway,
-      );
-      if (result.error) throw new DrafterError('api', result.error.message);
-      try {
-        return normalizeVerdict(JSON.parse(result.text));
-      } catch {
-        // One repair retry with the requirement restated, then the schema
-        // failure stands as a recorded failure for this case.
-        const retry = await callModel(
-          {
-            pin_id: pin.pin_id,
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
-              { role: 'user', content: 'Your previous reply was missing the verdict or the one-sentence reason. Reply with both.' },
-            ],
-            max_tokens: 300,
-            response_format: { type: 'json_schema', json_schema: { name: 'verdict', strict: true, schema: SEAT_VERDICT_SCHEMA } },
-            caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.caseId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
-          },
-          gateway,
-        );
-        if (retry.error) throw new DrafterError('api', retry.error.message);
-        return normalizeVerdict(JSON.parse(retry.text));
-      }
+    score: (req, gateway = {}) => scoreThroughGateway({ pin_id: pin.pin_id }, req, gateway),
+  };
+}
+
+/** A seat's family when it runs on the company's own endpoint: `endpoint:<id>`. */
+export const ENDPOINT_FAMILY = 'endpoint:';
+export const endpointFamily = (endpointId: string) => `${ENDPOINT_FAMILY}${endpointId}`;
+export const endpointIdOf = (family: string): string | null => (family.startsWith(ENDPOINT_FAMILY) ? family.slice(ENDPOINT_FAMILY.length) : null);
+
+/**
+ * The company's own model in a seat. Real by definition: it is their
+ * fine-tune or their gateway, and its verdicts are the ones they most want
+ * to see beside the panel's.
+ */
+export function endpointAdapter(endpoint: OwnEndpoint): FamilyAdapter {
+  return {
+    family: endpointFamily(endpoint.id),
+    model: endpoint.model,
+    real: true,
+    score: (req, gateway = {}) => scoreThroughGateway({ pin_id: `byo:${endpoint.id}`, endpoint }, req, gateway),
+  };
+}
+
+/** A seat whose endpoint was removed: fails by name, never falls back to the simulation. */
+function missingEndpointAdapter(family: string): FamilyAdapter {
+  return {
+    family,
+    model: 'missing',
+    real: true,
+    async score() {
+      throw new DrafterError('api', 'This seat ran on an endpoint that has since been removed. Point the seat at another endpoint, or a registry family.');
     },
   };
 }
 
-export function adapterFor(family: string): FamilyAdapter {
+/**
+ * The adapter for a seat's family. Registry families come from the pin
+ * list; `endpoint:<id>` families come from the project's own endpoints,
+ * which the caller passes because the registry knows nothing about them.
+ */
+export function adapterFor(family: string, endpoints: OwnEndpoint[] = []): FamilyAdapter {
+  const endpointId = endpointIdOf(family);
+  if (endpointId !== null) {
+    const found = endpoints.find((e) => e.id === endpointId);
+    return found ? endpointAdapter(found) : missingEndpointAdapter(family);
+  }
   const found = availableFamilies().find((a) => a.family === family);
   return found ?? offlineAdapter();
 }

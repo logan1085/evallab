@@ -57,6 +57,19 @@ export class ApiError extends Error {
   }
 }
 
+/** A company's own endpoint as the Room sees it: never the key, only its hint. */
+export interface EndpointView {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  keyHint: string;
+  hasKey: boolean;
+  createdAt: string;
+  /** Names of the seats currently running on it. */
+  seats: string[];
+}
+
 async function call<T>(path: string, init: RequestInit & { token?: string } = {}): Promise<T> {
   const { token, ...rest } = init;
   const headers: Record<string, string> = { ...(rest.headers as Record<string, string>) };
@@ -377,8 +390,21 @@ export const api = {
     slug: string,
     token: string,
     seatId: string,
-    body: { name?: string; objective?: string; failsFor?: string; note?: string },
+    body: { name?: string; objective?: string; failsFor?: string; endpointId?: string | null; note?: string },
   ) => call<{ seat: Grader }>(`/projects/${slug}/panel/seats/${seatId}`, { method: 'PATCH', token, body: json(body) }),
+
+  /* The company's own endpoints: registered per project, never returning the key. */
+  endpoints: (slug: string, token: string) =>
+    call<{ endpoints: EndpointView[]; secrets: 'env' | 'dev-default' }>(`/projects/${slug}/endpoints`, { token }),
+  addEndpoint: (slug: string, token: string, body: { name: string; base_url: string; model: string; api_key?: string }) =>
+    call<{ endpoint: EndpointView }>(`/projects/${slug}/endpoints`, { method: 'POST', token, body: json(body) }),
+  checkEndpoint: (slug: string, token: string, endpointId: string) =>
+    call<{ ok: boolean; model?: string; latency_ms?: number; reply?: string; error?: string }>(
+      `/projects/${slug}/endpoints/${endpointId}/check`,
+      { method: 'POST', token },
+    ),
+  deleteEndpoint: (slug: string, token: string, endpointId: string) =>
+    call<void>(`/projects/${slug}/endpoints/${endpointId}`, { method: 'DELETE', token }),
 
   deleteSeat: (slug: string, token: string, seatId: string) =>
     call<void>(`/projects/${slug}/panel/seats/${seatId}`, { method: 'DELETE', token }),

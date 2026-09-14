@@ -95,6 +95,25 @@ curl -s -X POST ${v1}/projects/$SLUG/panel -H "Authorization: Bearer $TOKEN"
 curl -s ${v1}/projects/$SLUG/panel/archetypes -H "Authorization: Bearer $TOKEN"
 \`\`\`
 
+#### Your own model in a seat
+
+Any OpenAI-compatible chat endpoint (a fine-tune behind vLLM, an internal
+gateway, a vendor API) can take a seat. Register it once per project, check
+that it answers, then move a seat onto it. The key is sealed at rest under
+GR_SECRET and never returned; responses carry its last four characters.
+Calls to it go through the same gateway as every other seat: recorded,
+metered, and pinned into the round.
+
+\`\`\`bash
+curl -s -X POST ${v1}/projects/$SLUG/endpoints -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"name":"our fine-tune","base_url":"https://llm.example.com/v1","model":"acme-support-7b","api_key":"…"}'
+curl -s -X POST ${v1}/projects/$SLUG/endpoints/$EID/check -H "Authorization: Bearer $TOKEN"   # one real call
+curl -s -X PATCH ${v1}/projects/$SLUG/panel/seats/$SEAT -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"endpointId":"'$EID'"}'                           # null moves it back
+curl -s ${v1}/projects/$SLUG/endpoints -H "Authorization: Bearer $TOKEN"
+\`\`\`
+
 ### 5. Run a blind round
 
 Create the round, then run each seat. Every seat grades every case blind;

@@ -16,14 +16,16 @@ import type { DB } from './db.js';
 import { newId, newSlug, newToken, resolveConnection } from './db.js';
 import { PIN_OVERRIDES, validatePins } from './pins.js';
 import { writerCheck } from './openrouter.js';
-import type { GatewayOptions } from './gateway.js';
+import { callModel, type GatewayOptions } from './gateway.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
 import { parseImport } from './import.js';
 import { JudgeError, mapLimit, resolveProvider } from './judge.js';
 import { DrafterError, resolveDrafter } from './drafter.js';
 import { offlineScenarist, resolveScenarist } from './scenarist.js';
-import { adapterFor, availableFamilies, offlineAdapter, offlinePanelWriter, resolvePanelWriter } from './panelists.js';
+import { adapterFor, availableFamilies, endpointFamily, endpointIdOf, offlineAdapter, offlinePanelWriter, resolvePanelWriter } from './panelists.js';
+import { keyHint, openSecret, sealSecret, secretsSource, SealError } from './secrets.js';
+import type { OwnEndpoint } from './gateway.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
 import { buildTrainingExport, toJsonl, type TrainingRound } from './training.js';
 import { buildZip } from './zip.js';
@@ -107,6 +109,8 @@ export interface AppOptions {
   writerGateway?: GatewayOptions;
   /** fetch used for the pin list check; tests inject a stand-in. */
   pinFetch?: typeof fetch;
+  /** Gateway options for calls to a company's own endpoints; tests inject a transport. */
+  endpointGateway?: GatewayOptions;
 }
 
 export function createApp(db: DB, appOpts: AppOptions = {}) {
@@ -183,6 +187,9 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         ok,
         deploy,
         judge: resolveProvider().id,
+        // Where a company's own endpoint keys are sealed. 'dev-default' means
+        // GR_SECRET is unset and the fixed development phrase is in use.
+        secrets: secretsSource(),
         ...(pins ? { pins: { ...pins, overrides: PIN_OVERRIDES } } : {}),
         ...(writer ? { writer } : {}),
         database: conn.url
@@ -211,6 +218,33 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     recorder: (attempt: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, attempt),
     guard: createSpendGuard(db),
   });
+
+  /**
+   * The project's own endpoints with their keys opened, for the length of
+   * one request. A key that will not open under this GR_SECRET is reported
+   * where the seat is used, not swallowed into a silent auth failure.
+   */
+  async function ownEndpoints(projectId: string): Promise<OwnEndpoint[]> {
+    const out: OwnEndpoint[] = [];
+    for (const e of await store.listEndpoints(db, projectId)) {
+      const sealed = await store.endpointSealedKey(db, e.id);
+      let apiKey: string | null = null;
+      if (sealed) {
+        try {
+          apiKey = openSecret(sealed);
+        } catch (err) {
+          if (!(err instanceof SealError)) throw err;
+          apiKey = null;
+        }
+      }
+      out.push({ id: e.id, name: e.name, base_url: e.baseUrl, model: e.model, api_key: apiKey });
+    }
+    return out;
+  }
+
+  /** Gateway options for a seat: a company's own endpoint gets the injected transport, if any. */
+  const gatewayFor = (family: string, base: GatewayOptions): GatewayOptions =>
+    endpointIdOf(family) !== null ? { ...base, ...(appOpts.endpointGateway ?? {}) } : base;
 
   /** One pin validation per instance, reused by every later health check. */
   let pinCheck: Promise<Awaited<ReturnType<typeof validatePins>>> | null = null;
@@ -917,6 +951,8 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         name: z.string().min(1).max(80).optional(),
         objective: z.string().min(1).max(300).optional(),
         failsFor: z.string().min(1).max(300).optional(),
+        /** An endpoint id moves the seat onto the company's own model; null moves it back to the registry. */
+        endpointId: z.string().min(1).nullable().optional(),
         note: z.string().max(300).default(''),
       })
       .safeParse(req.body);
@@ -926,14 +962,27 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     if (!before || before.projectId !== project.id || before.kind !== 'panelist') {
       return res.status(404).json({ error: 'No such seat.' });
     }
-    const seat = await store.updateSeat(db, project.id, req.params.seatId!, body.data);
+    const { endpointId, note, ...fields } = body.data;
+    let placement: { family: string; model: string } | null = null;
+    if (endpointId) {
+      const endpoint = await store.getEndpoint(db, endpointId);
+      if (!endpoint || endpoint.projectId !== project.id) return res.status(404).json({ error: 'No such endpoint on this project.' });
+      placement = { family: endpointFamily(endpoint.id), model: endpoint.model };
+    } else if (endpointId === null && endpointIdOf(before.family) !== null) {
+      // Back to the registry: the family this seat would have drawn by position.
+      const fams = availableFamilies();
+      const others = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist' && g.id !== before.id);
+      const fam = fams[others.length % fams.length]!;
+      placement = { family: fam.family, model: fam.model };
+    }
+    const seat = await store.updateSeat(db, project.id, req.params.seatId!, { ...fields, ...(placement ?? {}) });
     await store.recordPanelEdit(db, {
       projectId: project.id,
       seatName: before.name,
       action: 'rewrite',
-      before: `${before.name}: ${before.objective} / ${before.failsFor}`,
-      after: `${seat!.name}: ${seat!.objective} / ${seat!.failsFor}`,
-      note: body.data.note,
+      before: `${before.name}: ${before.objective} / ${before.failsFor}${placement ? ` [${before.model}]` : ''}`,
+      after: `${seat!.name}: ${seat!.objective} / ${seat!.failsFor}${placement ? ` [${seat!.model}]` : ''}`,
+      note,
     });
     res.json({ seat });
   });
@@ -955,6 +1004,111 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     res.status(204).end();
   });
 
+  /* ---- Bring your own endpoint ------------------------------------------ */
+
+  /**
+   * A company's own model as a seat: any OpenAI-compatible chat endpoint,
+   * registered per project. The key is sealed at rest and never returned;
+   * the response carries its last four characters so a person can tell
+   * which key they stored. Seats move onto an endpoint through PATCH
+   * /panel/seats/:id with endpointId.
+   */
+  api.get('/projects/:slug/endpoints', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    const endpoints = (await store.listEndpoints(db, project.id)).map((e) => ({
+      ...e,
+      seats: seats.filter((s) => endpointIdOf(s.family) === e.id).map((s) => s.name),
+    }));
+    res.json({ endpoints, secrets: secretsSource() });
+  });
+
+  api.post('/projects/:slug/endpoints', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z
+      .object({
+        name: z.string().trim().min(1).max(60),
+        base_url: z.string().trim().url().max(500),
+        model: z.string().trim().min(1).max(200),
+        api_key: z.string().max(4000).optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) {
+      return res.status(400).json({ error: 'An endpoint needs a name, a base_url (the API root, https://host/v1), a model, and optionally an api_key.' });
+    }
+    const url = new URL(body.data.base_url);
+    if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+      return res.status(400).json({ error: 'The endpoint must be https, unless it is localhost.' });
+    }
+    if ((await store.listEndpoints(db, project.id)).some((e) => e.name.toLowerCase() === body.data.name.toLowerCase())) {
+      return res.status(409).json({ error: `An endpoint named "${body.data.name}" already exists on this project.` });
+    }
+    const key = body.data.api_key?.trim() ?? '';
+    const endpoint = await store.createEndpoint(db, {
+      projectId: project.id,
+      name: body.data.name,
+      baseUrl: body.data.base_url.replace(/\/+$/, ''),
+      model: body.data.model,
+      keySealed: key ? sealSecret(key) : '',
+      keyHint: key ? keyHint(key) : '',
+    });
+    res.status(201).json({ endpoint: { ...endpoint, seats: [] }, secrets: secretsSource() });
+  });
+
+  /**
+   * One real call, so "registered" and "answers" are not confused: a tiny
+   * prompt with a JSON reply, through the same gateway a seat would use.
+   */
+  api.post('/projects/:slug/endpoints/:endpointId/check', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const endpoint = (await ownEndpoints(project.id)).find((e) => e.id === req.params.endpointId);
+    if (!endpoint) return res.status(404).json({ error: 'No such endpoint on this project.' });
+    const sealed = await store.endpointSealedKey(db, endpoint.id);
+    if (sealed && endpoint.api_key === null) {
+      return res.status(409).json({ ok: false, error: 'The stored key does not open under this GR_SECRET. Add the endpoint again with its key.' });
+    }
+    const result = await callModel(
+      {
+        pin_id: `byo:${endpoint.id}`,
+        endpoint,
+        messages: [
+          { role: 'system', content: 'Reply with JSON only.' },
+          { role: 'user', content: 'Reply with {"ok": true}.' },
+        ],
+        max_tokens: 40,
+        response_format: { type: 'json_schema', json_schema: { name: 'ok', strict: true, schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false } } },
+        caller: { kind: 'grader' },
+      },
+      { ...meter(), timeoutMs: 20_000, ...(appOpts.endpointGateway ?? {}) },
+    );
+    if (result.error) return res.status(502).json({ ok: false, error: result.error.message, latency_ms: result.latency_ms });
+    let parsed = false;
+    try {
+      parsed = (JSON.parse(result.text) as { ok?: unknown }).ok === true;
+    } catch {
+      parsed = false;
+    }
+    res.json({
+      ok: parsed,
+      model: endpoint.model,
+      latency_ms: result.latency_ms,
+      reply: result.text.slice(0, 200),
+      ...(parsed ? {} : { error: 'The endpoint answered, but not with the JSON asked for. Seats need JSON replies; check that the model follows a response format.' }),
+    });
+  });
+
+  api.delete('/projects/:slug/endpoints/:endpointId', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const endpoint = await store.getEndpoint(db, req.params.endpointId!);
+    if (!endpoint || endpoint.projectId !== project.id) return res.status(404).json({ error: 'No such endpoint on this project.' });
+    const using = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist' && endpointIdOf(g.family) === endpoint.id);
+    if (using.length > 0) {
+      return res.status(409).json({ error: `${using.map((s) => s.name).join(', ')} still run${using.length === 1 ? 's' : ''} on this endpoint. Move the seat first.` });
+    }
+    await store.deleteEndpoint(db, project.id, endpoint.id);
+    res.status(204).end();
+  });
+
   /**
    * A panel round: every seat grades every case, blind. Cases are capped at 30
    * and all count; there is no held-out arm here, because the owner's ten
@@ -970,8 +1124,17 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     // which is the thing family diversity exists to prevent. Zero real
     // families is the labeled simulation and allowed; one or two is blocked
     // loudly rather than papered over.
-    const realFamilies = new Set(availableFamilies().filter((f) => f.real).map((f) => f.family));
-    if (realFamilies.size > 0 && realFamilies.size < 3) {
+    // A company's own endpoint is a real family of its own: their fine-tune
+    // is not the router's model wearing a different name.
+    const endpoints = await ownEndpoints(project.id);
+    const registryReal = availableFamilies().filter((f) => f.real).map((f) => f.family);
+    const realFamilies = new Set([
+      ...registryReal,
+      ...seats.map((s) => s.family).filter((f) => endpointIdOf(f) !== null && endpoints.some((e) => e.id === endpointIdOf(f))),
+    ]);
+    // The labeled simulation plus the company's own model is allowed: it is
+    // how a team sees their model against the loop before spending a key.
+    if (registryReal.length > 0 && realFamilies.size < 3) {
       return res.status(409).json({
         error: `Only ${realFamilies.size} real model famil${realFamilies.size === 1 ? 'y is' : 'ies are'} reachable (${[...realFamilies].join(', ')}). The panel needs three disjoint families; add OPENROUTER_API_KEY for all three through one key, or run with no keys for the labeled simulation.`,
       });
@@ -997,7 +1160,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     await store.setRoundPinnedModels(
       db,
       round.id,
-      Object.fromEntries(seats.map((s) => [s.name, `${s.family}:${adapterFor(s.family).model}`])),
+      Object.fromEntries(seats.map((s) => [s.name, `${s.family}:${adapterFor(s.family, endpoints).model}`])),
     );
     res.status(201).json({ round, seats: seats.map((s) => ({ id: s.id, name: s.name })), cases: traces.length });
   });
@@ -1021,19 +1184,19 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
 
     const rubric = await store.getRubric(db, round.rubricVersionId);
     const rubricMarkdown = rubric ? renderRubricMarkdown(rubric) : '';
-    const adapter = adapterFor(seat.family);
+    const adapter = adapterFor(seat.family, await ownEndpoints(round.projectId));
     const items = await store.listItems(db, round.id);
 
     // The gateway context for this seat: telemetry, the spend guard, and the
     // user's own key when they sent one. The key lives in this request and
     // nowhere else.
     const byok = req.header('x-openrouter-key');
-    const gateway = {
+    const gateway = gatewayFor(seat.family, {
       ...(byok ? { apiKey: byok } : {}),
       recorder: (a: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, a),
       guard: createSpendGuard(db),
       roundId: round.id,
-    };
+    });
 
     // Case order shuffled per seat (position bias): a cheap deterministic
     // shuffle keyed on the seat id.
@@ -1177,12 +1340,13 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     for (const g of grades) if (seatById.has(g.graderId)) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
 
     const byok = req.header('x-openrouter-key');
-    const gateway = {
+    const baseGateway = {
       ...(byok ? { apiKey: byok } : {}),
       recorder: (a: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, a),
       guard: createSpendGuard(db),
       roundId: round.id,
     };
+    const endpoints = await ownEndpoints(round.projectId);
 
     // Only the cases the panel did not settle under the first phrasing.
     const contested = items.filter((item) => {
@@ -1199,7 +1363,8 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       const seatGrades = byItem.get(item.id) ?? [];
       await mapLimit(seatGrades, 6, async (first) => {
         const seat = seatById.get(first.graderId)!;
-        const adapter = adapterFor(seat.family);
+        const adapter = adapterFor(seat.family, endpoints);
+        const gateway = gatewayFor(seat.family, baseGateway);
         if (adapter.real) simulated = false;
         const answers: { variant: number; verdict: string; note: string }[] = [{ variant: 0, verdict: first.verdict, note: first.note }];
         await store.recordGradeVariant(db, { itemId: item.id, graderId: seat.id, variant: 0, verdict: first.verdict, note: first.note });
@@ -1332,7 +1497,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         alpha: krippendorffAlpha(units, categories, 'nominal'),
         ac1: gwetAC1(units, categories),
       },
-      simulated: !availableFamilies().some((f) => f.real),
+      simulated: !availableFamilies().some((f) => f.real) && !seats.some((s) => endpointIdOf(s.family) !== null),
     });
   });
 
@@ -1920,7 +2085,8 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       calibration: traces.map((t) => t.id),
       heldout: [],
     });
-    await store.setRoundPinnedModels(db, round.id, Object.fromEntries(seats.map((s) => [s.name, `${s.family}:${adapterFor(s.family).model}`])));
+    const endpoints = await ownEndpoints(project.id);
+    await store.setRoundPinnedModels(db, round.id, Object.fromEntries(seats.map((s) => [s.name, `${s.family}:${adapterFor(s.family, endpoints).model}`])));
     const run = await store.createRun(db, { id: runId, projectId: project.id, roundId: round.id, rubricVersionId: rubric.id, name, gate: body.data.gate ?? {} });
     res.status(201).json({
       run: { id: run.id, name: run.name, roundId: round.id, standards_version: rubric.version, gate: run.gate, cases: traces.length },

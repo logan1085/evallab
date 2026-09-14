@@ -18,8 +18,26 @@ import { PinError, resolvePin, type Pin } from './pins.js';
 
 export type CallerKind = 'creator' | 'grader' | 'clusterer';
 
+/**
+ * A company's own OpenAI-compatible endpoint standing in for a registry pin.
+ * The call still goes through callModel: same recorder, same spend guard,
+ * same typed errors, same one log line. Only the URL and the key differ.
+ */
+export interface OwnEndpoint {
+  id: string;
+  name: string;
+  /** The API root, e.g. https://llm.example.com/v1; /chat/completions is appended. */
+  base_url: string;
+  model: string;
+  /** Sent as a bearer token when present; some internal endpoints need none. */
+  api_key: string | null;
+}
+
 export interface ModelCallRequest {
+  /** A registry pin id, or `byo:<endpoint id>` when `endpoint` is set. */
   pin_id: string;
+  /** When set, the request goes to this endpoint instead of the router. */
+  endpoint?: OwnEndpoint;
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
   max_tokens?: number;
   temperature?: number;
@@ -79,8 +97,12 @@ export interface ModelCallAttempt {
 }
 
 export interface GatewayTransport {
-  /** POSTs one request body; returns status and parsed JSON. The only place a key is used. */
-  post(body: object, apiKey: string): Promise<{ status: number; json: unknown }>;
+  /**
+   * POSTs one request body; returns status and parsed JSON. The only place a
+   * key is used. `url` is the router's chat completions URL unless the call
+   * carries an endpoint of its own; an empty key sends no authorization.
+   */
+  post(body: object, apiKey: string, url?: string): Promise<{ status: number; json: unknown }>;
 }
 
 export interface SpendGuard {
@@ -301,16 +323,32 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
   const callId = newCallId();
 
   let pin: Pin;
-  try {
-    pin = resolvePin(req.pin_id);
-  } catch (err) {
-    if (err instanceof PinError) return errorResult(req, null, callId, err.kind, err.message);
-    throw err;
-  }
-  if (pin.status === 'deprecated') {
-    // Policy: a deprecated pin freezes the form. Substitution would make every
-    // historical comparison on this pin worthless.
-    return errorResult(req, pin, callId, 'model_deprecated', `Pin ${pin.pin_id} is deprecated. Choose a live pin; nothing is substituted silently.`);
+  const own = req.endpoint ?? null;
+  if (own) {
+    // A synthetic pin, so every downstream row and log line reads the same
+    // way for a company's own model as for a registry one. The family is
+    // the endpoint's name: nothing else on the panel shares it.
+    pin = {
+      pin_id: `byo:${own.id}`,
+      family: `endpoint:${own.id}`,
+      openrouter_model_id: own.model,
+      provider_slug: null,
+      tier: 'mid',
+      status: 'live',
+      cost_hint: 0,
+    };
+  } else {
+    try {
+      pin = resolvePin(req.pin_id);
+    } catch (err) {
+      if (err instanceof PinError) return errorResult(req, null, callId, err.kind, err.message);
+      throw err;
+    }
+    if (pin.status === 'deprecated') {
+      // Policy: a deprecated pin freezes the form. Substitution would make every
+      // historical comparison on this pin worthless.
+      return errorResult(req, pin, callId, 'model_deprecated', `Pin ${pin.pin_id} is deprecated. Choose a live pin; nothing is substituted silently.`);
+    }
   }
 
   if (opts.guard) {
@@ -318,8 +356,10 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
     if (refusal) return errorResult(req, pin, callId, refusal.kind, refusal.message);
   }
 
-  const apiKey = opts.apiKey ?? process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return errorResult(req, pin, callId, 'auth', 'No OpenRouter key on this request and none in the environment.');
+  const apiKey = own ? (own.api_key ?? '') : (opts.apiKey ?? process.env.OPENROUTER_API_KEY);
+  if (apiKey === undefined) return errorResult(req, pin, callId, 'auth', 'No OpenRouter key on this request and none in the environment.');
+  const url = own ? `${own.base_url.replace(/\/+$/, '')}/chat/completions` : undefined;
+  const where = own ? `${own.name} (${own.model})` : pin.openrouter_model_id;
 
   const transport = opts.transport ?? httpTransport(opts.timeoutMs);
   const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
@@ -360,7 +400,7 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
     let json: unknown = null;
     let failed: string | null = null;
     try {
-      const res = await transport.post(body, apiKey);
+      const res = await transport.post(body, apiKey, url);
       status = res.status;
       json = res.json;
     } catch (err) {
@@ -396,7 +436,10 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
         upstream_inference_cost: null, generation_id: null,
         latency_ms: latency, http_status: status, error_kind: 'auth',
       });
-      return { ...errorResult(req, pin, callId, 'auth', 'The OpenRouter key was rejected.'), latency_ms: latency };
+      return {
+        ...errorResult(req, pin, callId, 'auth', own ? `${own.name} rejected the key it was given (${status}).` : 'The OpenRouter key was rejected.'),
+        latency_ms: latency,
+      };
     }
     if (status !== 200) {
       await record({
@@ -415,7 +458,10 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
       // router says the model does not support the format, never when it says
       // our schema is malformed, because masking that is how the last outage
       // stayed invisible for a week.
-      if (!degradedFormat && !schemaUnsupported && usesJsonSchema(req) && saysFormatUnsupported(detail)) {
+      // An endpoint of the company's own speaks whatever dialect its server
+      // speaks, so its first 400 on a schema request is taken as "no
+      // json_schema here" and the plain JSON form is tried once.
+      if (!degradedFormat && !schemaUnsupported && usesJsonSchema(req) && (saysFormatUnsupported(detail) || own !== null)) {
         degradedFormat = true;
         NO_SCHEMA_SUPPORT.add(pin.openrouter_model_id);
         body = buildRequestBody(pin, { ...req, response_format: { type: 'json_object' } });
@@ -429,7 +475,7 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
           pin,
           callId,
           status === 404 ? 'model_deprecated' : 'provider_error',
-          `The router returned ${status} for ${pin.openrouter_model_id}${detail ? `: ${detail}` : '.'}`,
+          `${own ? own.name : 'The router'} returned ${status} for ${where}${detail ? `: ${detail}` : '.'}`,
         ),
         latency_ms: latency,
       };
@@ -503,7 +549,7 @@ const LOG_CALLS = process.env.GR_LOG_MODEL_CALLS === '1';
 
 function httpTransport(timeoutMs = REQUEST_TIMEOUT_MS): GatewayTransport {
   return {
-    async post(body, apiKey) {
+    async post(body, apiKey, url = 'https://openrouter.ai/api/v1/chat/completions') {
       const started = Date.now();
       const sent = body as { model?: string; max_tokens?: number };
       if (LOG_CALLS) {
@@ -513,11 +559,11 @@ function httpTransport(timeoutMs = REQUEST_TIMEOUT_MS): GatewayTransport {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        const res = await fetch(url, {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: `Bearer ${apiKey}`,
+            ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
             'x-title': 'The Grading Room',
           },
           body: JSON.stringify(body),
