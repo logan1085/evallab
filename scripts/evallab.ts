@@ -129,7 +129,7 @@ async function main() {
   if (!args.json) console.error(`  ✓ stability: ${stability.body.checked} contested cases rechecked, ${stability.body.unstable} unstable votes`);
 
   const report = await api<{
-    summary: { cases: number; pass_rate: number | null; splits: number; new_splits: number; unstable_votes: number; expected_match: { compared: number; agreed: number; rate: number } | null };
+    summary: { cases: number; pass_rate: number | null; splits: number; new_splits: number; unstable_votes: number; expected_match: { supplied: number; compared: number; agreed: number; rate: number | null } | null };
     gate: { passed: boolean; reasons: string[]; spec: Record<string, number> };
     diff: { against: string; compared: number; flipped: { title: string; from: string | null; to: string | null }[] } | null;
     cases: { title: string; verdict: string | null; pattern: string; dissenter: string | null; expected: string | null; matches_expected: boolean | null }[];
@@ -147,7 +147,7 @@ async function main() {
     console.log('');
     console.log(`${run.name} · Standards v${run.standards_version}`);
     console.log(`cases ${s.cases} · pass rate ${s.pass_rate === null ? 'n/a' : `${(s.pass_rate * 100).toFixed(0)}%`} · splits ${s.splits} · new splits ${s.new_splits} · unstable votes ${s.unstable_votes}`);
-    if (s.expected_match) console.log(`expected: agreed on ${s.expected_match.agreed} of ${s.expected_match.compared} (${(s.expected_match.rate * 100).toFixed(0)}%)`);
+    if (s.expected_match) console.log(`expected: agreed on ${s.expected_match.agreed} of ${s.expected_match.compared} compared (${s.expected_match.supplied} supplied${s.expected_match.rate === null ? "" : `, ${(s.expected_match.rate * 100).toFixed(0)}%`})`);
     if (rep.diff) {
       console.log(`vs ${rep.diff.against}: ${rep.diff.compared} cases compared, ${rep.diff.flipped.length} flipped`);
       for (const f of rep.diff.flipped) console.log(`  ${f.title}: ${f.from ?? '–'} → ${f.to ?? '–'}`);

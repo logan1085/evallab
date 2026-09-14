@@ -97,7 +97,8 @@ describe('POST /projects/:slug/runs and GET /runs/:id', () => {
     expect(rep.run.standards_version).toBe(1);
     expect(rep.cases.map((c: { title: string }) => c.title)).toEqual(cases.map((c) => c.title));
     expect(rep.summary.cases).toBe(4);
-    expect(rep.summary.expected_match.compared).toBe(2);
+    expect(rep.summary.expected_match.supplied).toBe(2);
+    expect(rep.summary.expected_match.compared).toBeLessThanOrEqual(2);
     for (const c of rep.cases) {
       expect(c.votes.length).toBeGreaterThanOrEqual(3);
       expect(['settled', 'persona-driven', 'contested', 'blind-spot', 'ungraded']).toContain(c.pattern);

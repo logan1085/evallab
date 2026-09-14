@@ -1998,8 +1998,14 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     const isSplit = (p: string) => p === 'persona-driven' || p === 'contested';
     const splits = cases.filter((c) => isSplit(c.pattern)).length;
     const unstable = cases.reduce((n, c) => n + c.votes.filter((v) => !v.stable).length, 0);
+    const supplied = cases.filter((c) => c.expected !== null);
     const compared = cases.filter((c) => c.matches_expected !== null);
-    const expectedMatch = compared.length === 0 ? null : { compared: compared.length, agreed: compared.filter((c) => c.matches_expected).length, rate: compared.filter((c) => c.matches_expected).length / compared.length };
+    // A supplied expectation on a case the ensemble could not decide is
+    // reported as supplied and not compared, never as a miss.
+    const expectedMatch =
+      supplied.length === 0
+        ? null
+        : { supplied: supplied.length, compared: compared.length, agreed: compared.filter((c) => c.matches_expected).length, rate: compared.length === 0 ? null : compared.filter((c) => c.matches_expected).length / compared.length };
 
     // The previous finished run of the same standard, matched by title.
     const previous = (await store.listRuns(db, round.projectId))
