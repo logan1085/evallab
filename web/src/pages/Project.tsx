@@ -87,6 +87,10 @@ export function ProjectPage() {
 
       <RunSection slug={slug!} token={token} seats={seats} caseCount={caseCount} rounds={data.rounds} onError={setError} />
 
+      {data.rounds.some((r) => r.status === 'closed') ? (
+        <DataSection slug={slug!} token={token} />
+      ) : null}
+
       <details className="deep">
         <summary>Your documents: the rules you already have written down</summary>
         <OperationsTab slug={slug!} token={token} onError={setError} />
@@ -427,6 +431,71 @@ function RunSection({
         </div>
       ) : null}
     </>
+  );
+}
+
+/* ---- Your data ------------------------------------------------------------ */
+
+/**
+ * Section 5: the company's judgment as rows. Three files, one provenance:
+ * every row names its case, its judge, its model id, and the version of the
+ * standard it was scored under. Counts come from the same builder that
+ * writes the files, so the numbers on screen are the numbers in the file.
+ */
+function DataSection({ slug, token }: { slug: string; token: string }) {
+  const { data, loading } = useAsync(() => api.training(slug, token), [slug, token]);
+  const href = (format: 'examples' | 'gold' | 'rewards') => api.trainingUrl(slug, token, format);
+  const c = data?.counts;
+  return (
+    <div className="panel">
+      <div className="sec-title">
+        <span className="no">5</span>
+        <h2>Your data</h2>
+      </div>
+      <p className="sec-sub" style={{ margin: '2px 0 0' }}>
+        The judgment this room has produced, as rows a model can learn from. Every row carries its case, its judge, the
+        model that judged, and the version of the standard it was scored under.
+      </p>
+      {loading && !data ? (
+        <Loading what="data" />
+      ) : c ? (
+        <div className="scroll-x" style={{ marginTop: 12 }}>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">File</th>
+                <th scope="col">Rows</th>
+                <th scope="col">What it is</th>
+                <th scope="col" />
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="mono">examples.jsonl</td>
+                <td className="mono">{c.examples}</td>
+                <td>Settled cases with the panel's verdict and rationale, chat-shaped. Cases the owner overruled are left out ({c.excluded_false_settles} excluded).</td>
+                <td><a className="btn ghost tiny-btn" href={href('examples')}>download</a></td>
+              </tr>
+              <tr>
+                <td className="mono">gold.jsonl</td>
+                <td className="mono">{c.gold}</td>
+                <td>Your own adjudications, with the panel's verdict beside each one.</td>
+                <td><a className="btn ghost tiny-btn" href={href('gold')}>download</a></td>
+              </tr>
+              <tr>
+                <td className="mono">rewards.jsonl</td>
+                <td className="mono">{c.rewards}</td>
+                <td>One row per judge per case, the verdict as a score on your standard's scale, for training a reward model against your standard rather than a generic one.</td>
+                <td><a className="btn ghost tiny-btn" href={href('rewards')}>download</a></td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="tiny" style={{ marginTop: 10 }}>
+            From {c.rounds} finished round{c.rounds === 1 ? '' : 's'} and {c.cases} graded case{c.cases === 1 ? '' : 's'}. Grade more of your ten and the gold file grows; run another round and the examples do.
+          </p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

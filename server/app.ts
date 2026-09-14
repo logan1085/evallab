@@ -25,6 +25,7 @@ import { DrafterError, resolveDrafter } from './drafter.js';
 import { offlineScenarist, resolveScenarist } from './scenarist.js';
 import { adapterFor, availableFamilies, offlineAdapter, offlinePanelWriter, resolvePanelWriter } from './panelists.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
+import { buildTrainingExport, toJsonl, type TrainingRound } from './training.js';
 import { createSpendGuard } from './spend.js';
 import {
   ABSTAIN,
@@ -1770,6 +1771,43 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * The export bundle: files, not a dashboard. Rubric, golden set, judge
    * prompt, panel config with its edit provenance, and a re-run script.
    */
+  /**
+   * Training data with provenance: the company's judgment as rows. Examples
+   * are settled cases the owner did not overrule, gold is the owner's own
+   * adjudications, rewards are every judge's verdict as a score on the
+   * standard's scale. Built from every finished round of the project.
+   */
+  api.get('/projects/:slug/training', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const format = typeof req.query.format === 'string' ? req.query.format : 'json';
+    if (!['json', 'examples', 'gold', 'rewards'].includes(format)) {
+      return res.status(400).json({ error: 'format must be one of json, examples, gold, rewards.' });
+    }
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    const traces = new Map((await store.listTraces(db, project.id)).map((t) => [t.id, t]));
+    const rounds: TrainingRound[] = [];
+    for (const round of (await store.listRounds(db, project.id)).filter((r) => r.status === 'closed')) {
+      const rubric = await store.getRubric(db, round.rubricVersionId);
+      if (!rubric) continue;
+      rounds.push({
+        id: round.id,
+        name: round.name || `Round ${round.index}`,
+        rubric,
+        items: await store.listItems(db, round.id),
+        grades: await store.allGradesForRound(db, round.id),
+        userVerdicts: await store.listUserVerdicts(db, round.id),
+        pinnedModels: await store.getRoundPinnedModels(db, round.id),
+      });
+    }
+    const out = buildTrainingExport({ projectName: project.name, seats, traces, rounds });
+    if (format === 'json') return res.json(out);
+    const rows = format === 'examples' ? out.examples : format === 'gold' ? out.gold : out.rewards;
+    res
+      .type('application/x-ndjson')
+      .set('content-disposition', `attachment; filename="${project.slug}-${format}.jsonl"`)
+      .send(toJsonl(rows));
+  });
+
   api.get('/rounds/:roundId/bundle', requireRound, async (req, res) => {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') return res.status(409).json({ error: 'Export a finished round.' });
@@ -1854,7 +1892,29 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       hashes[name] = hash;
       await store.recordExport(db, round.id, name, hash);
     }
-    res.json({ ...payload, hashes });
+    // The manifest: what this eval is, which version of the standard it
+    // grades against, the mixture that graded it, and the hash of every file
+    // beside it. This is the file a runner reads first.
+    const manifest = {
+      name: project.name,
+      slug: project.slug,
+      standards_version: rubric?.version ?? null,
+      standards_id: rubric?.id ?? null,
+      round: { id: round.id, name: round.name || `Round ${round.index}` },
+      mixture: {
+        experts: seats.length,
+        families: [...new Set(seats.map((s) => s.family))].length,
+        prompts: 1,
+        samples: 1,
+        weights: Object.fromEntries(seats.map((s) => [s.name, s.weight])),
+      },
+      pins: pinnedModels,
+      files: hashes,
+      exported_at: new Date().toISOString(),
+    };
+    const manifestJson = JSON.stringify(manifest, null, 2);
+    hashes['eval.json'] = createHash('sha256').update(manifestJson).digest('hex');
+    res.json({ ...payload, manifest, manifestJson, hashes });
   });
 
   /**

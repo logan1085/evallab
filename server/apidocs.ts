@@ -156,8 +156,30 @@ curl -s ${v1}/rounds/$RID/compare/$OTHER_RID -H "Authorization: Bearer $TOKEN"
 \`\`\`
 
 The bundle ships rubric.md, the golden set, the judge prompt, panel.json
-with edit provenance, a rerun script, round cost, and a SHA-256 hash per
-artifact. Bundles without a pinned model map are refused rather than shipped.
+with edit provenance, a rerun script, round cost, eval.json (the manifest:
+standard version, the mixture that graded, pinned models, and a hash of
+every file), and a SHA-256 hash per artifact. Bundles without a pinned model
+map are refused rather than shipped.
+
+### 10. Training data
+
+The project's judgment as rows, with provenance on every one: the case, the
+judge, the model id, and the version of the standard it was scored under.
+Built from every finished round.
+
+\`\`\`bash
+curl -s ${v1}/projects/$SLUG/training -H "Authorization: Bearer $TOKEN"           # counts + all three sets
+curl -s "${v1}/projects/$SLUG/training?format=examples" -H "Authorization: Bearer $TOKEN" > examples.jsonl
+curl -s "${v1}/projects/$SLUG/training?format=gold"     -H "Authorization: Bearer $TOKEN" > gold.jsonl
+curl -s "${v1}/projects/$SLUG/training?format=rewards"  -H "Authorization: Bearer $TOKEN" > rewards.jsonl
+\`\`\`
+
+- \`examples\`: settled cases with the panel's verdict and majority rationale,
+  chat-shaped (\`messages\`) for fine-tuning. Cases the owner overruled are
+  excluded; unsettled cases never appear.
+- \`gold\`: the owner's adjudications, with the panel's verdict beside each.
+- \`rewards\`: one row per judge per case, the verdict as a 0..1 score on the
+  standard's own scale, with the case's pattern attached for filtering.
 
 ## Health
 

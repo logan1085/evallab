@@ -470,6 +470,14 @@ export const api = {
   exportUrl: (rubricId: string, token: string, format: 'md' | 'json' | 'judge') =>
     `/api/rubrics/${rubricId}/export?format=${format}&k=${encodeURIComponent(token)}`,
 
+  training: (slug: string, token: string) =>
+    call<{
+      counts: { examples: number; gold: number; rewards: number; cases: number; rounds: number; excluded_false_settles: number; excluded_unsettled: number };
+    }>(`/projects/${slug}/training`, { token }),
+
+  trainingUrl: (slug: string, token: string, format: 'examples' | 'gold' | 'rewards') =>
+    `/api/v1/projects/${slug}/training?format=${format}&k=${encodeURIComponent(token)}`,
+
   joinGrader: (slug: string, token: string, name: string) =>
     call<{ grader: Grader }>(`/projects/${slug}/graders`, { method: 'POST', token, body: json({ name }) }),
 

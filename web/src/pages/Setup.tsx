@@ -155,7 +155,7 @@ export function SetupPage() {
   }
 
   const benchSeated = seats.length > 0 && revealed >= seats.length;
-  const working = phase === 'creating' || phase === 'seating' || phase === 'writing';
+  const working = phase === 'creating' || phase === 'seating';
   const STEPS: { id: Step; label: string }[] = [
     { id: 'creating', label: '1 Project' },
     { id: 'seating', label: '2 Panel' },
