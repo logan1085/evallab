@@ -30,7 +30,7 @@ const PATTERN_COPY: Record<PanelCaseView['pattern'], { label: string; hint: stri
   },
   ungraded: {
     label: 'Ungraded',
-    hint: 'Fewer than two seats returned a verdict on these. An absence is not agreement or disagreement; it counts as nothing.',
+    hint: 'Fewer than two verdicts held under paraphrase. An absence is not agreement or disagreement; it counts as nothing.',
   },
 };
 
