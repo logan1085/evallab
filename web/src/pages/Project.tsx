@@ -198,7 +198,14 @@ function PanelSection({
     );
   }
 
-  const simulatedPanel = seats.every((s) => s.family === 'offline' || s.model === 'simulated');
+  // Seats on the company's own endpoints are counted apart from registry
+  // seats: they are real by definition, and named by endpoint, not by family.
+  const ownSeats = seats.filter((s) => endpointOf(s.family));
+  const registrySeats = seats.filter((s) => !endpointOf(s.family));
+  const simulatedPanel = registrySeats.every((s) => s.family === 'offline' || s.model === 'simulated');
+  const registryFamilies = [...new Set(registrySeats.map((s) => s.family))];
+  const ownNames = [...new Set(ownSeats.map((s) => endpoints.find((e) => e.id === endpointOf(s.family))?.name ?? 'a removed endpoint'))];
+  const ownClause = ownSeats.length > 0 ? `${ownSeats.length} on your own model (${ownNames.join(', ')})` : '';
 
   return (
     <div className="panel">
@@ -213,10 +220,12 @@ function PanelSection({
       </p>
 
       <p className="tiny" style={{ margin: '10px 0 0' }}>
-        {simulatedPanel
+        {simulatedPanel && ownSeats.length === 0
           ? 'Every seat is simulated: no OPENROUTER_API_KEY is set, so this is the labeled simulation rather than judgment.'
-          : `${seats.length} seats across ${new Set(seats.map((s) => s.family)).size} model families: ${[...new Set(seats.map((s) => s.family))].join(', ')}. Different families is the point, because a panel that is one model six times agrees with itself for reasons that have nothing to do with your rubric.`}
-        {new Set(seats.map((s) => s.family)).size < 3 && !simulatedPanel
+          : simulatedPanel
+            ? `${registrySeats.length} simulated seats (no OPENROUTER_API_KEY is set) and ${ownClause}. The simulated seats show the loop; your model’s verdicts are real.`
+            : `${seats.length} seats across ${registryFamilies.length} model famil${registryFamilies.length === 1 ? 'y' : 'ies'}: ${registryFamilies.join(', ')}${ownClause ? `, plus ${ownClause}` : ''}. Different families is the point, because a panel that is one model six times agrees with itself for reasons that have nothing to do with your rubric.`}
+        {!simulatedPanel && registryFamilies.length + ownNames.length < 3
           ? ' Fewer than three disjoint families: the run will refuse until the spread is real.'
           : ''}
       </p>
