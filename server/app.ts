@@ -26,6 +26,7 @@ import { offlineScenarist, resolveScenarist } from './scenarist.js';
 import { adapterFor, availableFamilies, offlineAdapter, offlinePanelWriter, resolvePanelWriter } from './panelists.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
 import { buildTrainingExport, toJsonl, type TrainingRound } from './training.js';
+import { buildZip } from './zip.js';
 import { ensembleVerdict, evaluateGate } from '../shared/ensemble.js';
 import { createSpendGuard } from './spend.js';
 import {
@@ -2100,10 +2101,12 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       .send(toJsonl(rows));
   });
 
-  api.get('/rounds/:roundId/bundle', requireRound, async (req, res) => {
-    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
-    if (round.status !== 'closed') return res.status(409).json({ error: 'Export a finished round.' });
-    const project = (req as ProjectRequest).project;
+  /**
+   * The bundle as data. One builder serves the JSON form the Room reads,
+   * the zip the Standards page hands out, and the per-round zip, so the
+   * three can never drift. Returns an error string for the two refusals.
+   */
+  async function buildBundle(round: NonNullable<Awaited<ReturnType<typeof store.getRound>>>, project: Project) {
     const rubric = await store.getRubric(db, round.rubricVersionId);
     const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
     const seatIds = new Set(seats.map((s) => s.id));
@@ -2136,7 +2139,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     // mean nothing. Refused, not footnoted.
     const pinnedModels = await store.getRoundPinnedModels(db, round.id);
     if (Object.keys(pinnedModels).length === 0) {
-      return res.status(409).json({ error: 'This round has no pinned model map, so its bundle cannot be exported honestly.' });
+      return { error: 'This round has no pinned model map, so its bundle cannot be exported honestly.' } as const;
     }
     const cost = await store.costForRound(db, round.id);
     const perSeatCost = [];
@@ -2170,14 +2173,33 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       ].join('\n'),
     };
 
+    const readme = [
+      `# ${project.name}: eval package`,
+      '',
+      `Standards v${rubric?.version ?? '?'}, exported from ${round.name || `Round ${round.index}`}.`,
+      '',
+      'eval.json          the manifest: standard version, the mixture that graded, pinned models, and a SHA-256 hash of every file here',
+      'rubric.md          the standard as people read it',
+      'judge-prompt.txt   the standard as a judge model reads it',
+      'golden-set.jsonl   one settled case per line: input, expected verdict, and how settled it was',
+      'panel.json         the seats, their stakes, their pinned models, and every edit the owner made',
+      'round.json         what this round cost and its false-settle rate',
+      'rerun.sh           re-run this eval against a Grading Room deployment with the same panel and standard',
+      '',
+      'Run it from CI: npm run evallab -- run --project SLUG --token KEY --cases cases.jsonl --gate pass-rate:0.9,new-splits:0',
+      'Verify a file: sha256sum rubric.md, then compare with files["rubric.md"] in eval.json.',
+      '',
+    ].join('\n');
+
     const hashes: Record<string, string> = {};
     const artifacts: [string, string][] = [
       ['rubric.md', payload.rubricMarkdown],
       ['golden-set.jsonl', payload.goldenJsonl],
       ['judge-prompt.txt', payload.judgeSystemPrompt],
-      ['panel.json', JSON.stringify({ panel: payload.panel, edits: payload.panelEdits, pinnedModels })],
-      ['round.json', JSON.stringify({ cost: payload.cost, falseSettleRate: payload.falseSettleRate, pinnedModels })],
+      ['panel.json', JSON.stringify({ panel: payload.panel, edits: payload.panelEdits, pinnedModels }, null, 2)],
+      ['round.json', JSON.stringify({ cost: payload.cost, falseSettleRate: payload.falseSettleRate, pinnedModels }, null, 2)],
       ['rerun.sh', payload.rerunScript],
+      ['README.md', readme],
     ];
     for (const [name, content] of artifacts) {
       const hash = createHash('sha256').update(content).digest('hex');
@@ -2206,7 +2228,57 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     };
     const manifestJson = JSON.stringify(manifest, null, 2);
     hashes['eval.json'] = createHash('sha256').update(manifestJson).digest('hex');
-    res.json({ ...payload, manifest, manifestJson, hashes });
+    const files: [string, string][] = [['eval.json', manifestJson], ...artifacts];
+    return { ...payload, manifest, manifestJson, hashes, files };
+  }
+
+  type Bundle = Exclude<Awaited<ReturnType<typeof buildBundle>>, { error: string }>;
+  function sendBundleZip(res: Response, bundle: Bundle, filename: string) {
+    const zip = buildZip(
+      bundle.files.map(([name, content]) => ({ name, content })),
+      new Date(bundle.manifest.exported_at),
+    );
+    res
+      .type('application/zip')
+      .set('content-disposition', `attachment; filename="${filename}"`)
+      .set('x-gr-standards-version', String(bundle.manifest.standards_version ?? ''))
+      .send(zip);
+  }
+
+  api.get('/rounds/:roundId/bundle', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Export a finished round.' });
+    const bundle = await buildBundle(round, (req as ProjectRequest).project);
+    if ('error' in bundle) return res.status(409).json({ error: bundle.error });
+    const { files: _files, ...body } = bundle;
+    res.json(body);
+  });
+
+  /** The same bundle as one file: what a person downloads and drops in a repo. */
+  api.get('/rounds/:roundId/bundle.zip', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    if (round.status !== 'closed') return res.status(409).json({ error: 'Export a finished round.' });
+    const project = (req as ProjectRequest).project;
+    const bundle = await buildBundle(round, project);
+    if ('error' in bundle) return res.status(409).json({ error: bundle.error });
+    sendBundleZip(res, bundle, `${project.slug}-eval-v${bundle.manifest.standards_version}.zip`);
+  });
+
+  /**
+   * The eval package for the project's current standard: the bundle of the
+   * round that produced this version, or the latest finished round when the
+   * version predates its first patch. This is the link on the Standards page.
+   */
+  api.get('/projects/:slug/eval.zip', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const roundId = await standardsRoundId(project);
+    const round = roundId ? await store.getRound(db, roundId) : null;
+    if (!round || round.status !== 'closed') {
+      return res.status(409).json({ error: 'No finished round yet. The eval package needs one graded round behind the standard.' });
+    }
+    const bundle = await buildBundle(round, project);
+    if ('error' in bundle) return res.status(409).json({ error: bundle.error });
+    sendBundleZip(res, bundle, `${project.slug}-eval-v${bundle.manifest.standards_version}.zip`);
   });
 
   /**
@@ -2987,6 +3059,19 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
   }
 
   /** Everything the Standards document renders, assembled from the store. */
+  /**
+   * The round a project's current standard stands on: the one that produced
+   * its first patch, or the latest finished round when the version predates
+   * any patch. The Standards page counts from it and the eval package ships it.
+   */
+  async function standardsRoundId(project: Project): Promise<string | null> {
+    const version = await store.currentRubric(db, project.id);
+    if (!version) return null;
+    const patches = await store.patchesForVersion(db, version.id);
+    const rounds = await store.listRounds(db, project.id);
+    return patches[0]?.roundId ?? rounds.filter((r) => r.status === 'closed').at(-1)?.id ?? null;
+  }
+
   async function standardsView(project: Project, owner: boolean, k: string | null): Promise<StandardsView | null> {
     const version = await store.currentRubric(db, project.id);
     if (!version) return null;
@@ -2999,7 +3084,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     // Split count from the round the version came from, or the latest closed
     // round when the framework predates its first patch.
     const rounds = await store.listRounds(db, project.id);
-    const roundId = patches[0]?.roundId ?? rounds.filter((r) => r.status === 'closed').at(-1)?.id ?? null;
+    const roundId = await standardsRoundId(project);
     let cases = 0;
     let splits = 0;
     if (roundId) {
@@ -3043,6 +3128,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       },
       // Same arithmetic as the Room's masthead, so the two never disagree.
       nextRound: rounds.length + 1,
+      hasPackage: roundId !== null && (Object.keys(await store.getRoundPinnedModels(db, roundId)).length > 0),
       owner,
       k,
     };

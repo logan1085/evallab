@@ -26,6 +26,8 @@ export interface StandardsView {
   stats: { cases: number; splits: number; sentences: number; simulated: boolean };
   /** The round the owner would run next; the Room's own count, not a guess. */
   nextRound: number;
+  /** True when a finished, pinned round stands behind this version, so the package can ship. */
+  hasPackage: boolean;
   /** True when the request carried the project's own key. */
   owner: boolean;
   /** Echoed into owner forms so the toggle round-trips. */
@@ -149,6 +151,11 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
           <button type="submit">${v.project.isPublic ? 'Make it private' : 'Publish it'}</button>
         </form>
         <a href="/p/${esc(v.project.slug)}?k=${encodeURIComponent(v.k ?? '')}">Run round ${v.nextRound}</a>
+        ${
+          v.hasPackage
+            ? `<a href="/api/v1/projects/${esc(v.project.slug)}/eval.zip?k=${encodeURIComponent(v.k ?? '')}" download>Download the eval package</a>`
+            : ''
+        }
       </div>`
     : '';
 

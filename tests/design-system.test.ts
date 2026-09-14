@@ -50,6 +50,7 @@ const view: StandardsView = {
   seats: [{ name: 'The literalist', objective: 'Grades what is written.', failsFor: 'Fails gap-filling.', model: 'simulated' }],
   stats: { cases: 12, splits: 14, sentences: 1, simulated: true },
   nextRound: 2,
+  hasPackage: true,
   owner: false,
   k: null,
 };

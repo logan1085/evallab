@@ -571,28 +571,24 @@ function SelfCheckSection({
 function ExportSection({ roundId, token, onError }: { roundId: string; token: string; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
 
+  const [done, setDone] = useState<string | null>(null);
+
   async function download() {
     setBusy(true);
+    setDone(null);
     try {
-      const b = await api.bundle(roundId, token);
-      const files: [string, string][] = [
-        ['rubric.md', b.rubricMarkdown],
-        ['golden-set.jsonl', b.goldenJsonl],
-        ['judge-prompt.txt', b.judgeSystemPrompt],
-        ['panel.json', JSON.stringify({ panel: b.panel, edits: b.panelEdits, pinnedModels: b.pinnedModels }, null, 2)],
-        ['round.json', JSON.stringify({ cost: b.cost, falseSettleRate: b.falseSettleRate, pinnedModels: b.pinnedModels, hashes: b.hashes }, null, 2)],
-        ['rerun.sh', b.rerunScript],
-      ];
-      for (const [name, content] of files) {
-        const url = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${b.project.slug}-${name}`;
-        a.click();
-        URL.revokeObjectURL(url);
-      }
+      // One file, one click. Six separate downloads used to trip the browser's
+      // multiple-download guard and lost eval.json on the way.
+      const { blob, filename } = await api.bundleZip(roundId, token);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setDone(filename);
     } catch (err) {
-      onError(err instanceof Error ? err.message : 'Could not build the bundle.');
+      onError(err instanceof Error ? err.message : 'Could not build the package.');
     } finally {
       setBusy(false);
     }
@@ -602,12 +598,16 @@ function ExportSection({ roundId, token, onError }: { roundId: string; token: st
     <section className="band">
       <h2 style={{ marginBottom: 4 }}>Leave with files</h2>
       <p className="note" style={{ marginTop: 0 }}>
-        Rubric, golden set, judge prompt, panel config with its edit history, and a script that re-runs this eval.
-        Framework agnostic; drop them in your repo. False settles never ship as golden.
+        One zip: eval.json (the manifest with a hash of every file), rubric, golden set, judge prompt, panel config with its
+        edit history, and a script that re-runs this eval. Framework agnostic; drop it in your repo. False settles never
+        ship as golden.
       </p>
-      <button onClick={download} disabled={busy}>
-        {busy ? 'Building…' : 'Download the bundle'}
-      </button>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button onClick={download} disabled={busy}>
+          {busy ? 'Packing…' : 'Download the eval package'}
+        </button>
+        {done ? <span className="note mono">{done}</span> : null}
+      </div>
     </section>
   );
 }

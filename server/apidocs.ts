@@ -163,15 +163,19 @@ curl -s ${v1}/rounds/$RID/alignment -H "Authorization: Bearer $TOKEN"          #
 ### 9. Export
 
 \`\`\`bash
-curl -s ${v1}/rounds/$RID/bundle -H "Authorization: Bearer $TOKEN"
+curl -s ${v1}/rounds/$RID/bundle -H "Authorization: Bearer $TOKEN"                 # as JSON
+curl -sO -J ${v1}/rounds/$RID/bundle.zip -H "Authorization: Bearer $TOKEN"         # as one file
+curl -sO -J ${v1}/projects/$SLUG/eval.zip -H "Authorization: Bearer $TOKEN"        # the current standard's package
 curl -s ${v1}/rounds/$RID/compare/$OTHER_RID -H "Authorization: Bearer $TOKEN"
 \`\`\`
 
 The bundle ships rubric.md, the golden set, the judge prompt, panel.json
-with edit provenance, a rerun script, round cost, eval.json (the manifest:
-standard version, the mixture that graded, pinned models, and a hash of
-every file), and a SHA-256 hash per artifact. Bundles without a pinned model
-map are refused rather than shipped.
+with edit provenance, a rerun script, round cost, a README, eval.json (the
+manifest: standard version, the mixture that graded, pinned models, and a
+hash of every file), and a SHA-256 hash per artifact. The zip forms carry
+the same files byte for byte; eval.zip picks the round the current standard
+stands on. Bundles without a pinned model map are refused rather than
+shipped.
 
 ### 10. Training data
 

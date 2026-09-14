@@ -460,6 +460,23 @@ export const api = {
       rerunScript: string;
     }>(`/rounds/${roundId}/bundle`, { token }),
 
+  /** The same bundle as one zip. The key rides in a header, not the URL. */
+  bundleZip: async (roundId: string, token: string): Promise<{ blob: Blob; filename: string }> => {
+    const res = await fetch(`/api/v1/rounds/${roundId}/bundle.zip`, { headers: { 'x-gr-token': token } });
+    if (!res.ok) {
+      let message = `Could not build the package (${res.status}).`;
+      try {
+        message = ((await res.json()) as { error?: string }).error ?? message;
+      } catch {
+        /* not json */
+      }
+      throw new Error(message);
+    }
+    const disposition = res.headers.get('content-disposition') ?? '';
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'eval.zip';
+    return { blob: await res.blob(), filename };
+  },
+
   setExpected: (slug: string, token: string, traceId: string, body: { verdict: string | null; reason: string }) =>
     call<{ trace: Trace }>(`/projects/${slug}/traces/${traceId}/expected`, { method: 'PATCH', token, body: json(body) }),
 
