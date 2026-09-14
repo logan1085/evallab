@@ -1,0 +1,26 @@
+# Run your eval on every change and fail the build on the gate.
+#
+# Copy into .github/workflows/ in the repo that ships your AI. It needs two
+# secrets: EVALLAB_PROJECT (the project slug) and EVALLAB_TOKEN (the project
+# key or a minted gr_ key), and a cases file in the repo with one JSON object
+# per line: { "title", "content", "expected"? }.
+name: evallab
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run the eval
+        env:
+          GR_BASE_URL: https://evallab-eosin.vercel.app
+          GR_TOKEN: ${{ secrets.EVALLAB_TOKEN }}
+        run: |
+          npx --yes tsx https://raw.githubusercontent.com/logan1085/evallab/claude/artifact-full-product-yjdq0p/scripts/evallab.ts \
+            run --project "${{ secrets.EVALLAB_PROJECT }}" --cases evals/cases.jsonl \
+            --gate pass-rate:0.9,new-splits:0

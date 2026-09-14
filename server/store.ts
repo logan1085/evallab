@@ -838,6 +838,56 @@ function toGrade(row: Row): Grade {
   };
 }
 
+/* ---- Runs ------------------------------------------------------------------ */
+
+export interface RunRow {
+  id: string;
+  projectId: string;
+  roundId: string;
+  rubricVersionId: string;
+  name: string;
+  gate: { pass_rate_min?: number; max_new_splits?: number };
+  createdAt: string;
+}
+
+function toRun(row: Row): RunRow {
+  let gate: RunRow['gate'] = {};
+  try {
+    gate = JSON.parse(str(row.gate ?? '{}')) as RunRow['gate'];
+  } catch {
+    gate = {};
+  }
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    roundId: str(row.round_id),
+    rubricVersionId: str(row.rubric_version_id),
+    name: str(row.name),
+    gate,
+    createdAt: str(row.created_at),
+  };
+}
+
+export async function createRun(
+  db: DB,
+  args: { id: string; projectId: string; roundId: string; rubricVersionId: string; name: string; gate: RunRow['gate'] },
+): Promise<RunRow> {
+  await db.run(
+    'INSERT INTO runs (id, project_id, round_id, rubric_version_id, name, gate, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    args.id, args.projectId, args.roundId, args.rubricVersionId, args.name, JSON.stringify(args.gate ?? {}), now(),
+  );
+  return (await getRun(db, args.id))!;
+}
+
+export async function getRun(db: DB, id: string): Promise<RunRow | null> {
+  const row = await db.get('SELECT * FROM runs WHERE id = ?', id) as Row | undefined;
+  return row ? toRun(row) : null;
+}
+
+export async function listRuns(db: DB, projectId: string): Promise<RunRow[]> {
+  return (await db.all('SELECT * FROM runs WHERE project_id = ? ORDER BY created_at', projectId) as Row[]).map(toRun);
+}
+
 /* ---- The stability pass ---------------------------------------------------- */
 
 /** One verdict under one phrasing of the standard, kept for provenance. */

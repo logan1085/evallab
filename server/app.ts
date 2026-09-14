@@ -26,6 +26,7 @@ import { offlineScenarist, resolveScenarist } from './scenarist.js';
 import { adapterFor, availableFamilies, offlineAdapter, offlinePanelWriter, resolvePanelWriter } from './panelists.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
 import { buildTrainingExport, toJsonl, type TrainingRound } from './training.js';
+import { ensembleVerdict, evaluateGate } from '../shared/ensemble.js';
 import { createSpendGuard } from './spend.js';
 import {
   ABSTAIN,
@@ -1864,6 +1865,198 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * The export bundle: files, not a dashboard. Rubric, golden set, judge
    * prompt, panel config with its edit provenance, and a re-run script.
    */
+  /* ---- Runs: the eval executed from outside the Room --------------------- */
+
+  /**
+   * A run is the eval applied to a case set that arrives with the request,
+   * against one pinned version of the standard, with a gate. Underneath it is
+   * a round: the same seats, the same blind grading, the same stability pass,
+   * driven through the same per-seat endpoints the Room uses, so nothing a
+   * CI job sees can differ from what a person sees.
+   */
+  api.post('/projects/:slug/runs', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z
+      .object({
+        cases: z
+          .array(z.object({ title: z.string().min(1).max(200), content: z.string().min(1).max(40_000), expected: z.string().max(40).optional() }))
+          .min(1)
+          .max(60),
+        standards_version: z.number().int().positive().optional(),
+        gate: z.object({ pass_rate_min: z.number().min(0).max(1).optional(), max_new_splits: z.number().int().min(0).optional() }).optional(),
+        name: z.string().max(80).optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'A run needs cases (1 to 60, each with a title and content); optionally standards_version, gate, and a name.' });
+
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    if (seats.length < 3) return res.status(400).json({ error: 'A panel needs at least three seats before it can grade. Seat the panel first.' });
+    const versions = await store.listRubrics(db, project.id);
+    const rubric = body.data.standards_version
+      ? versions.find((v) => v.version === body.data.standards_version)
+      : await store.currentRubric(db, project.id);
+    if (!rubric) return res.status(404).json({ error: `No Standards v${body.data.standards_version ?? ''} on this project.` });
+    const scaleIds = new Set(rubric.scale.map((s) => s.id));
+    const badExpected = body.data.cases.find((c) => c.expected && !scaleIds.has(c.expected));
+    if (badExpected) return res.status(400).json({ error: `expected must be one of ${[...scaleIds].join(', ')}; got "${badExpected.expected}".` });
+
+    const runId = newId();
+    const runs = await store.listRuns(db, project.id);
+    const name = body.data.name?.trim() || `Run ${runs.length + 1}`;
+    const traces = await store.addTraces(
+      db,
+      project.id,
+      body.data.cases.map((c, i) => ({ title: c.title, content: c.content, source: 'run', meta: { run: runId, order: i, ...(c.expected ? { expected: c.expected } : {}) } })),
+    );
+    const { round } = await store.createRound(db, {
+      projectId: project.id,
+      rubricVersionId: rubric.id,
+      name,
+      strategy: 'random',
+      seed: newId(),
+      samplingNote: `${name}: ${seats.length} seats over ${traces.length} supplied cases against Standards v${rubric.version}.`,
+      sourceRoundId: null,
+      calibration: traces.map((t) => t.id),
+      heldout: [],
+    });
+    await store.setRoundPinnedModels(db, round.id, Object.fromEntries(seats.map((s) => [s.name, `${s.family}:${adapterFor(s.family).model}`])));
+    const run = await store.createRun(db, { id: runId, projectId: project.id, roundId: round.id, rubricVersionId: rubric.id, name, gate: body.data.gate ?? {} });
+    res.status(201).json({
+      run: { id: run.id, name: run.name, roundId: round.id, standards_version: rubric.version, gate: run.gate, cases: traces.length },
+      seats: seats.map((s) => ({ id: s.id, name: s.name })),
+      next: `POST /rounds/${round.id}/panel-run per seat, then POST /rounds/${round.id}/stability, then GET /runs/${run.id}`,
+    });
+  });
+
+  api.get('/projects/:slug/runs', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const runs = await store.listRuns(db, project.id);
+    const out = [];
+    for (const r of runs) {
+      const round = await store.getRound(db, r.roundId);
+      const rubric = await store.getRubric(db, r.rubricVersionId);
+      out.push({ id: r.id, name: r.name, roundId: r.roundId, standards_version: rubric?.version ?? null, gate: r.gate, status: round?.status ?? 'missing', createdAt: r.createdAt });
+    }
+    res.json({ runs: out });
+  });
+
+  /**
+   * The run report: the ensemble verdict per case, the pass rate, the
+   * splits, the diff against the previous run of the same standard, and the
+   * gate. Cases match across runs by title, because a run's cases are the
+   * caller's and their ids are ours.
+   */
+  async function runReport(run: Awaited<ReturnType<typeof store.getRun>> & object) {
+    const round = (await store.getRound(db, run.roundId))!;
+    const rubric = (await store.getRubric(db, run.rubricVersionId))!;
+    const seats = (await store.listGraders(db, round.projectId)).filter((g) => g.kind === 'panelist');
+    const seatById = new Map(seats.map((s) => [s.id, s]));
+    const items = await store.listItems(db, round.id);
+    const grades = await store.allGradesForRound(db, round.id);
+    const byItem = new Map<string, typeof grades>();
+    for (const g of grades) if (seatById.has(g.graderId)) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+
+    const cases = [];
+    // Rounds shuffle their items; a run reports in the order the caller sent.
+    const ordered = [];
+    for (const item of items) {
+      const trace = await store.getTrace(db, item.traceId);
+      if (trace) ordered.push({ item, trace });
+    }
+    ordered.sort((a, b) => Number(a.trace.meta?.order ?? 0) - Number(b.trace.meta?.order ?? 0));
+    for (const { item, trace } of ordered) {
+      const votes = (byItem.get(item.id) ?? []).map((g) => ({
+        seat: seatById.get(g.graderId)!.name,
+        model: seatById.get(g.graderId)!.model,
+        verdict: g.verdict,
+        reason: g.note,
+        stable: g.variantAgreement >= 1,
+        agreement: g.variantAgreement,
+        weight: seatById.get(g.graderId)!.weight,
+      }));
+      const reading = readCase(
+        item.id,
+        stableVotes(votes.map((v) => ({ seatId: v.seat, seatName: v.seat, verdict: v.verdict, reason: v.reason, stable: v.stable }))),
+      );
+      const ensemble = ensembleVerdict(votes, rubric.scale);
+      const expected = typeof trace.meta?.expected === 'string' ? trace.meta.expected : null;
+      cases.push({
+        title: trace.title,
+        expected,
+        verdict: ensemble.verdict,
+        support: ensemble.support,
+        pattern: reading.pattern,
+        dissenter: reading.dissenter,
+        matches_expected: expected === null || ensemble.verdict === null ? null : expected === ensemble.verdict,
+        votes,
+      });
+    }
+
+    const decided = cases.filter((c) => c.verdict !== null);
+    const top = [...rubric.scale].sort((a, b) => b.rank - a.rank)[0]?.id;
+    const passRate = decided.length === 0 ? null : decided.filter((c) => c.verdict === top).length / decided.length;
+    const isSplit = (p: string) => p === 'persona-driven' || p === 'contested';
+    const splits = cases.filter((c) => isSplit(c.pattern)).length;
+    const unstable = cases.reduce((n, c) => n + c.votes.filter((v) => !v.stable).length, 0);
+    const compared = cases.filter((c) => c.matches_expected !== null);
+    const expectedMatch = compared.length === 0 ? null : { compared: compared.length, agreed: compared.filter((c) => c.matches_expected).length, rate: compared.filter((c) => c.matches_expected).length / compared.length };
+
+    // The previous finished run of the same standard, matched by title.
+    const previous = (await store.listRuns(db, round.projectId))
+      .filter((r) => r.id !== run.id && r.rubricVersionId === run.rubricVersionId && r.createdAt < run.createdAt)
+      .at(-1);
+    let diff: { against: string; compared: number; flipped: { title: string; from: string | null; to: string | null }[]; new_splits: number } | null = null;
+    let newSplits = splits;
+    if (previous) {
+      const prevRound = await store.getRound(db, previous.roundId);
+      if (prevRound?.status === 'closed') {
+        const prev = await runReport(previous);
+        const byTitle = new Map(prev.cases.map((c) => [c.title, c]));
+        const flipped: { title: string; from: string | null; to: string | null }[] = [];
+        let matched = 0;
+        newSplits = 0;
+        for (const c of cases) {
+          const p = byTitle.get(c.title);
+          if (!p) {
+            if (isSplit(c.pattern)) newSplits++;
+            continue;
+          }
+          matched++;
+          if (p.verdict !== c.verdict) flipped.push({ title: c.title, from: p.verdict, to: c.verdict });
+          if (isSplit(c.pattern) && !isSplit(p.pattern)) newSplits++;
+        }
+        diff = { against: previous.name, compared: matched, flipped, new_splits: newSplits };
+      }
+    }
+    const gate = evaluateGate(run.gate, { passRate, newSplits });
+    return {
+      run: { id: run.id, name: run.name, roundId: round.id, standards_version: rubric.version, status: round.status, createdAt: run.createdAt },
+      summary: { cases: cases.length, decided: decided.length, pass_rate: passRate, splits, new_splits: newSplits, unstable_votes: unstable, expected_match: expectedMatch },
+      gate,
+      diff,
+      cases,
+    };
+  }
+
+  api.get('/runs/:runId', async (req, res) => {
+    const run = await store.getRun(db, req.params.runId!);
+    if (!run) return res.status(404).json({ error: 'No such run.' });
+    const project = await store.getProjectById(db, run.projectId);
+    if (!project) return res.status(404).json({ error: 'No such run.' });
+    if (!(await authorizeProject(req, res, project))) return;
+    const round = await store.getRound(db, run.roundId);
+    if (!round) return res.status(404).json({ error: 'No such run.' });
+    if (round.status !== 'closed') {
+      const progress = await store.roundProgress(db, run.roundId);
+      const items = await store.listItems(db, run.roundId);
+      return res.status(409).json({
+        error: 'The run is still grading.',
+        progress: progress.map((p) => ({ seat: p.name, done: p.done, of: items.length })),
+      });
+    }
+    res.json(await runReport(run));
+  });
+
   /**
    * Training data with provenance: the company's judgment as rows. Examples
    * are settled cases the owner did not overrule, gold is the owner's own

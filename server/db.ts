@@ -281,6 +281,24 @@ CREATE TABLE IF NOT EXISTS grade_variants (
 CREATE INDEX IF NOT EXISTS idx_grade_variants_item ON grade_variants(item_id);
 
 /*
+ * A run: the eval executed against a case set from outside the Room, from
+ * the API or CI, against one pinned version of the standard, with a gate.
+ * It is a round underneath (same seats, same grading, same map), plus the
+ * things a round does not have: the version it was asked to grade against,
+ * the gate it was asked to pass, and the expected verdicts it was handed.
+ */
+CREATE TABLE IF NOT EXISTS runs (
+  id                TEXT PRIMARY KEY,
+  project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  round_id          TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+  rubric_version_id TEXT NOT NULL REFERENCES rubric_versions(id),
+  name              TEXT NOT NULL,
+  gate              TEXT NOT NULL DEFAULT '{}',
+  created_at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id);
+
+/*
  * One row per model-call attempt, retries and failures included, with the
  * numbers read straight off the router's usage object and never recomputed.
  * Nothing is rolled up: a round's spend is summed from these rows at read

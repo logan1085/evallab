@@ -193,6 +193,43 @@ curl -s "${v1}/projects/$SLUG/training?format=rewards"  -H "Authorization: Beare
 - \`rewards\`: one row per judge per case, the verdict as a 0..1 score on the
   standard's own scale, with the case's pattern attached for filtering.
 
+## Runs: the eval from CI
+
+A run grades a case set you supply against one pinned version of the
+standard, through the same seats and the same stability pass, and reports
+the ensemble verdict per case, the pass rate, the splits, the diff against
+the previous run of that standard, and a gate. The CLI drives the whole
+sequence and exits 1 when the gate fails:
+
+\`\`\`bash
+npm run evallab -- run --base ${base} --project $SLUG --token $TOKEN \\
+  --cases cases.jsonl --standards 2 --gate pass-rate:0.9,new-splits:0
+\`\`\`
+
+By hand, the same thing is four calls:
+
+\`\`\`bash
+RUN=$(curl -s -X POST ${v1}/projects/$SLUG/runs -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"cases":[{"title":"Refund under the cap","content":"USER: … ASSISTANT: …","expected":"pass"}],
+       "standards_version":2,"gate":{"pass_rate_min":0.9,"max_new_splits":0}}')
+RID=$(echo "$RUN" | jq -r .run.roundId); RUN_ID=$(echo "$RUN" | jq -r .run.id)
+for SEAT in $(echo "$RUN" | jq -r '.seats[].id'); do
+  curl -s -X POST ${v1}/rounds/$RID/panel-run -H "Authorization: Bearer $TOKEN" \\
+    -H 'content-type: application/json' -d "{\\"seatId\\":\\"$SEAT\\"}" > /dev/null
+done
+curl -s -X POST ${v1}/rounds/$RID/stability -H "Authorization: Bearer $TOKEN" > /dev/null
+curl -s ${v1}/runs/$RUN_ID -H "Authorization: Bearer $TOKEN"
+# -> { run, summary: { cases, pass_rate, splits, new_splits, unstable_votes, expected_match },
+#      gate: { passed, reasons }, diff: { against, compared, flipped }, cases: [...] }
+\`\`\`
+
+Cases: 1 to 60 per run, each \`{ title, content, expected? }\`; \`expected\`
+must be a verdict on the standard's scale. The ensemble verdict is the
+weighted majority of the votes that survived paraphrase, ties to the lower
+verdict. Runs match cases across runs by title. A GitHub Action that runs
+this on every pull request is in \`docs/ci/evallab.yml\`.
+
 ## Health
 
 \`\`\`bash
