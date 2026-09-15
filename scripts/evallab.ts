@@ -79,10 +79,83 @@ function gateSpec(text: string | undefined): { pass_rate_min?: number; max_new_s
   return spec;
 }
 
+/**
+ * evallab drift: the finished runs as a series, and exit 1 when the latest
+ * reading has moved past the thresholds. Pair with a scheduled `run`.
+ *
+ *   npm run evallab -- drift --project SLUG --token KEY --gate pass-rate-drop:0.05,flips:0,new-splits:0 --window 5
+ */
+async function drift(rest: string[]) {
+  const out: Record<string, string | boolean> = { json: false };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i]!;
+    if (a === '--json') out.json = true;
+    else if (a.startsWith('--')) out[a.slice(2)] = rest[++i] ?? '';
+  }
+  const base = (typeof out.base === 'string' && out.base ? out.base : process.env.GR_BASE_URL ?? 'http://localhost:8787').replace(/\/+$/, '');
+  const project = typeof out.project === 'string' ? out.project : '';
+  const token = typeof out.token === 'string' && out.token ? out.token : (process.env.GR_TOKEN ?? '');
+  if (!project || !token) {
+    console.error('Usage: evallab drift --project SLUG --token KEY [--base URL] [--gate pass-rate-drop:0.05,flips:0,new-splits:0] [--window 5] [--standards N] [--json]');
+    process.exit(2);
+  }
+  const spec: Record<string, number> = {};
+  for (const part of (typeof out.gate === 'string' ? out.gate : '').split(',')) {
+    const [k, v] = part.split(':').map((s) => s.trim());
+    if (!k || v === undefined || !Number.isFinite(Number(v))) continue;
+    if (k === 'pass-rate-drop') spec.pass_rate_drop = Number(v);
+    if (k === 'flips') spec.flips = Number(v);
+    if (k === 'new-splits') spec.new_splits = Number(v);
+  }
+  if (typeof out.window === 'string' && out.window) spec.window = Number(out.window);
+  if (typeof out.standards === 'string' && out.standards) spec.standards_version = Number(out.standards);
+  const query = Object.entries(spec).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&');
+  const res = await fetch(`${base}/api/v1/projects/${project}/drift${query ? `?${query}` : ''}`, { headers: { 'x-gr-token': token } });
+  const text = await res.text();
+  let body: {
+    error?: string;
+    points: { name: string; standards_version: number; cases: number; pass_rate: number | null; splits: number; new_splits: number; flipped: number; at: string }[];
+    report: { trend: string; drifted: boolean; reasons: string[]; baseline: { name: string } | null; latest: { name: string } | null; delta: { pass_rate: number | null; splits: number | null }; standards_version: number | null };
+  };
+  try {
+    body = JSON.parse(text);
+  } catch {
+    console.error(`Could not read the drift report (${res.status}): ${text.slice(0, 300)}`);
+    process.exit(2);
+  }
+  if (res.status !== 200) {
+    console.error(`Could not read the drift report (${res.status}): ${body.error ?? 'unknown error'}`);
+    process.exit(2);
+  }
+  if (out.json === true) {
+    console.log(JSON.stringify(body, null, 2));
+  } else {
+    const r = body.report;
+    const pct = (v: number | null) => (v === null ? 'n/a' : `${(v * 100).toFixed(0)}%`);
+    console.log(`${project} · Standards v${r.standards_version ?? '?'} · ${body.points.length} finished run${body.points.length === 1 ? '' : 's'}`);
+    console.log('');
+    for (const p of r.series ?? body.points) {
+      console.log(`${p.name.padEnd(10)} ${p.at.slice(0, 10)}  pass ${pct(p.pass_rate).padStart(4)}  splits ${String(p.splits).padStart(2)}  new ${String(p.new_splits).padStart(2)}  flipped ${String(p.flipped).padStart(2)}  cases ${p.cases}`);
+    }
+    console.log('');
+    if (r.baseline && r.latest) {
+      console.log(
+        `${r.latest.name} vs ${r.baseline.name}: pass rate ${r.delta.pass_rate === null ? 'n/a' : `${r.delta.pass_rate >= 0 ? '+' : ''}${(r.delta.pass_rate * 100).toFixed(0)} points`}, splits ${r.delta.splits === null ? 'n/a' : `${r.delta.splits >= 0 ? '+' : ''}${r.delta.splits}`} · trend: ${r.trend}`,
+      );
+    } else {
+      console.log('Fewer than two finished runs on this standard: nothing to compare yet.');
+    }
+    console.log(r.drifted ? `DRIFT: ${r.reasons.join('; ')}` : `NO DRIFT${Object.keys(spec).some((k) => k !== 'window' && k !== 'standards_version') ? '' : ' (no thresholds set)'}`);
+  }
+  process.exit(body.report.drifted ? 1 : 0);
+}
+
 async function main() {
   const [command, ...rest] = process.argv.slice(2);
+  if (command === 'drift') return drift(rest);
   if (command !== 'run') {
     console.error('Usage: evallab run --project SLUG --token KEY --cases cases.jsonl [--base URL] [--standards N] [--gate pass-rate:0.9,new-splits:0] [--json]');
+    console.error('       evallab drift --project SLUG --token KEY [--gate pass-rate-drop:0.05,flips:0,new-splits:0] [--window 5] [--json]');
     process.exit(2);
   }
   const args = parseArgs(rest);

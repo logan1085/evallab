@@ -561,6 +561,21 @@ export const api = {
   trainingUrl: (slug: string, token: string, format: 'examples' | 'gold' | 'rewards' | 'pairs') =>
     `/api/v1/projects/${slug}/training?format=${format}&k=${encodeURIComponent(token)}`,
 
+  /* Drift: the finished runs as a series, and whether the latest reading moved. */
+  drift: (slug: string, token: string) =>
+    call<{
+      points: { id: string; name: string; at: string; standards_version: number; cases: number; decided: number; pass_rate: number | null; splits: number; new_splits: number; unstable_votes: number; flipped: number }[];
+      report: {
+        standards_version: number | null;
+        trend: 'steady' | 'improving' | 'degrading' | 'insufficient';
+        drifted: boolean;
+        reasons: string[];
+        baseline: { name: string } | null;
+        latest: { name: string } | null;
+        delta: { pass_rate: number | null; splits: number | null };
+      };
+    }>(`/projects/${slug}/drift`, { token }),
+
   /* Preference pairs: one prompt, two answers, which one the standard prefers. */
   pairs: (slug: string, token: string) => call<{ pairs: PairView[] }>(`/projects/${slug}/pairs`, { token }),
   addPair: (slug: string, token: string, body: { title: string; prompt: string; a: string; b: string }) =>

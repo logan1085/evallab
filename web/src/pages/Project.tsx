@@ -673,9 +673,66 @@ function RunSection({
               </li>
             ))}
           </ul>
+          <DriftBlock slug={slug} token={token} />
         </div>
       ) : null}
     </>
+  );
+}
+
+/* ---- Drift: the runs as a series ---------------------------------------- */
+
+/**
+ * The finished runs (the ones started from the API, the CLI, or CI) as a
+ * series against one standard: pass rate, splits, and the cases that
+ * flipped between readings. Rendered only once there is a run to read.
+ */
+function DriftBlock({ slug, token }: { slug: string; token: string }) {
+  const { data } = useAsync(() => api.drift(slug, token), [slug, token]);
+  if (!data || data.points.length === 0) return null;
+  const r = data.report;
+  const pct = (v: number | null) => (v === null ? 'n/a' : `${Math.round(v * 100)}%`);
+  const signed = (v: number) => `${v >= 0 ? '+' : ''}${v}`;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <span className="metric-k">Runs over time{r.standards_version ? ` · Standards v${r.standards_version}` : ''}</span>
+      <p className="tiny" style={{ margin: '6px 0 0' }}>
+        {r.baseline && r.latest && r.delta.pass_rate !== null
+          ? `${r.latest.name} against ${r.baseline.name}: pass rate ${signed(Math.round(r.delta.pass_rate * 100))} points, splits ${signed(r.delta.splits ?? 0)}. Trend: ${r.trend}.`
+          : 'One finished run so far. The second gives this a direction.'}
+        {' '}Schedule the CLI and it fails the morning the reading moves: <span className="mono">evallab drift --gate pass-rate-drop:0.05,flips:0</span>.
+      </p>
+      <div className="scroll-x" style={{ marginTop: 10 }}>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Run</th>
+              <th scope="col">When</th>
+              <th scope="col">Cases</th>
+              <th scope="col">Pass rate</th>
+              <th scope="col">Splits</th>
+              <th scope="col">New splits</th>
+              <th scope="col">Flipped</th>
+              <th scope="col">Unstable votes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.points.map((p) => (
+              <tr key={p.id}>
+                <td className="mono">{p.name}</td>
+                <td className="mono">{p.at.slice(0, 10)}</td>
+                <td className="mono">{p.cases}</td>
+                <td className="mono">{pct(p.pass_rate)}</td>
+                <td className="mono">{p.splits}</td>
+                <td className="mono">{p.new_splits}</td>
+                <td className="mono" style={p.flipped > 0 ? { color: 'var(--amber)' } : undefined}>{p.flipped}</td>
+                <td className="mono">{p.unstable_votes}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

@@ -1,15 +1,24 @@
-# Run your eval on every change and fail the build on the gate.
+# Run your eval on every change and fail the build on the gate; run it on a
+# schedule and fail when the workflow has drifted.
 #
 # Copy into .github/workflows/ in the repo that ships your AI. It needs two
 # secrets: EVALLAB_PROJECT (the project slug) and EVALLAB_TOKEN (the project
 # key or a minted gr_ key), and a cases file in the repo with one JSON object
 # per line: { "title", "content", "expected"? }.
+#
+# The scheduled job is the retainer in a file: the same cases, the same
+# pinned standard, every Monday, and a red run the morning the reading
+# moves. Point it at a fresh production sample (evals/weekly.jsonl) to read
+# the live workflow rather than the fixed set.
 name: evallab
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
 jobs:
   eval:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +33,26 @@ jobs:
           npx --yes tsx https://raw.githubusercontent.com/logan1085/evallab/claude/artifact-full-product-yjdq0p/scripts/evallab.ts \
             run --project "${{ secrets.EVALLAB_PROJECT }}" --cases evals/cases.jsonl \
             --gate pass-rate:0.9,new-splits:0
+  drift:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run this week's reading
+        env:
+          GR_BASE_URL: https://evallab-eosin.vercel.app
+          GR_TOKEN: ${{ secrets.EVALLAB_TOKEN }}
+        run: |
+          npx --yes tsx https://raw.githubusercontent.com/logan1085/evallab/claude/artifact-full-product-yjdq0p/scripts/evallab.ts \
+            run --project "${{ secrets.EVALLAB_PROJECT }}" --cases evals/cases.jsonl --name "Weekly $(date -u +%F)" || true
+      - name: Fail on drift
+        env:
+          GR_BASE_URL: https://evallab-eosin.vercel.app
+          GR_TOKEN: ${{ secrets.EVALLAB_TOKEN }}
+        run: |
+          npx --yes tsx https://raw.githubusercontent.com/logan1085/evallab/claude/artifact-full-product-yjdq0p/scripts/evallab.ts \
+            drift --project "${{ secrets.EVALLAB_PROJECT }}" --window 5 \
+            --gate pass-rate-drop:0.05,flips:0,new-splits:0

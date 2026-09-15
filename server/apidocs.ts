@@ -276,6 +276,21 @@ weighted majority of the votes that survived paraphrase, ties to the lower
 verdict. Runs match cases across runs by title. A GitHub Action that runs
 this on every pull request is in \`docs/ci/evallab.yml\`.
 
+### Drift: the runs as a series
+
+The finished runs against one version of the standard, oldest first, with
+pass rate, splits, new splits, and the cases that flipped verdict against
+the run before. The report compares the latest run with the oldest inside
+the window and says whether it moved. Thresholds are query fields; with
+none set the report describes and never fails. Schedule \`evallab run\` and
+then \`evallab drift\` (docs/ci/evallab.yml has the cron) and the build goes
+red the morning the reading changes.
+
+\`\`\`bash
+curl -s "${v1}/projects/$SLUG/drift?window=5&pass_rate_drop=0.05&flips=0&new_splits=0" -H "Authorization: Bearer $TOKEN"
+npm run evallab -- drift --project $SLUG --token $TOKEN --window 5 --gate pass-rate-drop:0.05,flips:0,new-splits:0   # exit 1 on drift
+\`\`\`
+
 ## Health
 
 \`\`\`bash

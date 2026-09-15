@@ -29,6 +29,7 @@ import type { OwnEndpoint } from './gateway.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
 import { buildTrainingExport, toJsonl, type ExplicitPair, type TrainingRound } from './training.js';
 import { pairOutcome, swapChoice, type PairVote } from '../shared/pairs.js';
+import { driftReport, type DriftSpec, type RunPoint } from '../shared/drift.js';
 import { buildZip } from './zip.js';
 import { ensembleVerdict, evaluateGate } from '../shared/ensemble.js';
 import { createSpendGuard } from './spend.js';
@@ -2273,6 +2274,48 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       out.push({ id: r.id, name: r.name, roundId: r.roundId, standards_version: rubric?.version ?? null, gate: r.gate, status: round?.status ?? 'missing', createdAt: r.createdAt });
     }
     res.json({ runs: out });
+  });
+
+  /**
+   * Drift: the finished runs as a series, and whether the latest reading
+   * has moved against a baseline. The thresholds arrive as query fields
+   * (pass_rate_drop, flips, new_splits, window); with none, the report
+   * describes and never fails. A scheduled run plus this is the retainer.
+   */
+  api.get('/projects/:slug/drift', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const q = (k: string): number | undefined => {
+      const v = req.query[k];
+      return typeof v === 'string' && v !== '' && Number.isFinite(Number(v)) ? Number(v) : undefined;
+    };
+    const spec: DriftSpec = {
+      ...(q('pass_rate_drop') !== undefined ? { max_pass_rate_drop: q('pass_rate_drop') } : {}),
+      ...(q('flips') !== undefined ? { max_flips: q('flips') } : {}),
+      ...(q('new_splits') !== undefined ? { max_new_splits: q('new_splits') } : {}),
+      ...(q('window') !== undefined ? { window: q('window') } : {}),
+    };
+    const points: RunPoint[] = [];
+    // The last thirty finished runs: a report reads every one of them, and
+    // each reading is a full report of its own.
+    for (const run of (await store.listRuns(db, project.id)).slice(-30)) {
+      const round = await store.getRound(db, run.roundId);
+      if (round?.status !== 'closed') continue;
+      const rep = await runReport(run);
+      points.push({
+        id: run.id,
+        name: run.name,
+        at: run.createdAt,
+        standards_version: rep.run.standards_version,
+        cases: rep.summary.cases,
+        decided: rep.summary.decided,
+        pass_rate: rep.summary.pass_rate,
+        splits: rep.summary.splits,
+        new_splits: rep.summary.new_splits,
+        unstable_votes: rep.summary.unstable_votes,
+        flipped: rep.diff?.flipped.length ?? 0,
+      });
+    }
+    res.json({ points, report: driftReport(points, spec, q('standards_version')) });
   });
 
   /**
