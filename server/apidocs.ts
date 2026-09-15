@@ -179,6 +179,23 @@ curl -s -X POST ${v1}/rounds/$RID/self-check \\
 curl -s ${v1}/rounds/$RID/alignment -H "Authorization: Bearer $TOKEN"          # who speaks for you
 \`\`\`
 
+#### Several reviewers
+
+Add \`reviewer\` (a name) to the self-check GET and POST and the verdicts
+are that person's, kept apart from the owner's. Everything downstream
+reads the consensus: the majority across reviewers, the owner breaking
+ties. The reviewers report says who graded what, agreement between them
+(Krippendorff's alpha on the cases at least two of them saw, against the
+same human ceiling as the panel), and the cases they split on, which are
+the ones to settle in a room.
+
+\`\`\`bash
+curl -s "${v1}/rounds/$RID/self-check?reviewer=Ana" -H "Authorization: Bearer $TOKEN"
+curl -s -X POST ${v1}/rounds/$RID/self-check -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"itemId":"…","verdict":"fail","reason":"…","reviewer":"Ana"}'
+curl -s ${v1}/rounds/$RID/reviewers -H "Authorization: Bearer $TOKEN"          # agreement and the splits
+\`\`\`
+
 ### 9. Export
 
 \`\`\`bash

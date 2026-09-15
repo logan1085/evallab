@@ -302,6 +302,17 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * nothing else. Missing reads as 401 with the fix; wrong reads as 403.
    * Unknown and revoked keys are indistinguishable on purpose.
    */
+  /**
+   * Who is grading: 'owner' unless a reviewer name came with the request.
+   * Names are trimmed and capped; a blank is the owner. The project key is
+   * still what opens the round, so a reviewer is someone the owner shared
+   * the link with, named so their verdicts can be told apart and compared.
+   */
+  const reviewerOf = (raw: unknown): string => {
+    const name = typeof raw === 'string' ? raw.trim().replace(/\s+/g, ' ').slice(0, 40) : '';
+    return name && name.toLowerCase() !== store.OWNER_REVIEWER ? name : store.OWNER_REVIEWER;
+  };
+
   async function authorizeProject(req: Request, res: Response, project: Project): Promise<boolean> {
     const cred = credentialOf(req);
     if (!cred) {
@@ -2005,7 +2016,10 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     for (const item of pick(['settled'], 4, taken)) { taken.add(item.id); chosen.push(item); }
     for (const item of pick(['blind-spot', 'settled', 'contested', 'persona-driven'], 2, taken)) { taken.add(item.id); chosen.push(item); }
 
-    const existing = new Map((await store.listUserVerdicts(db, round.id)).map((v) => [v.itemId, v]));
+    // Whose ten: the owner's by default, or a named reviewer's. Every
+    // reviewer sees the same ten, blind to each other as well as to the panel.
+    const reviewer = reviewerOf(req.query.reviewer);
+    const mine = new Map((await store.listReviewerVerdicts(db, round.id)).filter((v) => v.reviewer === reviewer).map((v) => [v.itemId, v]));
     const cases = [];
     for (const item of chosen) {
       const trace = await store.getTrace(db, item.traceId);
@@ -2013,24 +2027,97 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         itemId: item.id,
         title: trace?.title ?? 'Case',
         content: trace?.content ?? '',
-        myVerdict: existing.get(item.id)?.verdict ?? null,
-        myReason: existing.get(item.id)?.reason ?? '',
+        myVerdict: mine.get(item.id)?.verdict ?? null,
+        myReason: mine.get(item.id)?.reason ?? '',
       });
     }
-    res.json({ cases, done: cases.filter((c) => c.myVerdict).length });
+    res.json({ reviewer, cases, done: cases.filter((c) => c.myVerdict).length });
   });
 
   api.post('/rounds/:roundId/self-check', requireRound, async (req, res) => {
     const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
     if (round.status !== 'closed') return res.status(409).json({ error: 'Grade your ten after the panel finishes.' });
     const body = z
-      .object({ itemId: z.string().min(1), verdict: z.enum(['pass', 'recoverable', 'fail']), reason: z.string().max(600).default('') })
+      .object({
+        itemId: z.string().min(1),
+        verdict: z.enum(['pass', 'recoverable', 'fail']),
+        reason: z.string().max(600).default(''),
+        reviewer: z.string().max(40).optional(),
+      })
       .safeParse(req.body);
     if (!body.success) return res.status(400).json({ error: 'A call needs an item and a verdict.' });
     const item = await store.getItem(db, body.data.itemId);
     if (!item || item.roundId !== round.id) return res.status(404).json({ error: 'No such case in this round.' });
-    await store.saveUserVerdict(db, { roundId: round.id, itemId: body.data.itemId, verdict: body.data.verdict, reason: body.data.reason });
-    res.json({ ok: true });
+    const reviewer = reviewerOf(body.data.reviewer);
+    await store.saveUserVerdict(db, { roundId: round.id, itemId: body.data.itemId, verdict: body.data.verdict, reason: body.data.reason, reviewer });
+    res.json({ ok: true, reviewer });
+  });
+
+  /**
+   * Several people, one round: who graded what, how far they agree with
+   * each other, and the cases they split on. Agreement is Krippendorff's
+   * alpha across reviewers on the cases at least two of them graded, read
+   * against the same human ceiling as the panel. The consensus everything
+   * downstream uses is the majority; the split cases are the ones to settle
+   * in a room, because a standard cannot be written from a coin toss.
+   */
+  api.get('/rounds/:roundId/reviewers', requireRound, async (req, res) => {
+    const round = (req as Request & { round: Awaited<ReturnType<typeof store.getRound>> }).round!;
+    const rows = await store.listReviewerVerdicts(db, round.id);
+    const consensus = new Map((await store.listUserVerdicts(db, round.id)).map((c) => [c.itemId, c]));
+    const names = [...new Set(rows.map((r) => r.reviewer))];
+    const byItem = new Map<string, typeof rows>();
+    for (const r of rows) byItem.set(r.itemId, [...(byItem.get(r.itemId) ?? []), r]);
+
+    const reviewers = names.map((name) => {
+      const mine = rows.filter((r) => r.reviewer === name);
+      const agreed = mine.filter((r) => consensus.get(r.itemId)?.verdict === r.verdict).length;
+      return { name, graded: mine.length, agreed_with_consensus: agreed, last_at: mine.at(-1)?.createdAt ?? null };
+    });
+
+    const shared = [...byItem.values()].filter((v) => v.length >= 2);
+    const categories = (await store.getRubric(db, round.rubricVersionId))?.scale.map((l) => l.id) ?? ['fail', 'recoverable', 'pass'];
+    const alpha = krippendorffAlpha(shared.map((v) => v.map((r) => r.verdict)), categories, 'nominal');
+
+    const pairwise = [];
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        const a = names[i]!;
+        const b = names[j]!;
+        let items = 0;
+        let agree = 0;
+        for (const votes of shared) {
+          const va = votes.find((v) => v.reviewer === a);
+          const vb = votes.find((v) => v.reviewer === b);
+          if (!va || !vb) continue;
+          items++;
+          if (va.verdict === vb.verdict) agree++;
+        }
+        if (items > 0) pairwise.push({ a, b, items, agree, rate: agree / items });
+      }
+    }
+
+    const disagreements = [];
+    for (const votes of shared) {
+      if (new Set(votes.map((v) => v.verdict)).size < 2) continue;
+      const item = await store.getItem(db, votes[0]!.itemId);
+      const trace = item ? await store.getTrace(db, item.traceId) : null;
+      disagreements.push({
+        itemId: votes[0]!.itemId,
+        title: trace?.title ?? 'Case',
+        verdicts: votes.map((v) => ({ reviewer: v.reviewer, verdict: v.verdict, reason: v.reason })),
+        consensus: consensus.get(votes[0]!.itemId)?.verdict ?? null,
+      });
+    }
+
+    res.json({
+      reviewers,
+      shared_cases: shared.length,
+      alpha,
+      pairwise,
+      disagreements,
+      humanCeiling: 0.81,
+    });
   });
 
   /**

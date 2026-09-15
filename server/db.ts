@@ -252,14 +252,20 @@ CREATE TABLE IF NOT EXISTS patches (
  * from grades so the closed-round guard (nobody grades after seeing results)
  * still holds for the panel while the owner checks it.
  */
+/*
+ * A person's verdict on a case. reviewer names who: 'owner' for the
+ * project's own key, or a reviewer's name when several people adjudicate
+ * the same round. Consensus across reviewers is computed at read time, so
+ * one reviewer and five look the same to everything downstream.
+ */
 CREATE TABLE IF NOT EXISTS user_verdicts (
   id          TEXT PRIMARY KEY,
   round_id    TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
   item_id     TEXT NOT NULL REFERENCES round_items(id) ON DELETE CASCADE,
+  reviewer    TEXT NOT NULL DEFAULT 'owner',
   verdict     TEXT NOT NULL,
   reason      TEXT NOT NULL DEFAULT '',
-  created_at  TEXT NOT NULL,
-  UNIQUE (round_id, item_id)
+  created_at  TEXT NOT NULL
 );
 
 /*
@@ -408,6 +414,9 @@ CREATE TABLE IF NOT EXISTS exports (
   created_at    TEXT NOT NULL
 );
 
+ALTER TABLE user_verdicts   ADD COLUMN IF NOT EXISTS reviewer       TEXT NOT NULL DEFAULT 'owner';
+ALTER TABLE user_verdicts   DROP CONSTRAINT IF EXISTS user_verdicts_round_id_item_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_user_verdicts_reviewer ON user_verdicts(round_id, item_id, reviewer);
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS open_questions TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS drafted_from   TEXT;
 ALTER TABLE rubric_versions ADD COLUMN IF NOT EXISTS conflicts      TEXT NOT NULL DEFAULT '[]';

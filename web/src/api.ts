@@ -460,14 +460,25 @@ export const api = {
       body: json({ action, text }),
     }),
 
-  selfCheck: (roundId: string, token: string) =>
-    call<{ cases: { itemId: string; title: string; content: string; myVerdict: string | null; myReason: string }[]; done: number }>(
-      `/rounds/${roundId}/self-check`,
+  selfCheck: (roundId: string, token: string, reviewer = '') =>
+    call<{ reviewer: string; cases: { itemId: string; title: string; content: string; myVerdict: string | null; myReason: string }[]; done: number }>(
+      `/rounds/${roundId}/self-check${reviewer ? `?reviewer=${encodeURIComponent(reviewer)}` : ''}`,
       { token },
     ),
 
-  submitSelfCheck: (roundId: string, token: string, body: { itemId: string; verdict: string; reason: string }) =>
-    call<{ ok: true }>(`/rounds/${roundId}/self-check`, { method: 'POST', token, body: json(body) }),
+  submitSelfCheck: (roundId: string, token: string, body: { itemId: string; verdict: string; reason: string; reviewer?: string }) =>
+    call<{ ok: true; reviewer: string }>(`/rounds/${roundId}/self-check`, { method: 'POST', token, body: json(body) }),
+
+  /** Several people on one round: who graded, how far they agree, and where they split. */
+  reviewers: (roundId: string, token: string) =>
+    call<{
+      reviewers: { name: string; graded: number; agreed_with_consensus: number; last_at: string | null }[];
+      shared_cases: number;
+      alpha: number | null;
+      pairwise: { a: string; b: string; items: number; agree: number; rate: number }[];
+      disagreements: { itemId: string; title: string; verdicts: { reviewer: string; verdict: string; reason: string }[]; consensus: string | null }[];
+      humanCeiling: number;
+    }>(`/rounds/${roundId}/reviewers`, { token }),
 
   alignment: (roundId: string, token: string) =>
     call<{

@@ -422,9 +422,21 @@ function SelfCheckSection({
   onError: (m: string) => void;
   onChanged: () => void;
 }) {
-  const { data, reload } = useAsync(() => api.selfCheck(roundId, token), [roundId, token]);
+  // Who is grading. Blank is the owner; a name makes these verdicts a
+  // reviewer's, kept apart from the owner's and compared with them. The
+  // name is remembered per browser so a reviewer types it once.
+  const [reviewer, setReviewer] = useState<string>(() => {
+    try {
+      return localStorage.getItem('grading-room:reviewer') ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [reviewerDraft, setReviewerDraft] = useState(reviewer);
+  const { data, reload } = useAsync(() => api.selfCheck(roundId, token, reviewer), [roundId, token, reviewer]);
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [alignment, setAlignment] = useState<Awaited<ReturnType<typeof api.alignment>> | null>(null);
+  const [reviewers, setReviewers] = useState<Awaited<ReturnType<typeof api.reviewers>> | null>(null);
   // Outcomes of deliberate actions, not failures: these render as plain
   // statements, because a success in an error banner reads as a bug.
   const [notice, setNotice] = useState<string | null>(null);
@@ -437,11 +449,23 @@ function SelfCheckSection({
     if (allDone) {
       api.alignment(roundId, token).then(setAlignment).catch(() => undefined);
     }
-  }, [allDone, roundId, token]);
+    api.reviewers(roundId, token).then(setReviewers).catch(() => undefined);
+  }, [allDone, done, roundId, token]);
+
+  function commitReviewer() {
+    const name = reviewerDraft.trim();
+    setReviewer(name);
+    setReasons({});
+    try {
+      localStorage.setItem('grading-room:reviewer', name);
+    } catch {
+      /* per-browser convenience only */
+    }
+  }
 
   async function grade(itemId: string, verdict: string) {
     try {
-      await api.submitSelfCheck(roundId, token, { itemId, verdict, reason: reasons[itemId] ?? '' });
+      await api.submitSelfCheck(roundId, token, { itemId, verdict, reason: reasons[itemId] ?? '', ...(reviewer ? { reviewer } : {}) });
       reload();
       onChanged();
     } catch (err) {
@@ -457,7 +481,23 @@ function SelfCheckSection({
         thing honest. Where you disagree with a unanimous panel is a rubric clause no panel could ever have found,
         because it lives in your head or your business.
       </p>
-      <p className="tiny">{done} of {cases.length} graded</p>
+      <div className="row" style={{ alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+        <p className="tiny" style={{ margin: 0 }}>
+          {done} of {cases.length} graded{reviewer ? ` as ${reviewer}` : ' as the owner'}
+        </p>
+        <label htmlFor="reviewer-name" className="tiny" style={{ margin: 0 }}>
+          Grading as
+        </label>
+        <input
+          id="reviewer-name"
+          placeholder="your name (blank: the owner)"
+          value={reviewerDraft}
+          onChange={(e) => setReviewerDraft(e.target.value)}
+          onBlur={commitReviewer}
+          onKeyDown={(e) => (e.key === 'Enter' ? commitReviewer() : undefined)}
+          style={{ maxWidth: 220 }}
+        />
+      </div>
       {cases.map((c) => (
         <div key={c.itemId} className="panel">
           <h3 style={{ marginTop: 0 }}>{c.title}</h3>
@@ -559,6 +599,62 @@ function SelfCheckSection({
                 </p>
               </div>
             ))
+          )}
+        </>
+      ) : null}
+
+      {reviewers && reviewers.reviewers.length >= 2 ? (
+        <>
+          <h3>Several reviewers, one round</h3>
+          <p className="note">
+            {reviewers.reviewers.length} people graded. On the {reviewers.shared_cases} case{reviewers.shared_cases === 1 ? '' : 's'} at least two of them
+            saw, agreement (Krippendorff’s alpha) is {reviewers.alpha === null ? 'not measurable yet' : reviewers.alpha.toFixed(2)}
+            {reviewers.alpha !== null ? `, against the ${Math.round(reviewers.humanCeiling * 100)} percent ceiling experts reach with each other` : ''}.
+            The consensus everything downstream uses is the majority; the owner breaks ties.
+          </p>
+          <div className="scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Reviewer</th>
+                  <th scope="col">Graded</th>
+                  <th scope="col">With the consensus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewers.reviewers.map((r) => (
+                  <tr key={r.name}>
+                    <td className="case">{r.name}</td>
+                    <td>{r.graded}</td>
+                    <td>{r.agreed_with_consensus} of {r.graded}</td>
+                  </tr>
+                ))}
+                {reviewers.pairwise.map((p) => (
+                  <tr key={`${p.a}|${p.b}`}>
+                    <td className="case">{p.a} and {p.b}</td>
+                    <td>{p.items} shared</td>
+                    <td>agree on {p.agree} ({pct(p.rate, 0)})</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {reviewers.disagreements.length > 0 ? (
+            <>
+              <h3>To settle in a room</h3>
+              {reviewers.disagreements.map((d) => (
+                <div key={d.itemId} className="warn">
+                  <span className="metric-k">{d.title}</span>
+                  <p style={{ margin: '6px 0 0' }}>
+                    {d.verdicts.map((v) => `${v.reviewer} said ${v.verdict}${v.reason ? ` (“${v.reason}”)` : ''}`).join('; ')}.
+                    {d.consensus ? ` Consensus for now: ${d.consensus}.` : ''} A case two of your own people read differently is a
+                    sentence the standard is missing.
+                  </p>
+                </div>
+              ))}
+            </>
+          ) : (
+            <p className="note">No case split your reviewers. That is rarer than it sounds.</p>
           )}
         </>
       ) : null}

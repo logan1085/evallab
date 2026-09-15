@@ -1318,23 +1318,78 @@ function toPatch(row: Row): PatchRecord {
 
 /* ---- The owner's ten ------------------------------------------------------ */
 
+export const OWNER_REVIEWER = 'owner';
+
 export async function saveUserVerdict(
   db: DB,
-  args: { roundId: string; itemId: string; verdict: string; reason: string },
+  args: { roundId: string; itemId: string; verdict: string; reason: string; reviewer?: string },
 ): Promise<void> {
+  const reviewer = (args.reviewer ?? OWNER_REVIEWER).trim() || OWNER_REVIEWER;
   await db.run(
-    `INSERT INTO user_verdicts (id, round_id, item_id, verdict, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (round_id, item_id) DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason`,
-    newId(), args.roundId, args.itemId, args.verdict, args.reason, now(),
+    `INSERT INTO user_verdicts (id, round_id, item_id, reviewer, verdict, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (round_id, item_id, reviewer) DO UPDATE SET verdict = EXCLUDED.verdict, reason = EXCLUDED.reason`,
+    newId(), args.roundId, args.itemId, reviewer, args.verdict, args.reason, now(),
   );
 }
 
-export async function listUserVerdicts(db: DB, roundId: string) {
-  return (await db.all('SELECT * FROM user_verdicts WHERE round_id = ? ORDER BY created_at', roundId) as Row[]).map((row) => ({
+export interface ReviewerVerdict {
+  itemId: string;
+  reviewer: string;
+  verdict: string;
+  reason: string;
+  createdAt: string;
+}
+
+/** Every person's verdict on every case of the round, one row each. */
+export async function listReviewerVerdicts(db: DB, roundId: string): Promise<ReviewerVerdict[]> {
+  return (await db.all('SELECT * FROM user_verdicts WHERE round_id = ? ORDER BY created_at, id', roundId) as Row[]).map((row) => ({
     itemId: str(row.item_id),
+    reviewer: str(row.reviewer) || OWNER_REVIEWER,
     verdict: str(row.verdict),
     reason: str(row.reason),
+    createdAt: str(row.created_at),
   }));
+}
+
+export interface ConsensusVerdict {
+  itemId: string;
+  verdict: string;
+  reason: string;
+  /** How many people graded this case. */
+  reviewers: number;
+  /** True when every reviewer said the same thing (trivially, with one). */
+  unanimous: boolean;
+  /** Who the verdict came from: the majority, or the owner on a tie. */
+  by: string[];
+}
+
+/**
+ * One verdict per case: the people's word, as everything downstream reads
+ * it. The majority across reviewers; a tie goes to the owner when the owner
+ * is among them, else to whoever graded first. The reason is the majority's,
+ * the owner's when the owner is in it.
+ */
+export async function listUserVerdicts(db: DB, roundId: string): Promise<ConsensusVerdict[]> {
+  const rows = await listReviewerVerdicts(db, roundId);
+  const byItem = new Map<string, ReviewerVerdict[]>();
+  for (const r of rows) byItem.set(r.itemId, [...(byItem.get(r.itemId) ?? []), r]);
+  const out: ConsensusVerdict[] = [];
+  for (const [itemId, votes] of byItem) {
+    const tally = new Map<string, ReviewerVerdict[]>();
+    for (const v of votes) tally.set(v.verdict, [...(tally.get(v.verdict) ?? []), v]);
+    const ranked = [...tally.entries()].sort((a, b) => {
+      if (b[1].length !== a[1].length) return b[1].length - a[1].length;
+      const ownerA = a[1].some((v) => v.reviewer === OWNER_REVIEWER) ? 1 : 0;
+      const ownerB = b[1].some((v) => v.reviewer === OWNER_REVIEWER) ? 1 : 0;
+      if (ownerA !== ownerB) return ownerB - ownerA;
+      return a[1][0]!.createdAt.localeCompare(b[1][0]!.createdAt);
+    });
+    const [verdict, group] = ranked[0]!;
+    const owner = group.find((v) => v.reviewer === OWNER_REVIEWER);
+    const reason = owner?.reason || group.map((v) => v.reason).find((r) => r.trim()) || '';
+    out.push({ itemId, verdict, reason, reviewers: votes.length, unanimous: tally.size === 1, by: group.map((v) => v.reviewer) });
+  }
+  return out;
 }
 
 
