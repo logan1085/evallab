@@ -1146,7 +1146,9 @@ function ScenarioWriter({
       const res = await api.generateScenarios(slug, token, { description });
       setResult(
         res.provider.real
-          ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.`
+          ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.${
+              res.failed.length > 0 ? ` ${res.failed.length} of ${res.parts} parts did not land (${res.failed.join('; ')}); write again for the rest.` : ''
+            }`
           : `${res.scenarios.length} starter scenarios added. No OPENROUTER_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
       );
       setDescription('');
@@ -1225,8 +1227,13 @@ function TracesTab({
     if (!autoWrite) return;
     setArrival({ status: 'writing', message: '' });
     try {
-      await api.generateScenarios(slug, token, { description: autoWrite });
+      const res = await api.generateScenarios(slug, token, { description: autoWrite });
       setArrival({ status: 'idle', message: '' });
+      if (res.failed.length > 0) {
+        setResult(
+          `${res.scenarios.length} cases written; ${res.failed.length} of ${res.parts} parts did not land (${res.failed.join('; ')}). Write more below for the rest.`,
+        );
+      }
       onChange();
     } catch (err) {
       setArrival({ status: 'failed', message: err instanceof Error ? err.message : 'The scenarios could not be written.' });

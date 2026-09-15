@@ -113,6 +113,8 @@ export interface AppOptions {
   pinFetch?: typeof fetch;
   /** Gateway options for calls to a company's own endpoints; tests inject a transport. */
   endpointGateway?: GatewayOptions;
+  /** Gateway options merged into every creator call (scenarios, seats, drafts); tests inject a transport. */
+  creatorGateway?: GatewayOptions;
 }
 
 export function createApp(db: DB, appOpts: AppOptions = {}) {
@@ -216,9 +218,10 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * the daily ceiling, so GR_DAILY_COST_CEILING_CREDITS actually caps what an
    * anonymous visitor can spend.
    */
-  const meter = () => ({
+  const meter = (): GatewayOptions => ({
     recorder: (attempt: Parameters<typeof store.recordModelCall>[1]) => store.recordModelCall(db, attempt),
     guard: createSpendGuard(db),
+    ...(appOpts.creatorGateway ?? {}),
   });
 
   /**
@@ -690,7 +693,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     const scenarist = resolveScenarist();
     try {
       const prepared = prepareDocuments(chosen.map((d) => ({ title: d.title, kind: d.kind, content: d.content })));
-      const scenarios = await scenarist.write(
+      const written = await scenarist.write(
         {
           description: body.data.description,
           documents: prepared.documents,
@@ -698,9 +701,11 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         },
         meter(),
       );
+      const { scenarios } = written;
       if (scenarios.length === 0) {
         return res.status(502).json({ error: 'No usable scenarios came back. Try a more specific description.' });
       }
+      for (const line of written.failed) console.warn(`[scenarios] ${project.slug}: ${line}`);
       const saved = await store.addTraces(
         db,
         project.id,
@@ -716,6 +721,10 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       res.status(201).json({
         scenarios: saved.map((t, i) => ({ id: t.id, title: t.title, content: t.content, probe: scenarios[i]!.probe })),
         provider: { id: scenarist.id, model: scenarist.model, real: scenarist.real },
+        // Written in parts; the parts that failed are named so a short set
+        // reads as short for a reason, not as the model's whole answer.
+        parts: written.parts,
+        failed: written.failed,
       });
     } catch (error) {
       if (error instanceof DrafterError) {
@@ -3629,7 +3638,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         { id: newId(), title: 'No invented policy', body: 'The agent never states a policy, price, or timeline that is not in the operating documents.' },
       ],
     });
-    const scenarios = await offlineScenarist().write({ description: project.description });
+    const { scenarios } = await offlineScenarist().write({ description: project.description });
     await store.addTraces(
       db,
       project.id,

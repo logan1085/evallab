@@ -65,7 +65,7 @@ export function buildScenarioSystemPrompt(): string {
   ].join('\n');
 }
 
-export function buildScenarioUserPrompt(req: ScenarioRequest): string {
+export function buildScenarioUserPrompt(req: ScenarioRequest, batch?: ScenarioBatch): string {
   const lines: string[] = [];
   const documents = req.documents ?? [];
 
@@ -87,8 +87,44 @@ export function buildScenarioUserPrompt(req: ScenarioRequest): string {
     });
   }
 
-  lines.push(`Write ${clampScenarioCount(req.count)} scenarios.`);
+  if (batch) {
+    lines.push(`This is part ${batch.index + 1} of ${batch.of}; other parts cover the other kinds of ground. Write ${batch.count} scenarios, all of this kind: ${batch.focus}`);
+  } else {
+    lines.push(`Write ${clampScenarioCount(req.count)} scenarios.`);
+  }
   return lines.join('\n');
+}
+
+/** One slice of a scenario write: how many, and which kind of ground. */
+export interface ScenarioBatch {
+  index: number;
+  of: number;
+  count: number;
+  focus: string;
+}
+
+/**
+ * The three kinds of ground from the system prompt, as the focus of each
+ * batch. A frontier model writing twelve scenarios at once is a single
+ * long call that a deployment deadline cuts off; three parallel writes of
+ * four each finish in the time one of them took, and each part can land
+ * on its own. Twelve becomes 4 / 4 / 4; five becomes 2 / 2 / 1.
+ */
+export const SCENARIO_GROUNDS = [
+  'clear cases the written rules settle, so agreement has an anchor.',
+  'boundary cases where the rules run out, nearly contradict, or leave a judgment call. If the documents contradict each other, land one scenario exactly on the contradiction.',
+  'cases the documents never imagined but the operation will meet.',
+];
+
+export function scenarioBatches(count: number | undefined): ScenarioBatch[] {
+  const total = clampScenarioCount(count);
+  const parts = Math.min(SCENARIO_GROUNDS.length, total);
+  const out: ScenarioBatch[] = [];
+  for (let i = 0; i < parts; i++) {
+    const n = Math.floor(total / parts) + (i < total % parts ? 1 : 0);
+    if (n > 0) out.push({ index: i, of: parts, count: n, focus: SCENARIO_GROUNDS[i]! });
+  }
+  return out;
 }
 
 export function scenarioJsonSchema(count: number) {

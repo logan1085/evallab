@@ -13,6 +13,7 @@ import {
   buildScenarioUserPrompt,
   clampScenarioCount,
   normalizeScenarios,
+  scenarioBatches,
   scenarioJsonSchema,
   type Scenario,
   type ScenarioRequest,
@@ -23,12 +24,25 @@ import type { GatewayOptions } from './gateway.js';
 
 export const DEFAULT_SCENARIO_MODEL = 'openrouter';
 
+/**
+ * What a write hands back: the scenarios that landed, and the parts that
+ * did not, in the gateway's words. A write with some parts failed is still
+ * a write; the Room shows the cases it has and names what is missing.
+ */
+export interface ScenarioWrite {
+  scenarios: Scenario[];
+  /** How many parallel parts the write was split into. */
+  parts: number;
+  /** One line per part that failed, empty when every part landed. */
+  failed: string[];
+}
+
 export interface ScenarioProvider {
   id: string;
   model: string;
   /** True when a model actually read the description and documents. */
   real: boolean;
-  write(req: ScenarioRequest, gateway?: GatewayOptions): Promise<Scenario[]>;
+  write(req: ScenarioRequest, gateway?: GatewayOptions): Promise<ScenarioWrite>;
 }
 
 export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_SCENARIO_MODEL): ScenarioProvider {
@@ -36,7 +50,17 @@ export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_
   return offlineScenarist();
 }
 
-/** One OpenRouter key makes the arrival real: scenarios written, not stubbed. */
+/**
+ * One OpenRouter key makes the arrival real: scenarios written, not stubbed.
+ *
+ * Written in parts, in parallel: one call for twelve scenarios is several
+ * thousand output tokens from a frontier model, which is longer than a
+ * deployment's request deadline, and a call that dies at the deadline
+ * leaves zero cases however good the model was. Three parts of four
+ * finish in the time one of them takes, each under its own deadline
+ * sized to its output, and a part that fails costs four cases, not
+ * twelve. Titles are deduplicated across parts.
+ */
 function openrouterScenarist(): ScenarioProvider {
   return {
     id: 'openrouter',
@@ -44,14 +68,45 @@ function openrouterScenarist(): ScenarioProvider {
     real: true,
     async write(req, gateway) {
       const count = clampScenarioCount(req.count);
-      const parsed = await openrouterJson<unknown>({
-        system: buildScenarioSystemPrompt(),
-        user: buildScenarioUserPrompt(req),
-        schema: scenarioJsonSchema(count),
-        maxTokens: 8192,
-        gateway,
+      const batches = scenarioBatches(count);
+      const results = await Promise.allSettled(
+        batches.map(async (batch) => {
+          const parsed = await openrouterJson<unknown>({
+            system: buildScenarioSystemPrompt(),
+            user: buildScenarioUserPrompt(req, batch),
+            schema: scenarioJsonSchema(batch.count),
+            // Roughly 250 tokens per scenario, with room: the deadline in
+            // openrouterJson is derived from this number.
+            maxTokens: Math.min(4096, 400 * batch.count + 400),
+            gateway,
+          });
+          return normalizeScenarios(parsed, batch.count);
+        }),
+      );
+      const scenarios: Scenario[] = [];
+      const failed: string[] = [];
+      const seen = new Set<string>();
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const message = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          failed.push(`part ${i + 1} of ${batches.length}: ${message}`);
+          return;
+        }
+        for (const s of r.value) {
+          const key = s.title.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          scenarios.push(s);
+        }
       });
-      return normalizeScenarios(parsed, count);
+      if (scenarios.length === 0) {
+        // Every part failed: the first failure is the diagnosis, and it is
+        // a DrafterError already, with its stage named.
+        const first = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+        if (first && first.reason instanceof DrafterError) throw first.reason;
+        throw new DrafterError('api', failed[0] ?? 'No scenarios came back.');
+      }
+      return { scenarios: scenarios.slice(0, count), parts: batches.length, failed };
     },
   };
 }
@@ -95,7 +150,7 @@ export function offlineScenarist(): ScenarioProvider {
           probe: 'Whether caution reads as diligence or as failure to do the job.',
         },
       ];
-      return stubs.slice(0, clampScenarioCount(req.count));
+      return { scenarios: stubs.slice(0, clampScenarioCount(req.count)), parts: 1, failed: [] };
     },
   };
 }

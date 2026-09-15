@@ -59,6 +59,21 @@ export function resolveCreatorPin(): Pin {
  */
 const CREATOR_TIMEOUT_MS = Number(process.env.GR_CREATOR_TIMEOUT_MS ?? 25_000);
 const REPAIR_TIMEOUT_MS = Number(process.env.GR_REPAIR_TIMEOUT_MS ?? 8_000);
+/** The most any one creator call may wait; under the deployment's own ceiling. */
+const CREATOR_TIMEOUT_MAX_MS = Number(process.env.GR_CREATOR_TIMEOUT_MAX_MS ?? 120_000);
+
+/**
+ * A deadline sized to the answer asked for. A frontier model writes on the
+ * order of twenty to forty tokens a second, so a call allowed 4096 tokens
+ * can legitimately take a minute and a half; holding every creator call to
+ * the same 25 seconds meant the scenario write, the longest one, was the
+ * one that always died at the deadline, and its retries were all doomed
+ * too. Twenty milliseconds a token, never under the floor, never over the
+ * ceiling.
+ */
+export function creatorDeadlineMs(maxTokens: number): number {
+  return Math.min(CREATOR_TIMEOUT_MAX_MS, Math.max(CREATOR_TIMEOUT_MS, maxTokens * 20));
+}
 
 export async function openrouterJson<T>(args: {
   /** Which pin runs this task. Defaults to the creator pin. */
@@ -73,7 +88,7 @@ export async function openrouterJson<T>(args: {
   const responseFormat = args.schema
     ? { type: 'json_schema', json_schema: { name: 'result', strict: true, schema: args.schema } }
     : { type: 'json_object' };
-  const gateway: GatewayOptions = { timeoutMs: CREATOR_TIMEOUT_MS, ...(args.gateway ?? {}) };
+  const gateway: GatewayOptions = { timeoutMs: creatorDeadlineMs(args.maxTokens ?? 2048), ...(args.gateway ?? {}) };
 
   const ask = (messages: { role: 'system' | 'user' | 'assistant'; content: string }[]) =>
     callModel(

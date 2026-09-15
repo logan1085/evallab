@@ -548,6 +548,9 @@ export const api = {
     call<{
       scenarios: { id: string; title: string; content: string; probe: string }[];
       provider: { id: string; model: string; real: boolean };
+      /** Written in parallel parts; `failed` names any part that did not land. */
+      parts: number;
+      failed: string[];
     }>(`/projects/${slug}/scenarios`, { method: 'POST', token, body: json(body) }),
 
   exportUrl: (rubricId: string, token: string, format: 'md' | 'json' | 'judge') =>
