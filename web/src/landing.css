@@ -515,6 +515,73 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- The gap: who sells what --------------------------------------------- */
+
+.l-gap {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  margin: 40px 0 0;
+  border-top: 1px solid var(--ink);
+}
+
+.l-gap > div {
+  padding: 22px 24px 24px 0;
+  border-bottom: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+.l-gap > div + div:not(.us) {
+  border-left: 1px solid var(--hairline);
+  padding-left: 24px;
+}
+
+.l-gap dt {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.l-gap dd {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+.l-gap > div.us {
+  grid-column: 1 / -1;
+  border-top: 2px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  padding-right: 0;
+}
+
+.l-gap > div.us dt {
+  color: var(--signal);
+}
+
+.l-gap > div.us dd {
+  font-family: var(--serif);
+  font-size: clamp(20px, 2vw, 25px);
+  line-height: 1.3;
+  color: var(--ink);
+  max-width: 62ch;
+}
+
+@media (max-width: 720px) {
+  .l-gap {
+    grid-template-columns: 1fr;
+  }
+  .l-gap > div + div:not(.us) {
+    border-left: none;
+    padding-left: 0;
+  }
+}
+
 /* ---- Closer ------------------------------------------------------------- */
 
 .l-close {

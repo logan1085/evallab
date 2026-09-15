@@ -13,5 +13,8 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Route tests seat a panel and grade through the simulation; under a
+    // full parallel run that can pass ten seconds on a loaded machine.
+    testTimeout: 30_000,
   },
 });

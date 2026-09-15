@@ -245,6 +245,42 @@ export function Home() {
         </div>
       </section>
 
+      <section className="l-section">
+        <div className="l-wrap">
+          <p className="l-eyebrow">The gap</p>
+          <h2 className="l-h2" data-reveal>
+            Everyone sells a way to run evals, or a way to buy labels. Nobody sells the standard.
+          </h2>
+          <p className="l-lede" data-reveal style={{ ['--d' as string]: '70ms' }}>
+            Every tool starts one step after the hard part. You arrive with a rubric you do not have and a labeled set
+            you never made, and the judge is one model grading itself. What you leave with is a number that moves when
+            the prompt does.
+          </p>
+          <dl className="l-gap" data-reveal style={{ ['--d' as string]: '120ms' }}>
+            <div>
+              <dt>Eval frameworks</dt>
+              <dd>A harness that runs tests. The standard it tests against is your problem.</dd>
+            </div>
+            <div>
+              <dt>Labeling vendors</dt>
+              <dd>Rows from people working to a brief written from the outside. No reasons, no versions.</dd>
+            </div>
+            <div>
+              <dt>Your own LLM judge</dt>
+              <dd>One model, one phrasing, position bias and self-preference unmeasured.</dd>
+            </div>
+            <div className="us">
+              <dt>The Grading Room</dt>
+              <dd>
+                A standard written from your own policies and decisions, graded by experts with conflicting stakes
+                across model families, adjudicated by your people, and exported as an eval and as training data with
+                a reason and a source on every row. Yours, whichever model you rent this year.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
       <section className="l-close">
         <div className="l-wrap">
           <p className="line" data-reveal>
