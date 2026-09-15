@@ -87,7 +87,7 @@ export function ProjectPage() {
 
       <RunSection slug={slug!} token={token} seats={seats} caseCount={caseCount} rounds={data.rounds} onError={setError} />
 
-      {data.rounds.some((r) => r.status === 'closed') ? (
+      {seats.length > 0 ? (
         <DataSection slug={slug!} token={token} />
       ) : null}
 
@@ -703,6 +703,10 @@ function DataSection({ slug, token }: { slug: string; token: string }) {
       </p>
       {loading && !data ? (
         <Loading what="data" />
+      ) : c && c.rounds === 0 && c.pairs === 0 ? (
+        <p className="tiny" style={{ margin: '10px 0 0' }}>
+          Nothing to export yet. The first finished round fills examples, gold and rewards; pairs you pose below fill pairs.jsonl as soon as the panel compares them.
+        </p>
       ) : c ? (
         <div className="scroll-x" style={{ marginTop: 12 }}>
           <table>
