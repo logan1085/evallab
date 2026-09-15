@@ -688,8 +688,8 @@ function RunSection({
  * writes the files, so the numbers on screen are the numbers in the file.
  */
 function DataSection({ slug, token }: { slug: string; token: string }) {
-  const { data, loading } = useAsync(() => api.training(slug, token), [slug, token]);
-  const href = (format: 'examples' | 'gold' | 'rewards') => api.trainingUrl(slug, token, format);
+  const { data, loading, reload } = useAsync(() => api.training(slug, token), [slug, token]);
+  const href = (format: 'examples' | 'gold' | 'rewards' | 'pairs') => api.trainingUrl(slug, token, format);
   const c = data?.counts;
   return (
     <div className="panel">
@@ -733,6 +733,14 @@ function DataSection({ slug, token }: { slug: string; token: string }) {
                 <td>One row per judge per case, the verdict as a score on your standard's scale, for training a reward model against your standard rather than a generic one.</td>
                 <td><a className="btn ghost tiny-btn" href={href('rewards')}>download</a></td>
               </tr>
+              <tr>
+                <td className="mono">pairs.jsonl</td>
+                <td className="mono">{c.pairs}</td>
+                <td>
+                  Preference pairs: one prompt, a chosen answer and a rejected one, the rows preference training reads. {c.pairs_compared} compared by the panel below, {c.pairs_derived} derived from graded cases that share a prompt.
+                </td>
+                <td><a className="btn ghost tiny-btn" href={href('pairs')}>download</a></td>
+              </tr>
             </tbody>
           </table>
           <p className="tiny" style={{ marginTop: 10 }}>
@@ -740,6 +748,167 @@ function DataSection({ slug, token }: { slug: string; token: string }) {
           </p>
         </div>
       ) : null}
+      <PairsBlock slug={slug} token={token} onChange={reload} />
+    </div>
+  );
+}
+
+/* ---- Preference pairs ---------------------------------------------------- */
+
+/**
+ * One prompt, two answers, which one the standard prefers. The panel
+ * compares both orders, so a seat whose choice flips when A and B swap
+ * places is set aside as position bias. The owner's own pick sits beside
+ * the panel's and outranks it in the export.
+ */
+function PairsBlock({ slug, token, onChange }: { slug: string; token: string; onChange: () => void }) {
+  const { data, loading, reload } = useAsync(() => api.pairs(slug, token), [slug, token]);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ title: '', prompt: '', a: '', b: '' });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const pairs = data?.pairs ?? [];
+
+  async function run(key: string, fn: () => Promise<unknown>) {
+    setBusy(key);
+    setError(null);
+    try {
+      await fn();
+      reload();
+      onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That did not work.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const label = (p: (typeof pairs)[number]) => {
+    if (p.preferred) return `${p.preferred.toUpperCase()} preferred`;
+    if (p.ownerChoice === 'tie') return 'you called it a tie';
+    if (!p.gradedAt) return 'not compared yet';
+    return p.outcome.counted < 2 ? 'no preference held' : 'the panel split';
+  };
+
+  return (
+    <div style={{ marginTop: 22 }}>
+      <span className="metric-k">Preference pairs</span>
+      <p className="tiny" style={{ margin: '6px 0 0' }}>
+        Pose two answers to one prompt and the panel says which one the standard prefers, in both orders, so a seat that
+        prefers whatever comes first is caught rather than counted. Your own pick outranks the panel’s in the export.
+      </p>
+      {error ? <p className="tiny" style={{ color: 'var(--split)', margin: '8px 0 0' }}>{error}</p> : null}
+
+      {loading && !data ? <Loading what="pairs" /> : null}
+      {pairs.length > 0 ? (
+        <div style={{ marginTop: 10 }}>
+          {pairs.map((p) => (
+            <div key={p.id} className="seat-row">
+              <span className="seat-name">
+                {p.title}
+                <span className="seat-note" style={{ marginLeft: 10 }}>{label(p)}</span>
+              </span>
+              <span className="seat-stake">
+                {p.gradedAt ? (
+                  <>
+                    {p.votes.map((v) => (
+                      <span key={v.seatId} className="vote-chip" title={v.reason} style={v.stable === false ? { color: 'var(--amber)' } : undefined}>
+                        {v.seatName}: {v.choice.toUpperCase()}
+                        {v.stable === false ? ' (flipped)' : ''}
+                      </span>
+                    ))}
+                    <span className="fails">
+                      {p.outcome.winner
+                        ? `Panel prefers ${p.outcome.winner.toUpperCase()} with ${Math.round(p.outcome.support * 100)}% of counted weight`
+                        : 'The panel did not settle it'}
+                      {p.outcome.flipped ? `; ${p.outcome.flipped} vote${p.outcome.flipped === 1 ? '' : 's'} flipped under the swap` : ''}
+                      {p.standards_version ? ` · Standards v${p.standards_version}` : ''}
+                    </span>
+                  </>
+                ) : (
+                  <span className="fails">Compare to see every seat’s choice and reason.</span>
+                )}
+                {open === p.id ? (
+                  <div className="tiny" style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                    <b>Prompt.</b> {p.prompt}
+                    {'\n\n'}
+                    <b>A.</b> {p.a}
+                    {'\n\n'}
+                    <b>B.</b> {p.b}
+                  </div>
+                ) : null}
+              </span>
+              <span className="seat-model">{p.ownerChoice ? `you: ${p.ownerChoice.toUpperCase()}` : ''}</span>
+              <span className="seat-actions">
+                <button onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? 'hide' : 'read'}</button>
+                <button disabled={busy !== null} onClick={() => run(`grade:${p.id}`, () => api.gradePair(slug, token, p.id))}>
+                  {busy === `grade:${p.id}` ? 'comparing…' : p.gradedAt ? 'compare again' : 'compare'}
+                </button>
+                {(['a', 'b', 'tie'] as const).map((c) => (
+                  <button
+                    key={c}
+                    disabled={busy !== null}
+                    title={`Your call: ${c === 'tie' ? 'a tie' : c.toUpperCase()}`}
+                    style={p.ownerChoice === c ? { fontWeight: 600 } : undefined}
+                    onClick={() => run(`pick:${p.id}`, () => api.setPairVerdict(slug, token, p.id, { choice: p.ownerChoice === c ? null : c }))}
+                  >
+                    {c === 'tie' ? 'tie' : c.toUpperCase()}
+                  </button>
+                ))}
+                <button disabled={busy !== null} onClick={() => run(`rm:${p.id}`, () => api.deletePair(slug, token, p.id))}>
+                  remove
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {adding ? (
+        <div className="seat-edit" style={{ marginTop: 10 }}>
+          <div>
+            <label htmlFor="pair-title">Title</label>
+            <input id="pair-title" placeholder="Refund over the cap, two ways" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
+          </div>
+          <div>
+            <label htmlFor="pair-prompt">Prompt</label>
+            <textarea id="pair-prompt" rows={3} placeholder="USER: I want a refund on my $90 order." value={form.prompt} onChange={(e) => setForm((f) => ({ ...f, prompt: e.target.value }))} />
+          </div>
+          <div>
+            <label htmlFor="pair-a">Answer A</label>
+            <textarea id="pair-a" rows={3} value={form.a} onChange={(e) => setForm((f) => ({ ...f, a: e.target.value }))} />
+          </div>
+          <div>
+            <label htmlFor="pair-b">Answer B</label>
+            <textarea id="pair-b" rows={3} value={form.b} onChange={(e) => setForm((f) => ({ ...f, b: e.target.value }))} />
+          </div>
+          <div className="row">
+            <button
+              className="tiny-btn"
+              disabled={busy !== null || !form.title.trim() || !form.prompt.trim() || !form.a.trim() || !form.b.trim()}
+              onClick={() =>
+                run('add', async () => {
+                  await api.addPair(slug, token, { title: form.title.trim(), prompt: form.prompt.trim(), a: form.a.trim(), b: form.b.trim() });
+                  setForm({ title: '', prompt: '', a: '', b: '' });
+                  setAdding(false);
+                })
+              }
+            >
+              {busy === 'add' ? 'Adding…' : 'Add the pair'}
+            </button>
+            <button className="ghost tiny-btn" onClick={() => setAdding(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p style={{ margin: '10px 0 0' }}>
+          <button className="ghost tiny-btn" onClick={() => setAdding(true)}>
+            add a pair
+          </button>
+        </p>
+      )}
     </div>
   );
 }

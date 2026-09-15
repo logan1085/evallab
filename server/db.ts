@@ -317,6 +317,39 @@ CREATE TABLE IF NOT EXISTS endpoints (
 CREATE INDEX IF NOT EXISTS idx_endpoints_project ON endpoints(project_id);
 
 /*
+ * Preference pairs: one prompt, two answers, which one the standard prefers.
+ * Every seat compares both orders; a vote that flips when A and B swap is
+ * position bias and is set aside. The owner's own choice sits beside the
+ * panel's, never replacing it.
+ */
+CREATE TABLE IF NOT EXISTS pairs (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  prompt        TEXT NOT NULL,
+  a             TEXT NOT NULL,
+  b             TEXT NOT NULL,
+  owner_choice  TEXT,
+  owner_reason  TEXT NOT NULL DEFAULT '',
+  graded_at     TEXT,
+  rubric_version_id TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pairs_project ON pairs(project_id);
+
+CREATE TABLE IF NOT EXISTS pair_votes (
+  id          TEXT PRIMARY KEY,
+  pair_id     TEXT NOT NULL REFERENCES pairs(id) ON DELETE CASCADE,
+  grader_id   TEXT NOT NULL REFERENCES graders(id) ON DELETE CASCADE,
+  -- 'ab' is the canonical order; 'ba' the swap. Choices are stored as seen.
+  ordering    TEXT NOT NULL,
+  choice      TEXT NOT NULL,
+  reason      TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  UNIQUE (pair_id, grader_id, ordering)
+);
+
+/*
  * One row per model-call attempt, retries and failures included, with the
  * numbers read straight off the router's usage object and never recomputed.
  * Nothing is rolled up: a round's spend is summed from these rows at read

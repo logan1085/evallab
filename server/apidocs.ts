@@ -200,7 +200,30 @@ shipped.
 
 The project's judgment as rows, with provenance on every one: the case, the
 judge, the model id, and the version of the standard it was scored under.
-Built from every finished round.
+Built from every finished round. Four files: examples (settled cases,
+chat-shaped), gold (the owner's adjudications), rewards (one row per judge
+per case, scored on the standard's scale), and pairs (prompt, chosen,
+rejected: the rows preference post-training reads).
+
+#### Preference pairs
+
+Pose two answers to one prompt. Every seat compares them in both orders,
+so a seat whose choice flips when A and B swap places is set aside as
+position bias rather than counted. The owner's own pick sits beside the
+panel's and outranks it in the export. Pairs are also derived, without
+asking, from two graded transcripts that share a prompt and landed on
+different levels of the scale.
+
+\`\`\`bash
+curl -s -X POST ${v1}/projects/$SLUG/pairs -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"title":"Refund over the cap, two ways","prompt":"USER: refund my $90 order.","a":"Done, refunded.","b":"That needs approval; I have opened the request."}'
+curl -s -X POST ${v1}/projects/$SLUG/pairs/$PAIR/grade -H "Authorization: Bearer $TOKEN"     # every seat, both orders
+curl -s -X PATCH ${v1}/projects/$SLUG/pairs/$PAIR/verdict -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"choice":"b","reason":"Over the cap needs approval."}'
+curl -s ${v1}/projects/$SLUG/pairs -H "Authorization: Bearer $TOKEN"
+curl -s "${v1}/projects/$SLUG/training?format=pairs" -H "Authorization: Bearer $TOKEN"     # pairs.jsonl
+\`\`\`
 
 \`\`\`bash
 curl -s ${v1}/projects/$SLUG/training -H "Authorization: Bearer $TOKEN"           # counts + all three sets

@@ -19,9 +19,12 @@
  */
 
 import {
+  buildPairSystemPrompt,
+  buildPairUserPrompt,
   buildPanelSystemPrompt,
   buildPanelUserPrompt,
   buildSeatSystemPrompt,
+  PAIR_CHOICE_SCHEMA,
   panelJsonSchema,
   SEAT_VERDICT_SCHEMA,
   type Seat,
@@ -46,11 +49,28 @@ export interface ScoreRequest {
   variant?: number;
 }
 
+/** Two answers to one prompt; the seat says which the standard prefers. */
+export interface CompareRequest {
+  seat: Pick<Seat, 'id' | 'name' | 'objective' | 'failsFor' | 'model' | 'family'>;
+  rubricMarkdown: string;
+  pairId: string;
+  title: string;
+  prompt: string;
+  a: string;
+  b: string;
+}
+
+export interface SeatChoice {
+  choice: 'a' | 'b' | 'tie';
+  reason: string;
+}
+
 export interface FamilyAdapter {
   family: string;
   model: string;
   real: boolean;
   score(req: ScoreRequest, gateway?: GatewayOptions): Promise<SeatVerdict>;
+  compare(req: CompareRequest, gateway?: GatewayOptions): Promise<SeatChoice>;
 }
 
 /**
@@ -101,6 +121,38 @@ async function scoreThroughGateway(
   }
 }
 
+/** The pairwise call: one prompt, two answers, one choice with a reason. */
+async function compareThroughGateway(
+  target: { pin_id: string; endpoint?: OwnEndpoint },
+  req: CompareRequest,
+  gateway: GatewayOptions,
+): Promise<SeatChoice> {
+  const ask = (extra: { role: 'user'; content: string }[]) =>
+    callModel(
+      {
+        ...target,
+        messages: [
+          { role: 'system', content: buildPairSystemPrompt(req.seat, req.rubricMarkdown) },
+          { role: 'user', content: buildPairUserPrompt(req.title, req.prompt, req.a, req.b) },
+          ...extra,
+        ],
+        max_tokens: 300,
+        response_format: { type: 'json_schema', json_schema: { name: 'choice', strict: true, schema: PAIR_CHOICE_SCHEMA } },
+        caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.pairId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
+      },
+      gateway,
+    );
+  const result = await ask([]);
+  if (result.error) throw new DrafterError('api', result.error.message);
+  try {
+    return normalizeChoice(JSON.parse(result.text));
+  } catch {
+    const retry = await ask([{ role: 'user', content: 'Your previous reply was missing the choice (a, b, or tie) or the one-sentence reason. Reply with both.' }]);
+    if (retry.error) throw new DrafterError('api', retry.error.message);
+    return normalizeChoice(JSON.parse(retry.text));
+  }
+}
+
 export function openrouterAdapter(family: string): FamilyAdapter {
   const pin = pinsByFamily('small').get(family);
   if (!pin) return offlineAdapter();
@@ -109,6 +161,7 @@ export function openrouterAdapter(family: string): FamilyAdapter {
     model: pin.openrouter_model_id,
     real: true,
     score: (req, gateway = {}) => scoreThroughGateway({ pin_id: pin.pin_id }, req, gateway),
+    compare: (req, gateway = {}) => compareThroughGateway({ pin_id: pin.pin_id }, req, gateway),
   };
 }
 
@@ -128,6 +181,7 @@ export function endpointAdapter(endpoint: OwnEndpoint): FamilyAdapter {
     model: endpoint.model,
     real: true,
     score: (req, gateway = {}) => scoreThroughGateway({ pin_id: `byo:${endpoint.id}`, endpoint }, req, gateway),
+    compare: (req, gateway = {}) => compareThroughGateway({ pin_id: `byo:${endpoint.id}`, endpoint }, req, gateway),
   };
 }
 
@@ -138,6 +192,9 @@ function missingEndpointAdapter(family: string): FamilyAdapter {
     model: 'missing',
     real: true,
     async score() {
+      throw new DrafterError('api', 'This seat ran on an endpoint that has since been removed. Point the seat at another endpoint, or a registry family.');
+    },
+    async compare() {
       throw new DrafterError('api', 'This seat ran on an endpoint that has since been removed. Point the seat at another endpoint, or a registry family.');
     },
   };
@@ -164,10 +221,27 @@ export function adapterFor(family: string, endpoints: OwnEndpoint[] = []): Famil
  * reproducible; the persona bias gives the disagreement map real structure.
  */
 export function offlineAdapter(): FamilyAdapter {
-  return {
+  const adapter: FamilyAdapter = {
     family: 'offline',
     model: 'simulated',
     real: false,
+    // The simulated preference is the simulated verdict applied twice: the
+    // answer that scores higher on this seat's rules wins, equal scores tie.
+    // Order-blind by construction, so the swap check passes, which is what
+    // a simulation of a fair judge should do.
+    async compare(req) {
+      const rank = { fail: 0, recoverable: 1, pass: 2 } as const;
+      const [va, vb] = await Promise.all([
+        // Keyed on the answer's own text, not its letter, so the swap
+        // reaches the same roll: the simulation is order-blind because it
+        // cannot see the order, which is the property a real seat is tested for.
+        adapter.score({ seat: req.seat, rubricMarkdown: req.rubricMarkdown, caseId: `${req.pairId}:a`, caseTitle: `${req.title}#${hash(req.a)}`, caseContent: `${req.prompt}\n${req.a}` }),
+        adapter.score({ seat: req.seat, rubricMarkdown: req.rubricMarkdown, caseId: `${req.pairId}:b`, caseTitle: `${req.title}#${hash(req.b)}`, caseContent: `${req.prompt}\n${req.b}` }),
+      ]);
+      if (rank[va.verdict] === rank[vb.verdict]) return { choice: 'tie', reason: `Both answers land on ${va.verdict} for ${req.seat.name.toLowerCase()}.` };
+      const winner = rank[va.verdict] > rank[vb.verdict] ? 'a' : 'b';
+      return { choice: winner, reason: `${winner.toUpperCase()} ${winner === 'a' ? va.reason : vb.reason}`.replace(/^(A|B) /, (m) => `${m}is preferred: `) };
+    },
     async score(req) {
       // Keyed on the title, not the id: ids are random per project, and a
       // simulated panel must produce the identical round twice or the spec's
@@ -218,6 +292,7 @@ export function offlineAdapter(): FamilyAdapter {
       return { verdict: 'fail', reason: `Falls exactly where ${req.seat.name.toLowerCase()} draws the line.` };
     },
   };
+  return adapter;
 }
 
 function normalizeVerdict(parsed: unknown): SeatVerdict {
@@ -230,6 +305,15 @@ function normalizeVerdict(parsed: unknown): SeatVerdict {
     throw new DrafterError('schema', 'The seat returned a verdict without a reason.');
   }
   return { verdict, reason };
+}
+
+function normalizeChoice(parsed: unknown): SeatChoice {
+  const obj = (parsed ?? {}) as { choice?: unknown; reason?: unknown };
+  const raw = typeof obj.choice === 'string' ? obj.choice.trim().toLowerCase() : '';
+  const choice = raw === 'a' || raw === 'b' || raw === 'tie' ? raw : null;
+  const reason = typeof obj.reason === 'string' ? obj.reason.trim() : '';
+  if (!choice || !reason) throw new DrafterError('schema', 'The seat returned a preference without a choice or a reason.');
+  return { choice, reason };
 }
 
 function hash(s: string): number {

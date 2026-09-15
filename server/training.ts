@@ -21,6 +21,8 @@
 
 import { ABSTAIN, type Grade, type Grader, type RoundItem, type RubricVersion, type Trace } from '../shared/types.js';
 import { readCase, type SeatVote } from '../shared/panelmap.js';
+import { ensembleVerdict } from '../shared/ensemble.js';
+import { derivePairs, pairOutcome, type GradedCase, type PairVote } from '../shared/pairs.js';
 
 export interface TrainingRound {
   id: string;
@@ -81,11 +83,61 @@ export interface RewardRow {
   provenance: Provenance;
 }
 
+/**
+ * A preference pair: (prompt, chosen, rejected), the shape preference
+ * post-training reads. Two sources, both named in the row: pairs the owner
+ * posed and the panel compared in both orders, and pairs derived from two
+ * graded transcripts that share a prompt and landed on different levels.
+ */
+export interface PairRow {
+  kind: 'pair';
+  prompt: string;
+  chosen: string;
+  rejected: string;
+  source: 'panel-compared' | 'derived-from-grades';
+  /** Share of counted weight behind the choice; 1 is unanimous. */
+  support: number;
+  basis: 'owner-adjudicated' | 'panel, owner-checked' | 'panel, provisional';
+  judges: { seat: string; model: string; family: string; choice: 'a' | 'b' | 'tie'; stable: boolean | null; reason: string }[];
+  rationale: string;
+  provenance: Omit<Provenance, 'round_id' | 'round_name' | 'case_id' | 'case_title' | 'case_source' | 'prompt_variant'> & {
+    pair_id: string;
+    pair_title: string;
+    round_id?: string;
+    case_ids?: [string, string];
+  };
+}
+
+/** An explicit pair with its votes already collapsed across both orders. */
+export interface ExplicitPair {
+  id: string;
+  title: string;
+  prompt: string;
+  a: string;
+  b: string;
+  ownerChoice: 'a' | 'b' | 'tie' | null;
+  ownerReason: string;
+  standard: { id: string; version: number } | null;
+  votes: (PairVote & { model: string; family: string })[];
+}
+
 export interface TrainingExport {
   examples: ExampleRow[];
   gold: GoldRow[];
   rewards: RewardRow[];
-  counts: { examples: number; gold: number; rewards: number; cases: number; rounds: number; excluded_false_settles: number; excluded_unsettled: number };
+  pairs: PairRow[];
+  counts: {
+    examples: number;
+    gold: number;
+    rewards: number;
+    pairs: number;
+    pairs_compared: number;
+    pairs_derived: number;
+    cases: number;
+    rounds: number;
+    excluded_false_settles: number;
+    excluded_unsettled: number;
+  };
 }
 
 /** A verdict as a 0..1 score on the standard's own ordinal scale. */
@@ -121,6 +173,7 @@ export function buildTrainingExport(args: {
   seats: Grader[];
   traces: Map<string, Trace>;
   rounds: TrainingRound[];
+  pairs?: ExplicitPair[];
   now?: string;
 }): TrainingExport {
   const now = args.now ?? new Date().toISOString();
@@ -128,6 +181,7 @@ export function buildTrainingExport(args: {
   const examples: ExampleRow[] = [];
   const gold: GoldRow[] = [];
   const rewards: RewardRow[] = [];
+  const pairs: PairRow[] = [];
   let cases = 0;
   let excludedFalse = 0;
   let excludedUnsettled = 0;
@@ -139,6 +193,8 @@ export function buildTrainingExport(args: {
       byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
     }
     const owner = new Map(round.userVerdicts.map((v) => [v.itemId, v]));
+    // The round's cases with their ensemble level, for pairing by prompt.
+    const gradedCases: GradedCase[] = [];
 
     for (const item of round.items) {
       const trace = args.traces.get(item.traceId);
@@ -152,6 +208,17 @@ export function buildTrainingExport(args: {
         reason: g.note,
       }));
       const reading = readCase(item.id, votes);
+      {
+        // The owner's word outranks the ensemble for pairing, as it does for gold.
+        const uvHere = owner.get(item.id);
+        const ensemble = ensembleVerdict(
+          grades.map((g) => ({ verdict: g.verdict, weight: seatById.get(g.graderId)?.weight ?? 1, stable: g.variantAgreement >= 1 })),
+          round.rubric.scale,
+        );
+        const verdict = uvHere?.verdict ?? ensemble.verdict;
+        const rank = verdict === null ? null : (round.rubric.scale.find((s) => s.id === verdict)?.rank ?? null);
+        gradedCases.push({ id: trace.id, title: trace.title, content: trace.content, rank, verdict });
+      }
       const provenance: Provenance = {
         project: args.projectName,
         round_id: round.id,
@@ -233,16 +300,78 @@ export function buildTrainingExport(args: {
         provenance,
       });
     }
+
+    // Derived pairs: two graded transcripts, one prompt, different levels.
+    for (const p of derivePairs(gradedCases)) {
+      const chosenOwner = owner.get(round.items.find((i) => i.traceId === p.chosen.id)?.id ?? '');
+      const rejectedOwner = owner.get(round.items.find((i) => i.traceId === p.rejected.id)?.id ?? '');
+      pairs.push({
+        kind: 'pair',
+        prompt: p.prompt,
+        chosen: p.chosen.content,
+        rejected: p.rejected.content,
+        source: 'derived-from-grades',
+        support: 1,
+        basis: chosenOwner && rejectedOwner ? 'owner-adjudicated' : chosenOwner || rejectedOwner ? 'panel, owner-checked' : 'panel, provisional',
+        judges: [],
+        rationale: `${p.chosen.title} graded ${p.chosen.verdict}; ${p.rejected.title} graded ${p.rejected.verdict}, on the same prompt.`,
+        provenance: {
+          project: args.projectName,
+          standard_id: round.rubric.id,
+          standard_version: round.rubric.version,
+          exported_at: now,
+          pair_id: `${p.chosen.id}+${p.rejected.id}`,
+          pair_title: `${p.chosen.title} over ${p.rejected.title}`,
+          round_id: round.id,
+          case_ids: [p.chosen.id, p.rejected.id],
+        },
+      });
+    }
+  }
+
+  // Explicit pairs: the owner's word first, then the panel's when it holds.
+  let compared = 0;
+  for (const p of args.pairs ?? []) {
+    const outcome = pairOutcome(p.votes);
+    const winner = p.ownerChoice && p.ownerChoice !== 'tie' ? p.ownerChoice : outcome.winner;
+    if (!winner) continue;
+    if (p.ownerChoice === 'tie') continue;
+    compared++;
+    const [chosen, rejected] = winner === 'a' ? [p.a, p.b] : [p.b, p.a];
+    const majority = p.votes.filter((v) => v.choice === winner && v.stable !== false).map((v) => ({ reason: v.reason }));
+    pairs.push({
+      kind: 'pair',
+      prompt: p.prompt,
+      chosen,
+      rejected,
+      source: 'panel-compared',
+      support: p.ownerChoice ? 1 : outcome.support,
+      basis: p.ownerChoice ? 'owner-adjudicated' : 'panel, provisional',
+      judges: p.votes.map((v) => ({ seat: v.seatName, model: v.model, family: v.family, choice: v.choice, stable: v.stable ?? null, reason: v.reason })),
+      rationale: p.ownerChoice ? p.ownerReason || `The owner preferred ${winner.toUpperCase()}.` : majorityReason(majority),
+      provenance: {
+        project: args.projectName,
+        standard_id: p.standard?.id ?? '',
+        standard_version: p.standard?.version ?? 0,
+        exported_at: now,
+        pair_id: p.id,
+        pair_title: p.title,
+      },
+    });
   }
 
   return {
     examples,
     gold,
     rewards,
+    pairs,
     counts: {
       examples: examples.length,
       gold: gold.length,
       rewards: rewards.length,
+      pairs: pairs.length,
+      pairs_compared: compared,
+      pairs_derived: pairs.length - compared,
       cases,
       rounds: args.rounds.length,
       excluded_false_settles: excludedFalse,

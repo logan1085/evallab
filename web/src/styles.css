@@ -666,6 +666,18 @@ textarea::placeholder {
 
 /* ---- Votes in the spread ------------------------------------------------- */
 
+/* One seat's choice on a preference pair, inline, hover for the reason. */
+.vote-chip {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 1px 7px;
+  margin: 0 6px 6px 0;
+}
+
 .vote-row {
   display: grid;
   grid-template-columns: 200px auto minmax(0, 1fr);

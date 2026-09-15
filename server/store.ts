@@ -947,6 +947,119 @@ export async function deleteEndpoint(db: DB, projectId: string, id: string): Pro
   await db.run('DELETE FROM endpoints WHERE id = ? AND project_id = ?', id, projectId);
 }
 
+/* ---- Preference pairs ------------------------------------------------------ */
+
+export interface PairRow {
+  id: string;
+  projectId: string;
+  title: string;
+  prompt: string;
+  a: string;
+  b: string;
+  ownerChoice: 'a' | 'b' | 'tie' | null;
+  ownerReason: string;
+  gradedAt: string | null;
+  rubricVersionId: string | null;
+  createdAt: string;
+}
+
+export interface PairVoteRow {
+  pairId: string;
+  graderId: string;
+  ordering: 'ab' | 'ba';
+  choice: 'a' | 'b' | 'tie';
+  reason: string;
+  createdAt: string;
+}
+
+const choiceOf = (v: unknown): 'a' | 'b' | 'tie' | null => (v === 'a' || v === 'b' || v === 'tie' ? v : null);
+
+function toPair(row: Row): PairRow {
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    title: str(row.title),
+    prompt: str(row.prompt),
+    a: str(row.a),
+    b: str(row.b),
+    ownerChoice: choiceOf(row.owner_choice),
+    ownerReason: str(row.owner_reason),
+    gradedAt: row.graded_at ? str(row.graded_at) : null,
+    rubricVersionId: row.rubric_version_id ? str(row.rubric_version_id) : null,
+    createdAt: str(row.created_at),
+  };
+}
+
+export async function createPair(db: DB, args: { projectId: string; title: string; prompt: string; a: string; b: string }): Promise<PairRow> {
+  const id = newId();
+  await db.run(
+    'INSERT INTO pairs (id, project_id, title, prompt, a, b, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    id, args.projectId, args.title.trim(), args.prompt, args.a, args.b, now(),
+  );
+  return (await getPair(db, id))!;
+}
+
+export async function getPair(db: DB, id: string): Promise<PairRow | null> {
+  const row = await db.get('SELECT * FROM pairs WHERE id = ?', id) as Row | undefined;
+  return row ? toPair(row) : null;
+}
+
+export async function listPairs(db: DB, projectId: string): Promise<PairRow[]> {
+  return (await db.all('SELECT * FROM pairs WHERE project_id = ? ORDER BY created_at, id', projectId) as Row[]).map(toPair);
+}
+
+export async function deletePair(db: DB, projectId: string, id: string): Promise<void> {
+  await db.run('DELETE FROM pairs WHERE id = ? AND project_id = ?', id, projectId);
+}
+
+export async function markPairGraded(db: DB, id: string, rubricVersionId: string): Promise<void> {
+  await db.run('UPDATE pairs SET graded_at = ?, rubric_version_id = ? WHERE id = ?', now(), rubricVersionId, id);
+}
+
+export async function setPairOwnerChoice(db: DB, id: string, choice: 'a' | 'b' | 'tie' | null, reason: string): Promise<PairRow | null> {
+  await db.run('UPDATE pairs SET owner_choice = ?, owner_reason = ? WHERE id = ?', choice, reason, id);
+  return getPair(db, id);
+}
+
+/** One seat's answer under one order. Re-grading replaces the previous answer. */
+export async function recordPairVote(
+  db: DB,
+  args: { pairId: string; graderId: string; ordering: 'ab' | 'ba'; choice: 'a' | 'b' | 'tie'; reason: string },
+): Promise<void> {
+  await db.run('DELETE FROM pair_votes WHERE pair_id = ? AND grader_id = ? AND ordering = ?', args.pairId, args.graderId, args.ordering);
+  await db.run(
+    'INSERT INTO pair_votes (id, pair_id, grader_id, ordering, choice, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    newId(), args.pairId, args.graderId, args.ordering, args.choice, args.reason, now(),
+  );
+}
+
+export async function listPairVotes(db: DB, pairId: string): Promise<PairVoteRow[]> {
+  const rows = await db.all('SELECT * FROM pair_votes WHERE pair_id = ? ORDER BY created_at, id', pairId) as Row[];
+  return rows.map((r) => ({
+    pairId: str(r.pair_id),
+    graderId: str(r.grader_id),
+    ordering: str(r.ordering) === 'ba' ? 'ba' : 'ab',
+    choice: choiceOf(r.choice) ?? 'tie',
+    reason: str(r.reason),
+    createdAt: str(r.created_at),
+  }));
+}
+
+export async function listPairVotesForProject(db: DB, projectId: string): Promise<PairVoteRow[]> {
+  const rows = await db.all(
+    'SELECT v.* FROM pair_votes v JOIN pairs p ON p.id = v.pair_id WHERE p.project_id = ? ORDER BY v.created_at, v.id',
+    projectId,
+  ) as Row[];
+  return rows.map((r) => ({
+    pairId: str(r.pair_id),
+    graderId: str(r.grader_id),
+    ordering: str(r.ordering) === 'ba' ? 'ba' : 'ab',
+    choice: choiceOf(r.choice) ?? 'tie',
+    reason: str(r.reason),
+    createdAt: str(r.created_at),
+  }));
+}
+
 /* ---- The stability pass ---------------------------------------------------- */
 
 /** One verdict under one phrasing of the standard, kept for provenance. */

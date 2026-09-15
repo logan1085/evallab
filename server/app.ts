@@ -27,7 +27,8 @@ import { adapterFor, availableFamilies, endpointFamily, endpointIdOf, offlineAda
 import { keyHint, openSecret, sealSecret, secretsSource, SealError } from './secrets.js';
 import type { OwnEndpoint } from './gateway.js';
 import { renderOgSvg, renderStandardsPage, type StandardsView } from './standards.js';
-import { buildTrainingExport, toJsonl, type TrainingRound } from './training.js';
+import { buildTrainingExport, toJsonl, type ExplicitPair, type TrainingRound } from './training.js';
+import { pairOutcome, swapChoice, type PairVote } from '../shared/pairs.js';
 import { buildZip } from './zip.js';
 import { ensembleVerdict, evaluateGate } from '../shared/ensemble.js';
 import { createSpendGuard } from './spend.js';
@@ -1106,6 +1107,156 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       return res.status(409).json({ error: `${using.map((s) => s.name).join(', ')} still run${using.length === 1 ? 's' : ''} on this endpoint. Move the seat first.` });
     }
     await store.deleteEndpoint(db, project.id, endpoint.id);
+    res.status(204).end();
+  });
+
+  /* ---- Preference pairs ------------------------------------------------- */
+
+  /**
+   * One prompt, two answers, which one the standard prefers. Every seat
+   * compares both orders; a vote that flips when A and B swap is position
+   * bias and is set aside. The owner's own choice sits beside the panel's.
+   * Pairs are the rows preference post-training reads, and the export
+   * carries them with the same provenance as everything else.
+   */
+  async function pairView(pair: store.PairRow, seats: Awaited<ReturnType<typeof store.listGraders>>) {
+    const raw = await store.listPairVotes(db, pair.id);
+    const votes: (PairVote & { model: string; family: string })[] = [];
+    for (const seat of seats) {
+      const ab = raw.find((v) => v.graderId === seat.id && v.ordering === 'ab');
+      const ba = raw.find((v) => v.graderId === seat.id && v.ordering === 'ba');
+      if (!ab) continue;
+      votes.push({
+        seatId: seat.id,
+        seatName: seat.name,
+        choice: ab.choice,
+        reason: ab.reason,
+        weight: seat.weight,
+        model: seat.model,
+        family: seat.family,
+        ...(ba ? { stable: swapChoice(ba.choice) === ab.choice } : {}),
+      });
+    }
+    const outcome = pairOutcome(votes);
+    const rubric = pair.rubricVersionId ? await store.getRubric(db, pair.rubricVersionId) : null;
+    return {
+      id: pair.id,
+      title: pair.title,
+      prompt: pair.prompt,
+      a: pair.a,
+      b: pair.b,
+      ownerChoice: pair.ownerChoice,
+      ownerReason: pair.ownerReason,
+      gradedAt: pair.gradedAt,
+      standards_version: rubric?.version ?? null,
+      votes,
+      outcome,
+      /** What the export will say: the owner's word, else the panel's when it holds. */
+      preferred: pair.ownerChoice && pair.ownerChoice !== 'tie' ? pair.ownerChoice : pair.ownerChoice === 'tie' ? null : outcome.winner,
+      createdAt: pair.createdAt,
+    };
+  }
+
+  async function explicitPairs(projectId: string): Promise<ExplicitPair[]> {
+    const seats = (await store.listGraders(db, projectId)).filter((g) => g.kind === 'panelist');
+    const out: ExplicitPair[] = [];
+    for (const pair of await store.listPairs(db, projectId)) {
+      const view = await pairView(pair, seats);
+      const rubric = pair.rubricVersionId ? await store.getRubric(db, pair.rubricVersionId) : null;
+      out.push({
+        id: pair.id,
+        title: pair.title,
+        prompt: pair.prompt,
+        a: pair.a,
+        b: pair.b,
+        ownerChoice: pair.ownerChoice,
+        ownerReason: pair.ownerReason,
+        standard: rubric ? { id: rubric.id, version: rubric.version } : null,
+        votes: view.votes,
+      });
+    }
+    return out;
+  }
+
+  api.get('/projects/:slug/pairs', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    const pairs = [];
+    for (const pair of await store.listPairs(db, project.id)) pairs.push(await pairView(pair, seats));
+    res.json({ pairs });
+  });
+
+  api.post('/projects/:slug/pairs', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const body = z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        prompt: z.string().trim().min(1).max(40_000),
+        a: z.string().trim().min(1).max(40_000),
+        b: z.string().trim().min(1).max(40_000),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'A pair needs a title, a prompt, and two answers a and b.' });
+    if (body.data.a === body.data.b) return res.status(400).json({ error: 'The two answers are identical; there is nothing to prefer.' });
+    if ((await store.listPairs(db, project.id)).length >= 500) return res.status(409).json({ error: 'This project has 500 pairs. Export and remove some before adding more.' });
+    const pair = await store.createPair(db, { projectId: project.id, ...body.data });
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    res.status(201).json({ pair: await pairView(pair, seats) });
+  });
+
+  /** Every seat compares the pair in both orders; the standard is the current one. */
+  api.post('/projects/:slug/pairs/:pairId/grade', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const pair = await store.getPair(db, req.params.pairId!);
+    if (!pair || pair.projectId !== project.id) return res.status(404).json({ error: 'No such pair.' });
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    if (seats.length < 3) return res.status(400).json({ error: 'A panel needs at least three seats before it can compare. Seat the panel first.' });
+    const rubric = await store.currentRubric(db, project.id);
+    if (!rubric) return res.status(400).json({ error: 'This project has no standard to compare against.' });
+    const rubricMarkdown = renderRubricMarkdown(rubric);
+    const endpoints = await ownEndpoints(project.id);
+    const byok = req.header('x-openrouter-key');
+    const base = { ...(byok ? { apiKey: byok } : {}), ...meter() };
+    const failures: { seat: string; error: string }[] = [];
+    await mapLimit(seats, 3, async (seat) => {
+      const adapter = adapterFor(seat.family, endpoints);
+      const gateway = gatewayFor(seat.family, base);
+      const common = { seat, rubricMarkdown, pairId: pair.id, title: pair.title, prompt: pair.prompt };
+      try {
+        const ab = await adapter.compare({ ...common, a: pair.a, b: pair.b }, gateway);
+        await store.recordPairVote(db, { pairId: pair.id, graderId: seat.id, ordering: 'ab', choice: ab.choice, reason: ab.reason });
+        // The swap: the same pair with B shown first. A fair seat gives the
+        // mirror answer; a seat that prefers whatever comes first does not.
+        const ba = await adapter.compare({ ...common, a: pair.b, b: pair.a }, gateway);
+        await store.recordPairVote(db, { pairId: pair.id, graderId: seat.id, ordering: 'ba', choice: ba.choice, reason: ba.reason });
+      } catch (err) {
+        failures.push({ seat: seat.name, error: err instanceof Error ? err.message : 'failed' });
+      }
+    });
+    await store.markPairGraded(db, pair.id, rubric.id);
+    const view = await pairView((await store.getPair(db, pair.id))!, seats);
+    if (view.votes.length === 0) {
+      return res.status(502).json({ error: `No seat could compare this pair. ${failures[0]?.error ?? ''}`.trim(), failures });
+    }
+    res.json({ pair: view, failures });
+  });
+
+  api.patch('/projects/:slug/pairs/:pairId/verdict', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const pair = await store.getPair(db, req.params.pairId!);
+    if (!pair || pair.projectId !== project.id) return res.status(404).json({ error: 'No such pair.' });
+    const body = z.object({ choice: z.enum(['a', 'b', 'tie']).nullable(), reason: z.string().max(600).default('') }).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'choice must be a, b, tie, or null to withdraw; reason is optional.' });
+    const updated = await store.setPairOwnerChoice(db, pair.id, body.data.choice, body.data.choice ? body.data.reason.trim() : '');
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    res.json({ pair: await pairView(updated!, seats) });
+  });
+
+  api.delete('/projects/:slug/pairs/:pairId', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const pair = await store.getPair(db, req.params.pairId!);
+    if (!pair || pair.projectId !== project.id) return res.status(404).json({ error: 'No such pair.' });
+    await store.deletePair(db, project.id, pair.id);
     res.status(204).end();
   });
 
@@ -2239,8 +2390,8 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
   api.get('/projects/:slug/training', requireProject, async (req, res) => {
     const project = (req as ProjectRequest).project;
     const format = typeof req.query.format === 'string' ? req.query.format : 'json';
-    if (!['json', 'examples', 'gold', 'rewards'].includes(format)) {
-      return res.status(400).json({ error: 'format must be one of json, examples, gold, rewards.' });
+    if (!['json', 'examples', 'gold', 'rewards', 'pairs'].includes(format)) {
+      return res.status(400).json({ error: 'format must be one of json, examples, gold, rewards, pairs.' });
     }
     const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
     const traces = new Map((await store.listTraces(db, project.id)).map((t) => [t.id, t]));
@@ -2258,9 +2409,9 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         pinnedModels: await store.getRoundPinnedModels(db, round.id),
       });
     }
-    const out = buildTrainingExport({ projectName: project.name, seats, traces, rounds });
+    const out = buildTrainingExport({ projectName: project.name, seats, traces, rounds, pairs: await explicitPairs(project.id) });
     if (format === 'json') return res.json(out);
-    const rows = format === 'examples' ? out.examples : format === 'gold' ? out.gold : out.rewards;
+    const rows = format === 'examples' ? out.examples : format === 'gold' ? out.gold : format === 'pairs' ? out.pairs : out.rewards;
     res
       .type('application/x-ndjson')
       .set('content-disposition', `attachment; filename="${project.slug}-${format}.jsonl"`)

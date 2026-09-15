@@ -57,6 +57,23 @@ export class ApiError extends Error {
   }
 }
 
+export interface PairView {
+  id: string;
+  title: string;
+  prompt: string;
+  a: string;
+  b: string;
+  ownerChoice: 'a' | 'b' | 'tie' | null;
+  ownerReason: string;
+  gradedAt: string | null;
+  standards_version: number | null;
+  votes: { seatId: string; seatName: string; choice: 'a' | 'b' | 'tie'; reason: string; weight: number; stable?: boolean; model: string; family: string }[];
+  outcome: { winner: 'a' | 'b' | null; support: number; counted: number; setAside: number; flipped: number };
+  /** The owner's word, else the panel's when it holds; null when neither decides. */
+  preferred: 'a' | 'b' | null;
+  createdAt: string;
+}
+
 /** A company's own endpoint as the Room sees it: never the key, only its hint. */
 export interface EndpointView {
   id: string;
@@ -527,11 +544,32 @@ export const api = {
 
   training: (slug: string, token: string) =>
     call<{
-      counts: { examples: number; gold: number; rewards: number; cases: number; rounds: number; excluded_false_settles: number; excluded_unsettled: number };
+      counts: {
+        examples: number;
+        gold: number;
+        rewards: number;
+        pairs: number;
+        pairs_compared: number;
+        pairs_derived: number;
+        cases: number;
+        rounds: number;
+        excluded_false_settles: number;
+        excluded_unsettled: number;
+      };
     }>(`/projects/${slug}/training`, { token }),
 
-  trainingUrl: (slug: string, token: string, format: 'examples' | 'gold' | 'rewards') =>
+  trainingUrl: (slug: string, token: string, format: 'examples' | 'gold' | 'rewards' | 'pairs') =>
     `/api/v1/projects/${slug}/training?format=${format}&k=${encodeURIComponent(token)}`,
+
+  /* Preference pairs: one prompt, two answers, which one the standard prefers. */
+  pairs: (slug: string, token: string) => call<{ pairs: PairView[] }>(`/projects/${slug}/pairs`, { token }),
+  addPair: (slug: string, token: string, body: { title: string; prompt: string; a: string; b: string }) =>
+    call<{ pair: PairView }>(`/projects/${slug}/pairs`, { method: 'POST', token, body: json(body) }),
+  gradePair: (slug: string, token: string, pairId: string) =>
+    call<{ pair: PairView; failures: { seat: string; error: string }[] }>(`/projects/${slug}/pairs/${pairId}/grade`, { method: 'POST', token }),
+  setPairVerdict: (slug: string, token: string, pairId: string, body: { choice: 'a' | 'b' | 'tie' | null; reason?: string }) =>
+    call<{ pair: PairView }>(`/projects/${slug}/pairs/${pairId}/verdict`, { method: 'PATCH', token, body: json(body) }),
+  deletePair: (slug: string, token: string, pairId: string) => call<void>(`/projects/${slug}/pairs/${pairId}`, { method: 'DELETE', token }),
 
   joinGrader: (slug: string, token: string, name: string) =>
     call<{ grader: Grader }>(`/projects/${slug}/graders`, { method: 'POST', token, body: json({ name }) }),

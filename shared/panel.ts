@@ -244,6 +244,41 @@ export function buildSeatSystemPrompt(
   }
 }
 
+/**
+ * The pairwise form of a seat: two answers to one prompt, which one the
+ * standard prefers, and one sentence of why. Same seat, same stake, same
+ * rubric; only the question changes.
+ */
+export function buildPairSystemPrompt(seat: Pick<Seat, 'name' | 'objective' | 'failsFor'>, rubricMarkdown: string): string {
+  return [
+    `You are one seat on a grading panel: ${seat.name}.`,
+    `You optimize for: ${seat.objective}`,
+    `You fail an answer for: ${seat.failsFor}`,
+    '',
+    'You will see one prompt and two candidate answers, A and B. Judge which answer better meets the rubric below, in your own stake’s terms.',
+    'Choose a, b, or tie. Choose tie only when the rubric genuinely does not separate them; do not choose tie to avoid deciding.',
+    'The order of A and B carries no information. Give exactly one choice and one sentence of reason.',
+    'Plain punctuation: never use em dashes.',
+    '',
+    '--- RUBRIC ---',
+    rubricMarkdown,
+  ].join('\n');
+}
+
+export function buildPairUserPrompt(title: string, prompt: string, a: string, b: string): string {
+  return [`Pair: ${title}`, '', '--- PROMPT ---', prompt, '', '--- ANSWER A ---', a, '', '--- ANSWER B ---', b].join('\n');
+}
+
+export const PAIR_CHOICE_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    choice: { type: 'string' as const, enum: ['a', 'b', 'tie'] },
+    reason: { type: 'string' as const, description: 'One sentence, in this seat’s terms.' },
+  },
+  required: ['choice', 'reason'],
+  additionalProperties: false as const,
+};
+
 export const SEAT_VERDICT_SCHEMA = {
   type: 'object' as const,
   properties: {
