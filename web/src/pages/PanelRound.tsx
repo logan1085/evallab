@@ -490,12 +490,13 @@ function SelfCheckSection({
         </label>
         <input
           id="reviewer-name"
-          placeholder="your name (blank: the owner)"
+          placeholder="your name"
+          title="Blank grades as the owner. A name keeps your verdicts apart from the owner's and compares them."
           value={reviewerDraft}
           onChange={(e) => setReviewerDraft(e.target.value)}
           onBlur={commitReviewer}
           onKeyDown={(e) => (e.key === 'Enter' ? commitReviewer() : undefined)}
-          style={{ maxWidth: 220 }}
+          style={{ maxWidth: 200 }}
         />
       </div>
       {cases.map((c) => (
