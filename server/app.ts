@@ -249,7 +249,22 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
 
   /** One pin validation per instance, reused by every later health check. */
   let pinCheck: Promise<Awaited<ReturnType<typeof validatePins>>> | null = null;
-  const cachedPinCheck = () => (pinCheck ??= validatePins(appOpts.pinFetch ?? fetch, { disableInvalid: true }));
+  const cachedPinCheck = () => (pinCheck ??= validatePins(appOpts.pinFetch ?? fetch, { disableInvalid: true, repinCreators: true }));
+
+  /**
+   * Run before any creator call, so the writer's pin has been checked
+   * against the router's list (and repinned if unlisted) before the first
+   * scenario is written on a cold instance. One list fetch per instance;
+   * an unreachable list changes nothing and the call proceeds as pinned.
+   */
+  const readyPins = async () => {
+    if (!process.env.OPENROUTER_API_KEY) return;
+    try {
+      await cachedPinCheck();
+    } catch {
+      /* validatePins does not throw; belt and braces */
+    }
+  };
 
   /**
    * The writer canary, cached: a good answer holds for ten minutes, a failure
@@ -659,6 +674,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       return res.status(404).json({ error: 'One of those documents is not in this project.' });
     }
 
+    await readyPins();
     const scenarist = resolveScenarist();
     try {
       const prepared = prepareDocuments(chosen.map((d) => ({ title: d.title, kind: d.kind, content: d.content })));
@@ -823,6 +839,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    */
   async function seatPanel(project: Project) {
     const families = availableFamilies();
+    await readyPins();
     const writer = resolvePanelWriter();
     let proposed: { name: string; objective: string; failsFor: string }[];
     // Whether the seats were actually written for this project, or came from
@@ -2715,6 +2732,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
 
     const prepared = prepareExamples(chosen);
     const preparedDocs = prepareDocuments(chosenDocs);
+    await readyPins();
     const drafter = resolveDrafter();
 
     try {
@@ -3252,6 +3270,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
   /* ---- Judge ------------------------------------------------------------ */
 
   api.get('/judge/provider', async (_req, res) => {
+    await readyPins();
     const provider = resolveProvider();
     res.json({ provider: provider.id, model: provider.model, real: provider.real });
   });
@@ -3291,6 +3310,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       });
     }
 
+    await readyPins();
     const provider = resolveProvider();
     const runId = await store.createJudgeRun(db, {
       projectId: project.id,

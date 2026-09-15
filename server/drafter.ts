@@ -11,9 +11,8 @@
  * be worse than no rubric, because the team would trust it.
  */
 
-import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import { openrouterJson, openrouterKey, resolveCreatorPin } from './openrouter.js';
 import type { GatewayOptions } from './gateway.js';
-import { resolvePin } from './pins.js';
 import {
   buildDrafterSystemPrompt,
   buildDrafterUserPrompt,
@@ -44,7 +43,7 @@ export function resolveDrafter(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_DR
 function openrouterDrafter(): DrafterProvider {
   return {
     id: 'openrouter',
-    model: resolvePin(CREATOR_PIN).openrouter_model_id,
+    model: resolveCreatorPin().openrouter_model_id,
     real: true,
     async draft(req, gateway) {
       // openrouterJson throws DrafterError already, with the router's own

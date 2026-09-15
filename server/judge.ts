@@ -18,9 +18,8 @@
 
 import { ABSTAIN, type RubricVersion, type Trace } from '../shared/types.js';
 import { buildJudgeSystemPrompt, buildJudgeUserPrompt, judgeJsonSchema } from '../shared/rubric.js';
-import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import { openrouterJson, openrouterKey, resolveCreatorPin } from './openrouter.js';
 import type { GatewayOptions } from './gateway.js';
-import { resolvePin } from './pins.js';
 import { DrafterError } from './drafter.js';
 
 export const DEFAULT_JUDGE_MODEL = 'openrouter';
@@ -46,7 +45,7 @@ export function resolveProvider(_model = process.env.GR_JUDGE_MODEL ?? DEFAULT_J
 /* ---- OpenRouter --------------------------------------------------------- */
 
 function openrouterProvider(): JudgeProvider {
-  const pin = resolvePin(CREATOR_PIN);
+  const pin = resolveCreatorPin();
   return {
     id: 'openrouter',
     model: pin.openrouter_model_id,

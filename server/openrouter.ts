@@ -10,7 +10,7 @@
 import { callModel, type GatewayOptions } from './gateway.js';
 import { DrafterError } from './drafter.js';
 import { parseModelJson } from '../shared/schema.js';
-import { cheapestPin, resolvePin } from './pins.js';
+import { cheapestPin, PIN_REGISTRY, resolvePin, type Pin } from './pins.js';
 
 export function openrouterKey(): string | undefined {
   return process.env.OPENROUTER_API_KEY;
@@ -18,6 +18,30 @@ export function openrouterKey(): string | undefined {
 
 /** Generation quality wants the frontier pin; graders use the small tier. */
 export const CREATOR_PIN = process.env.GR_CREATOR_PIN ?? 'anthropic-frontier-1';
+
+let fallbackAnnounced = false;
+
+/**
+ * The pin a creator call actually uses. The configured creator pin while it
+ * is live; when the boot check has stood it down (its id is not on the
+ * router's list and nothing in its namespace could replace it), the next
+ * best live pin, so onboarding degrades to a smaller writer rather than to
+ * an error page. Announced once in the log; visible in /api/health.
+ */
+export function resolveCreatorPin(): Pin {
+  const configured = resolvePin(CREATOR_PIN);
+  if (configured.status === 'live') return configured;
+  const live = PIN_REGISTRY.filter((p) => p.status === 'live');
+  const fallback =
+    live.filter((p) => p.tier === 'frontier').sort((a, b) => b.cost_hint - a.cost_hint)[0] ??
+    live.filter((p) => p.tier !== 'frontier').sort((a, b) => b.cost_hint - a.cost_hint)[0];
+  if (!fallback) return configured;
+  if (!fallbackAnnounced) {
+    fallbackAnnounced = true;
+    console.warn(`Creator pin ${configured.pin_id} is stood down; creator calls use ${fallback.pin_id} (${fallback.openrouter_model_id}) until it is repinned.`);
+  }
+  return fallback;
+}
 
 /**
  * A creator call is one model call, and a failure must not become four.
@@ -45,7 +69,7 @@ export async function openrouterJson<T>(args: {
   maxTokens?: number;
   gateway?: GatewayOptions;
 }): Promise<T> {
-  const pinId = args.pinId ?? CREATOR_PIN;
+  const pinId = args.pinId ?? resolveCreatorPin().pin_id;
   const responseFormat = args.schema
     ? { type: 'json_schema', json_schema: { name: 'result', strict: true, schema: args.schema } }
     : { type: 'json_object' };
@@ -155,11 +179,11 @@ export async function writerCheck(gateway: GatewayOptions = {}): Promise<{
   finish_reason: string | null;
   error: string | null;
 }> {
-  const pin = resolvePin(CREATOR_PIN);
+  const pin = resolveCreatorPin();
   const repair = cheapestPin('small');
   const res = await callModel(
     {
-      pin_id: CREATOR_PIN,
+      pin_id: pin.pin_id,
       messages: [
         { role: 'system', content: 'Reply with JSON only.' },
         { role: 'user', content: 'Return {"ok":true}.' },

@@ -18,9 +18,8 @@ import {
   type ScenarioRequest,
 } from '../shared/scenarios.js';
 import { DrafterError } from './drafter.js';
-import { CREATOR_PIN, openrouterJson, openrouterKey } from './openrouter.js';
+import { openrouterJson, openrouterKey, resolveCreatorPin } from './openrouter.js';
 import type { GatewayOptions } from './gateway.js';
-import { resolvePin } from './pins.js';
 
 export const DEFAULT_SCENARIO_MODEL = 'openrouter';
 
@@ -41,7 +40,7 @@ export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_
 function openrouterScenarist(): ScenarioProvider {
   return {
     id: 'openrouter',
-    model: resolvePin(CREATOR_PIN).openrouter_model_id,
+    model: resolveCreatorPin().openrouter_model_id,
     real: true,
     async write(req, gateway) {
       const count = clampScenarioCount(req.count);

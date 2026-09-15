@@ -152,6 +152,30 @@ export function applyPinOverrides(env: NodeJS.ProcessEnv = process.env): { pin_i
 /** Applied once at load, before any caller resolves a pin. */
 export const PIN_OVERRIDES = applyPinOverrides();
 
+/** The registry as loaded, so tests that exercise repinning can put it back. */
+const PIN_SNAPSHOT = PIN_REGISTRY.map((p) => ({ ...p }));
+export function resetPinRegistry(): void {
+  for (const [i, snap] of PIN_SNAPSHOT.entries()) Object.assign(PIN_REGISTRY[i]!, snap);
+}
+
+/**
+ * The replacement a creator pin takes when its id is not on the router's
+ * list: the newest id in the same namespace, by the version in the name,
+ * with opus over sonnet over haiku at equal versions. Variants (":thinking",
+ * ":beta"), free tiers and aliases are skipped. Chosen from the list the
+ * router served, never typed in, so the only guess left is which of the
+ * models that exist is best, and that rule is written down here.
+ */
+export function pickReplacement(candidates: string[]): string | null {
+  const version = (id: string): number => {
+    const m = /(\d+(?:\.\d+)?)/.exec(id.split('/')[1] ?? '');
+    return m ? Number(m[1]) : 0;
+  };
+  const grade = (id: string): number => (/opus/i.test(id) ? 3 : /sonnet|pro\b/i.test(id) ? 2 : /haiku|mini|flash|small/i.test(id) ? 1 : 0);
+  const usable = candidates.filter((id) => id.includes('/') && !id.includes(':') && !/free|preview|exp\b|auto/i.test(id));
+  return usable.sort((a, b) => version(b) - version(a) || grade(b) - grade(a) || a.localeCompare(b))[0] ?? null;
+}
+
 export function pinIsVersionSafe(pin: Pin): boolean {
   return !LATEST_ALIASES.some((re) => re.test(pin.openrouter_model_id)) && pin.openrouter_model_id.includes('/');
 }
@@ -166,12 +190,17 @@ export function pinIsVersionSafe(pin: Pin): boolean {
  */
 export async function validatePins(
   fetchImpl: typeof fetch = fetch,
-  opts: { disableInvalid?: boolean } = {},
+  opts: { disableInvalid?: boolean; repinCreators?: boolean } = {},
 ): Promise<{
   ok: boolean;
   problems: string[];
   checked: number;
   disabled: string[];
+  /**
+   * Creator-tier pins whose id was not listed and were moved to the newest
+   * id in their namespace, from the router's list. Writers, never seats.
+   */
+  repinned: { pin_id: string; from: string; to: string }[];
   /**
    * The live ids that share each pin's namespace, from the router's own
    * list, so a replacement can be chosen from /api/health without a guess.
@@ -186,7 +215,7 @@ export async function validatePins(
   try {
     const res = await fetchImpl('https://openrouter.ai/api/v1/models');
     if (!res.ok) {
-      return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0, disabled: [], siblings: {} };
+      return { ok: false, problems: [...unsafe, `could not read the model list: HTTP ${res.status}`], checked: 0, disabled: [], repinned: [], siblings: {} };
     }
     const body = (await res.json()) as { data: { id: string }[] };
     known = new Set(body.data.map((m) => m.id));
@@ -198,6 +227,7 @@ export async function validatePins(
       problems: [...unsafe, `could not read the model list: ${error instanceof Error ? error.message : 'unreachable'}`],
       checked: 0,
       disabled: [],
+      repinned: [],
       siblings: {},
     };
   }
@@ -205,12 +235,26 @@ export async function validatePins(
   const live = PIN_REGISTRY.filter((p) => p.status === 'live');
   const problems = [...unsafe];
   const disabled: string[] = [];
+  const repinned: { pin_id: string; from: string; to: string }[] = [];
   const siblings: Record<string, string[]> = {};
   for (const pin of live) {
     const namespace = pin.openrouter_model_id.split('/')[0]!;
     siblings[pin.pin_id] = [...known].filter((id) => id.startsWith(`${namespace}/`)).sort().slice(0, 16);
     if (known.has(pin.openrouter_model_id)) continue;
     const candidates = siblings[pin.pin_id]!.slice(0, 6);
+
+    // A creator pin writes scenarios and seats; nothing is compared across
+    // its verdicts, so moving it to the newest listed id in its namespace
+    // costs no comparability and keeps onboarding alive. It is reported
+    // here and in the log, and a GR_PIN_ override still wins over it.
+    const replacement = opts.repinCreators && pin.tier === 'frontier' ? pickReplacement(siblings[pin.pin_id]!) : null;
+    if (replacement) {
+      repinned.push({ pin_id: pin.pin_id, from: pin.openrouter_model_id, to: replacement });
+      console.warn(`Pin ${pin.pin_id}: "${pin.openrouter_model_id}" is not listed; repinned to "${replacement}" from the router's list. Set ${pinEnvKey(pin.pin_id)} to choose.`);
+      pin.openrouter_model_id = replacement;
+      continue;
+    }
+
     problems.push(
       `${pin.pin_id}: "${pin.openrouter_model_id}" is not a model the router lists.` +
         (candidates.length > 0 ? ` Live under ${namespace}/: ${candidates.join(', ')}.` : ` Nothing lives under ${namespace}/.`) +
@@ -225,7 +269,7 @@ export async function validatePins(
       disabled.push(pin.pin_id);
     }
   }
-  return { ok: problems.length === 0, problems, checked: live.length, disabled, siblings };
+  return { ok: problems.length === 0, problems, checked: live.length, disabled, repinned, siblings };
 }
 
 export class PinError extends Error {

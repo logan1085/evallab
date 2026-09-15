@@ -41,7 +41,10 @@ const server = app.listen(port, () => {
     // that is not a model is a 400 on first use, and finding that at startup
     // beats finding it when someone clicks a button.
     for (const o of PIN_OVERRIDES) console.log(`Pin ${o.pin_id} repinned by ${pinEnvKey(o.pin_id)}: ${o.from} -> ${o.to}`);
-    void validatePins(fetch, { disableInvalid: true }).then((result) => {
+    void validatePins(fetch, { disableInvalid: true, repinCreators: true }).then((result) => {
+      // A creator pin whose id is not listed moves to the newest id in its
+      // namespace, from the router's list, and says so here. Seats never move.
+      for (const r of result.repinned) console.log(`Writer pin ${r.pin_id} repinned from the router's list: ${r.from} -> ${r.to}. Set ${pinEnvKey(r.pin_id)} to choose.`);
       // The writer's namespace, verified from the router's list, printed
       // every boot: when the writer pin needs replacing, the choice is here
       // rather than in a browser tab.
