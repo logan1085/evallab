@@ -81,6 +81,7 @@ export function ProjectPage() {
         traces={traces}
         loading={tracesQ.loading}
         autoWrite={autoWrite}
+        description={data.project.description}
         onChange={refresh}
         onError={setError}
       />
@@ -1194,12 +1195,114 @@ function ScenarioWriter({
  * should happen, say why. The verdict saves on click; the reason saves when
  * you leave the field. Answered cards are test cases already.
  */
+/* ---- The coverage map ---------------------------------------------------- */
+
+/**
+ * What kinds of ground the cases stand on: the three the writer covers on
+ * purpose, plus the company's own transcripts. Counts per class, how the
+ * last round read each class, and the gaps named, each with the one
+ * action that fills it.
+ */
+function CoverageBlock({
+  slug,
+  token,
+  description,
+  traceCount,
+  onChange,
+  onError,
+}: {
+  slug: string;
+  token: string;
+  description: string;
+  traceCount: number;
+  onChange: () => void;
+  onError: (m: string) => void;
+}) {
+  const { data, reload } = useAsync(() => api.coverage(slug, token), [slug, token, traceCount]);
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!data) return null;
+  const pct = (v: number | null) => (v === null ? '–' : `${Math.round(v * 100)}%`);
+
+  async function writeMore(ground: 'clear' | 'boundary' | 'unimagined') {
+    if (!description.trim()) {
+      onError('Describe what your AI does first; the writer needs it.');
+      return;
+    }
+    setBusy(ground);
+    try {
+      await api.generateScenarios(slug, token, { description, count: 4, ground });
+      reload();
+      onChange();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Could not write more cases.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <span className="metric-k">Coverage{data.round ? ` · read by ${data.round.name}` : ''}</span>
+      <div className="scroll-x" style={{ marginTop: 8 }}>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Kind of ground</th>
+              <th scope="col">Cases</th>
+              <th scope="col">Graded</th>
+              <th scope="col">Split</th>
+              <th scope="col">Pass rate</th>
+              <th scope="col" />
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((r) => (
+              <tr key={r.id}>
+                <td>
+                  {r.label}
+                  <span className="tiny" style={{ display: 'block' }}>{r.what}</span>
+                </td>
+                <td className="mono" style={r.cases === 0 ? { color: 'var(--split)' } : undefined}>{r.cases}</td>
+                <td className="mono">{r.graded}</td>
+                <td className="mono">{r.graded ? `${r.splits} (${pct(r.split_rate)})` : '–'}</td>
+                <td className="mono">{pct(r.pass_rate)}</td>
+                <td>
+                  {r.id !== 'real' ? (
+                    <button
+                      className="ghost tiny-btn"
+                      style={{ whiteSpace: 'nowrap' }}
+                      disabled={busy !== null}
+                      onClick={() => writeMore(r.id as 'clear' | 'boundary' | 'unimagined')}
+                    >
+                      {busy === r.id ? 'writing…' : 'write 4 more'}
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {data.gaps.length > 0 ? (
+        <ul className="plain tiny" style={{ margin: '8px 0 0' }}>
+          {data.gaps.map((g) => (
+            <li key={`${g.id}:${g.reason}`} style={{ color: 'var(--amber)' }}>
+              {g.reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function TracesTab({
   slug,
   token,
   traces,
   loading,
   autoWrite,
+  description,
   onChange,
   onError,
 }: {
@@ -1209,6 +1312,8 @@ function TracesTab({
   loading: boolean;
   /** The description from Setup, when the Room should write the cases on arrival. */
   autoWrite: string | null;
+  /** What the AI is supposed to do, for writing more cases of one kind. */
+  description: string;
   onChange: () => void;
   onError: (m: string) => void;
 }) {
@@ -1306,6 +1411,10 @@ function TracesTab({
               them with scenarios about your actual operation.
             </p>
           </div>
+        ) : null}
+
+        {traces.length > 0 ? (
+          <CoverageBlock slug={slug} token={token} description={description} traceCount={traces.length} onChange={onChange} onError={onError} />
         ) : null}
 
         {pasting ? (

@@ -30,6 +30,7 @@ import { renderOgSvg, renderStandardsPage, type StandardsView } from './standard
 import { buildTrainingExport, toJsonl, type ExplicitPair, type TrainingRound } from './training.js';
 import { pairOutcome, swapChoice, type PairVote } from '../shared/pairs.js';
 import { driftReport, type DriftSpec, type RunPoint } from '../shared/drift.js';
+import { coverageMap, type CoverageReading } from '../shared/coverage.js';
 import { buildZip } from './zip.js';
 import { ensembleVerdict, evaluateGate } from '../shared/ensemble.js';
 import { createSpendGuard } from './spend.js';
@@ -674,6 +675,8 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         description: z.string().min(10).max(2000),
         count: z.number().int().min(1).max(32).optional(),
         documentIds: z.array(z.string().min(1)).optional(),
+        /** Write only one kind of ground: how a gap in the coverage map is filled. */
+        ground: z.enum(['clear', 'boundary', 'unimagined']).optional(),
       })
       .safeParse(req.body);
     if (!body.success) {
@@ -698,6 +701,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
           description: body.data.description,
           documents: prepared.documents,
           count: body.data.count,
+          ...(body.data.ground ? { ground: body.data.ground } : {}),
         },
         meter(),
       );
@@ -715,7 +719,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
           source: 'scenario',
           // The probe never reaches a voter: the grading queue omits meta by
           // showing it collapsed, but scenarios carry it for the owner's view.
-          meta: { probe: s.probe, generated: true, real: scenarist.real },
+          meta: { probe: s.probe, generated: true, real: scenarist.real, ...(s.ground ? { ground: s.ground } : {}) },
         })),
       );
       res.status(201).json({
@@ -2412,6 +2416,49 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       });
     }
     res.json({ points, report: driftReport(points, spec, q('standards_version')) });
+  });
+
+  /**
+   * The coverage map: which kinds of ground the case set stands on, and
+   * how the latest finished round read each kind. Gaps are named; a gap
+   * in a written class is filled by POST /scenarios with that ground.
+   */
+  api.get('/projects/:slug/coverage', requireProject, async (req, res) => {
+    const project = (req as ProjectRequest).project;
+    const traces = await store.listTraces(db, project.id);
+    const seats = (await store.listGraders(db, project.id)).filter((g) => g.kind === 'panelist');
+    const seatIds = new Set(seats.map((s) => s.id));
+    const seatById = new Map(seats.map((s) => [s.id, s]));
+    const round = (await store.listRounds(db, project.id)).filter((r) => r.status === 'closed').at(-1) ?? null;
+    const rubric = round ? await store.getRubric(db, round.rubricVersionId) : await store.currentRubric(db, project.id);
+    const top = rubric ? [...rubric.scale].sort((a, b) => b.rank - a.rank)[0]?.id ?? null : null;
+    const readings: CoverageReading[] = [];
+    if (round && rubric) {
+      const grades = (await store.allGradesForRound(db, round.id)).filter((g) => seatIds.has(g.graderId));
+      const byItem = new Map<string, typeof grades>();
+      for (const g of grades) byItem.set(g.itemId, [...(byItem.get(g.itemId) ?? []), g]);
+      for (const item of await store.listItems(db, round.id)) {
+        const votes = (byItem.get(item.id) ?? []).map((g) => ({
+          seatId: g.graderId,
+          seatName: seatById.get(g.graderId)?.name ?? 'seat',
+          verdict: g.verdict,
+          reason: g.note,
+          stable: g.variantAgreement >= 1,
+          weight: seatById.get(g.graderId)?.weight ?? 1,
+        }));
+        readings.push({
+          caseId: item.traceId,
+          pattern: readCase(item.id, stableVotes(votes)).pattern,
+          verdict: ensembleVerdict(votes, rubric.scale).verdict,
+        });
+      }
+    }
+    const map = coverageMap(
+      traces.map((t) => ({ id: t.id, title: t.title, source: t.source, meta: t.meta })),
+      readings,
+      top,
+    );
+    res.json({ ...map, round: round ? { id: round.id, name: round.name || `Round ${round.index}` } : null });
   });
 
   /**

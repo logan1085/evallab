@@ -28,6 +28,8 @@ export interface Scenario {
   content: string;
   /** What this scenario is designed to find out. Shown to the owner, never to voters. */
   probe: string;
+  /** Which kind of ground it was written to cover. Set by the writer, read by the coverage map. */
+  ground?: ScenarioGround;
 }
 
 export interface ScenarioRequest {
@@ -35,6 +37,8 @@ export interface ScenarioRequest {
   description: string;
   documents?: DraftDocument[];
   count?: number;
+  /** Write only this kind of ground: how a gap in the coverage map gets filled. */
+  ground?: ScenarioGround;
 }
 
 export function clampScenarioCount(count: number | undefined): number {
@@ -100,29 +104,41 @@ export interface ScenarioBatch {
   index: number;
   of: number;
   count: number;
+  ground: ScenarioGround;
   focus: string;
 }
 
+export type ScenarioGround = 'clear' | 'boundary' | 'unimagined';
+
 /**
  * The three kinds of ground from the system prompt, as the focus of each
- * batch. A frontier model writing twelve scenarios at once is a single
- * long call that a deployment deadline cuts off; three parallel writes of
- * four each finish in the time one of them took, and each part can land
- * on its own. Twelve becomes 4 / 4 / 4; five becomes 2 / 2 / 1.
+ * batch and as the classes of the coverage map. A frontier model writing
+ * twelve scenarios at once is a single long call that a deployment
+ * deadline cuts off; three parallel writes of four each finish in the
+ * time one of them took, and each part can land on its own. Twelve
+ * becomes 4 / 4 / 4; five becomes 2 / 2 / 1.
  */
-export const SCENARIO_GROUNDS = [
-  'clear cases the written rules settle, so agreement has an anchor.',
-  'boundary cases where the rules run out, nearly contradict, or leave a judgment call. If the documents contradict each other, land one scenario exactly on the contradiction.',
-  'cases the documents never imagined but the operation will meet.',
+export const SCENARIO_GROUNDS: { id: ScenarioGround; label: string; focus: string }[] = [
+  { id: 'clear', label: 'Clear cases', focus: 'clear cases the written rules settle, so agreement has an anchor.' },
+  {
+    id: 'boundary',
+    label: 'Boundary cases',
+    focus: 'boundary cases where the rules run out, nearly contradict, or leave a judgment call. If the documents contradict each other, land one scenario exactly on the contradiction.',
+  },
+  { id: 'unimagined', label: 'The unimagined', focus: 'cases the documents never imagined but the operation will meet.' },
 ];
 
-export function scenarioBatches(count: number | undefined): ScenarioBatch[] {
+export const isScenarioGround = (v: unknown): v is ScenarioGround => SCENARIO_GROUNDS.some((g) => g.id === v);
+
+/** Only one ground asked for: one part, the whole count. */
+export function scenarioBatches(count: number | undefined, only?: ScenarioGround): ScenarioBatch[] {
   const total = clampScenarioCount(count);
-  const parts = Math.min(SCENARIO_GROUNDS.length, total);
+  const grounds = only ? SCENARIO_GROUNDS.filter((g) => g.id === only) : SCENARIO_GROUNDS;
+  const parts = Math.min(grounds.length, total);
   const out: ScenarioBatch[] = [];
   for (let i = 0; i < parts; i++) {
     const n = Math.floor(total / parts) + (i < total % parts ? 1 : 0);
-    if (n > 0) out.push({ index: i, of: parts, count: n, focus: SCENARIO_GROUNDS[i]! });
+    if (n > 0) out.push({ index: i, of: parts, count: n, ground: grounds[i]!.id, focus: grounds[i]!.focus });
   }
   return out;
 }

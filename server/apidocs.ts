@@ -82,6 +82,21 @@ curl -s -X POST ${v1}/projects/$SLUG/traces \\
   -d '{"traces":[{"title":"A hard case","content":"USER: … ASSISTANT: …"}]}'   # paste your own
 \`\`\`
 
+#### The coverage map
+
+Which kinds of ground the cases stand on: clear cases the rules settle,
+boundary cases where they run out, cases the documents never imagined,
+and your own transcripts. Each written scenario is stamped with the ground
+it was written for; the map counts each class, reads how the last finished
+round graded it (splits, pass rate), and names the gaps. A gap in a
+written class is filled by asking for that ground alone.
+
+\`\`\`bash
+curl -s ${v1}/projects/$SLUG/coverage -H "Authorization: Bearer $TOKEN"
+curl -s -X POST ${v1}/projects/$SLUG/scenarios -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"description":"…","count":4,"ground":"boundary"}'
+\`\`\`
+
 ### 4. The panel
 
 One model call. Idempotent: it never regenerates over your edits. Each seat

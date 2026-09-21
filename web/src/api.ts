@@ -544,7 +544,27 @@ export const api = {
   soloEvalsetUrl: (slug: string, token: string) =>
     `/api/projects/${slug}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
 
-  generateScenarios: (slug: string, token: string, body: { description: string; count?: number }) =>
+  /** The coverage map: which kinds of ground the cases stand on, and how the last round read each. */
+  coverage: (slug: string, token: string) =>
+    call<{
+      rows: {
+        id: 'clear' | 'boundary' | 'unimagined' | 'real';
+        label: string;
+        what: string;
+        cases: number;
+        graded: number;
+        settled: number;
+        splits: number;
+        split_rate: number | null;
+        pass_rate: number | null;
+        titles: string[];
+      }[];
+      total: number;
+      gaps: { id: 'clear' | 'boundary' | 'unimagined' | 'real'; reason: string }[];
+      round: { id: string; name: string } | null;
+    }>(`/projects/${slug}/coverage`, { token }),
+
+  generateScenarios: (slug: string, token: string, body: { description: string; count?: number; ground?: 'clear' | 'boundary' | 'unimagined' }) =>
     call<{
       scenarios: { id: string; title: string; content: string; probe: string }[];
       provider: { id: string; model: string; real: boolean };
