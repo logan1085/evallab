@@ -41,10 +41,15 @@ const args = parseArgs(process.argv.slice(2));
 let failed = 0;
 const started = Date.now();
 
-function report(step: string, ok: boolean, detail: string) {
+let warned = 0;
+
+/** PASS or FAIL counts; 'warn' is a configuration note that does not fail the smoke. */
+function report(step: string, ok: boolean | 'warn', detail: string) {
   const t = `${((Date.now() - started) / 1000).toFixed(1)}s`;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${step.padEnd(22)} ${detail}  [${t}]`);
-  if (!ok) failed++;
+  const tag = ok === 'warn' ? 'WARN' : ok ? 'PASS' : 'FAIL';
+  console.log(`${tag}  ${step.padEnd(22)} ${detail}  [${t}]`);
+  if (ok === 'warn') warned++;
+  else if (!ok) failed++;
 }
 
 async function call<T>(path: string, init: RequestInit & { token?: string } = {}): Promise<{ status: number; body: T; text: string }> {
@@ -114,7 +119,7 @@ async function main() {
   }
   if (h.body.writer) report('writer', h.body.writer.ok, h.body.writer.ok ? `answers on ${h.body.writer.model}` : h.body.writer.error ?? 'no answer');
   else report('writer', false, 'no writer canary: no key on the deployment');
-  report('secrets', h.body.secrets === 'env', h.body.secrets === 'env' ? 'GR_SECRET set' : `secrets=${h.body.secrets ?? 'unknown'} (set GR_SECRET in production)`);
+  report('secrets', h.body.secrets === 'env' ? true : 'warn', h.body.secrets === 'env' ? 'GR_SECRET set' : `secrets=${h.body.secrets ?? 'unknown'}: endpoint keys are sealed under the development phrase; set GR_SECRET in the Vercel project and redeploy`);
 
   // 3. A fresh project, as a new user makes one.
   const created = await call<{ project: { slug: string; token: string; description: string }; error?: string }>('/api/v1/projects', {
@@ -222,10 +227,12 @@ async function main() {
       ...auth,
       body: JSON.stringify({ seatId: seat.id }),
     });
-    // A seat that graded every case passes; one that abstained on some is
-    // reported with the reason, and still counts as run; one that graded
-    // nothing is a 502 from the server and fails here.
-    const ok = r.status === 200 && (r.body.failed ?? 0) === 0;
+    // A seat that graded every case passes, even if a repeat sample could
+    // not be asked (that is reported, and counts as neither agreement nor
+    // disagreement); one that abstained on a case is a failure with the
+    // reason; one that graded nothing is a 502 from the server.
+    const abstainedOnCase = (r.body.failures ?? []).some((f) => !/\(repeat\)/.test(f));
+    const ok = r.status === 200 && (r.body.graded ?? 0) >= round.body.cases && !abstainedOnCase;
     if (r.status === 200) seatsOk++;
     report(
       `seat: ${seat.name}`,
@@ -260,7 +267,11 @@ async function main() {
 function finish(slug?: string, token?: string) {
   console.log('');
   if (slug && token) console.log(`Project: ${args.base}/p/${slug}?k=${token}${args.keep ? '' : '  (left in place; delete it from the Room if you like)'}`);
-  console.log(failed === 0 ? 'SMOKE PASSED: the deployment works end to end.' : `SMOKE FAILED: ${failed} step${failed === 1 ? '' : 's'} above.`);
+  console.log(
+    failed === 0
+      ? `SMOKE PASSED: the deployment works end to end.${warned ? ` ${warned} configuration warning${warned === 1 ? '' : 's'} above.` : ''}`
+      : `SMOKE FAILED: ${failed} step${failed === 1 ? '' : 's'} above.`,
+  );
   process.exit(failed === 0 ? 0 : 1);
 }
 

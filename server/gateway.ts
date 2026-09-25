@@ -149,15 +149,25 @@ export function resetLearnedCapabilities(): void {
  */
 const REASONING_EFFORT = (process.env.GR_REASONING_EFFORT ?? 'low').trim().toLowerCase();
 
+/**
+ * Only the families whose models reason by default get the parameter.
+ * Sending it to a family whose thinking is off by default turns the
+ * thinking on: the second production smoke saw claude-haiku-4.5 spend a
+ * grading budget on "Let me evaluate this..." and answer nothing, which
+ * it had never done without the parameter.
+ */
+const REASONS_BY_DEFAULT = new Set(['openai', 'google']);
+
 export function buildRequestBody(pin: Pin, req: ModelCallRequest): object {
   const own = pin.pin_id.startsWith('byo:');
+  const reasoning = !own && REASONS_BY_DEFAULT.has(pin.family) && ['minimal', 'low', 'medium', 'high'].includes(REASONING_EFFORT);
   return {
     model: pin.openrouter_model_id,
     messages: req.messages,
     max_tokens: req.max_tokens ?? 1024,
     ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
     ...(req.response_format ? { response_format: req.response_format } : {}),
-    ...(!own && ['low', 'medium', 'high'].includes(REASONING_EFFORT) ? { reasoning: { effort: REASONING_EFFORT } } : {}),
+    ...(reasoning ? { reasoning: { effort: REASONING_EFFORT } } : {}),
     // Only lock the provider when the pin names one. Naming a host that does
     // not serve the model is how a request hangs rather than fails; which
     // provider actually answered is recorded per call either way.
