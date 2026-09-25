@@ -947,6 +947,100 @@ export async function deleteEndpoint(db: DB, projectId: string, id: string): Pro
   await db.run('DELETE FROM endpoints WHERE id = ? AND project_id = ?', id, projectId);
 }
 
+/* ---- Scenario jobs --------------------------------------------------------- */
+
+export interface ScenarioJobPart {
+  index: number;
+  ground: 'clear' | 'boundary' | 'unimagined';
+  count: number;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  /** The gateway's words when the part failed; empty otherwise. */
+  error: string;
+  /** How many cases this part persisted. */
+  scenarios: number;
+}
+
+export interface ScenarioJob {
+  id: string;
+  projectId: string;
+  description: string;
+  documentIds: string[];
+  parts: ScenarioJobPart[];
+  status: 'pending' | 'running' | 'done' | 'failed';
+  provider: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function toScenarioJob(row: Row): ScenarioJob {
+  const parse = <T>(v: unknown, fallback: T): T => {
+    try {
+      return JSON.parse(str(v)) as T;
+    } catch {
+      return fallback;
+    }
+  };
+  const status = str(row.status);
+  return {
+    id: str(row.id),
+    projectId: str(row.project_id),
+    description: str(row.description),
+    documentIds: parse<string[]>(row.document_ids, []),
+    parts: parse<ScenarioJobPart[]>(row.parts, []),
+    status: status === 'running' || status === 'done' || status === 'failed' ? status : 'pending',
+    provider: str(row.provider),
+    createdAt: str(row.created_at),
+    updatedAt: str(row.updated_at),
+  };
+}
+
+export async function createScenarioJob(
+  db: DB,
+  args: { projectId: string; description: string; documentIds: string[]; parts: ScenarioJobPart[]; provider: string },
+): Promise<ScenarioJob> {
+  const id = newId();
+  const t = now();
+  await db.run(
+    'INSERT INTO scenario_jobs (id, project_id, description, document_ids, parts, status, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    id, args.projectId, args.description, JSON.stringify(args.documentIds), JSON.stringify(args.parts), 'pending', args.provider, t, t,
+  );
+  return (await getScenarioJob(db, id))!;
+}
+
+export async function getScenarioJob(db: DB, id: string): Promise<ScenarioJob | null> {
+  const row = await db.get('SELECT * FROM scenario_jobs WHERE id = ?', id) as Row | undefined;
+  return row ? toScenarioJob(row) : null;
+}
+
+/**
+ * Replace one part's state. Parts run in parallel inside one process, and
+ * a read-modify-write on the row from two of them at once would let one
+ * overwrite the other's landing, so writes to a job are serialised per job.
+ */
+const jobWrites = new Map<string, Promise<unknown>>();
+
+export async function setScenarioJobPart(db: DB, id: string, part: ScenarioJobPart): Promise<ScenarioJob | null> {
+  const previous = jobWrites.get(id) ?? Promise.resolve();
+  const next = previous.then(async () => {
+    const job = await getScenarioJob(db, id);
+    if (!job) return null;
+    const parts = job.parts.map((p) => (p.index === part.index ? part : p));
+    const status: ScenarioJob['status'] = parts.every((p) => p.status === 'done')
+      ? 'done'
+      : parts.some((p) => p.status === 'running' || p.status === 'pending')
+        ? 'running'
+        : 'failed';
+    await db.run('UPDATE scenario_jobs SET parts = ?, status = ?, updated_at = ? WHERE id = ?', JSON.stringify(parts), status, now(), id);
+    return getScenarioJob(db, id);
+  });
+  jobWrites.set(id, next.catch(() => undefined));
+  return next;
+}
+
+export async function setScenarioJobStatus(db: DB, id: string, status: ScenarioJob['status']): Promise<void> {
+  await db.run('UPDATE scenario_jobs SET status = ?, updated_at = ? WHERE id = ?', status, now(), id);
+}
+
 /* ---- Preference pairs ------------------------------------------------------ */
 
 export interface PairRow {

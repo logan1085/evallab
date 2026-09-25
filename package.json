@@ -25,7 +25,8 @@
     "recovery": "tsx scripts/recovery-test.ts",
     "pins:check": "tsx scripts/pins-check.ts",
     "creator:smoke": "tsx scripts/creator-smoke.ts",
-    "evallab": "tsx scripts/evallab.ts"
+    "evallab": "tsx scripts/evallab.ts",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",

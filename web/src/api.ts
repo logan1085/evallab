@@ -74,6 +74,22 @@ export interface PairView {
   createdAt: string;
 }
 
+/** A scenario write in progress or finished: one entry per part, with the cases each persisted. */
+export interface ScenarioJobView {
+  id: string;
+  description: string;
+  parts: { index: number; ground: 'clear' | 'boundary' | 'unimagined'; count: number; status: 'pending' | 'running' | 'done' | 'failed'; error: string; scenarios: number }[];
+  status: 'pending' | 'running' | 'done' | 'failed';
+  provider: string;
+  /** Cases persisted so far, across parts. */
+  scenarios: number;
+  /** One line per failed part, in the gateway's words. */
+  failed: string[];
+  pending: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A company's own endpoint as the Room sees it: never the key, only its hint. */
 export interface EndpointView {
   id: string;
@@ -287,6 +303,139 @@ export interface JudgeRunView {
 }
 
 /* ---- Endpoints ---------------------------------------------------------- */
+
+function createScenarioJobReq(slug: string, token: string, body: { description: string; count?: number; documentIds?: string[]; ground?: 'clear' | 'boundary' | 'unimagined' }) {
+  return call<{ job: ScenarioJobView; provider: { id: string; model: string; real: boolean } }>(`/projects/${slug}/scenario-jobs`, {
+    method: 'POST',
+    token,
+    body: json(body),
+  });
+}
+
+function getScenarioJobReq(slug: string, token: string, jobId: string) {
+  return call<{ job: ScenarioJobView }>(`/projects/${slug}/scenario-jobs/${jobId}`, { token });
+}
+
+/**
+ * Run the job and read its stream: heartbeats, a line per part as it
+ * lands, then the final line. Resolves with the job as the server last
+ * reported it. Throws ApiError(0) when the connection dropped before the
+ * final line, which is the case the job exists for: the caller polls.
+ */
+async function runScenarioJobStream(slug: string, token: string, jobId: string, onPart?: (part: ScenarioJobView['parts'][number]) => void): Promise<ScenarioJobView> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1/projects/${slug}/scenario-jobs/${jobId}/run`, { method: 'POST', headers: { 'x-gr-token': token } });
+  } catch (err) {
+    throw new ApiError(0, `The connection dropped before the server answered (${err instanceof Error ? err.message : 'network error'}).`);
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(res.status, body.error ?? res.statusText);
+  }
+  if (!res.body) throw new ApiError(0, 'The server sent no stream.');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  type StreamLine = { done?: boolean; job?: ScenarioJobView; error?: string; part?: ScenarioJobView['parts'][number]; tick?: number };
+  let last: StreamLine | null = null;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl = buffer.indexOf('\n');
+      while (nl >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line) {
+          const parsed = JSON.parse(line) as StreamLine;
+          if (parsed?.part && onPart) onPart(parsed.part);
+          if (parsed?.done) last = parsed;
+        }
+        nl = buffer.indexOf('\n');
+      }
+    }
+  } catch (err) {
+    throw new ApiError(0, `The connection dropped while the scenarios were being written (${err instanceof Error ? err.message : 'stream error'}).`);
+  }
+  if (!last?.job) throw new ApiError(0, 'The connection dropped before the server finished.');
+  if (last.error) throw new ApiError(502, last.error);
+  return last.job;
+}
+
+/**
+ * The whole write, the way the Room does it: create, run, and when the
+ * run's connection drops, poll the job until it settles. The server keeps
+ * writing after the browser loses the connection, so polling sees the
+ * parts land. Returns the final job; the caller reads `failed` for the
+ * parts that did not.
+ */
+async function writeScenariosResilient(
+  slug: string,
+  token: string,
+  body: { description: string; count?: number; ground?: 'clear' | 'boundary' | 'unimagined' },
+  opts: { jobId?: string; onPart?: (part: ScenarioJobView['parts'][number]) => void; pollForMs?: number } = {},
+): Promise<{ job: ScenarioJobView; provider: { id: string; model: string; real: boolean } | null }> {
+  let jobId = opts.jobId ?? null;
+  let provider: { id: string; model: string; real: boolean } | null = null;
+  if (!jobId) {
+    const created = await createScenarioJobReq(slug, token, body);
+    jobId = created.job.id;
+    provider = created.provider;
+  }
+  try {
+    return { job: await runScenarioJobStream(slug, token, jobId, opts.onPart), provider };
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 0) throw err;
+    // The connection dropped. The server is still writing; watch the job.
+    const until = Date.now() + (opts.pollForMs ?? 150_000);
+    let lastJob: ScenarioJobView | null = null;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 3000));
+      let seen: ScenarioJobView;
+      try {
+        seen = (await getScenarioJobReq(slug, token, jobId)).job;
+      } catch {
+        continue;
+      }
+      lastJob = seen;
+      if (seen.status === 'done' || seen.status === 'failed') return { job: seen, provider };
+    }
+    const landed = lastJob as ScenarioJobView | null;
+    throw new ApiError(0, `${err.message} Waited ${Math.round((opts.pollForMs ?? 150_000) / 1000)} seconds for the write to finish on the server; ${landed ? `${landed.scenarios} cases have landed so far` : 'it has not reported back'}. Job ${jobId}.`);
+  }
+}
+
+/**
+ * Seat the panel, and when the connection drops mid-write, wait for the
+ * seats to appear rather than calling it failed: the server finishes the
+ * write whether or not the browser is still listening.
+ */
+type PanelWrite = { seats: Grader[]; families: string[]; familiesShort?: number; generated: boolean; real?: boolean; fallbackReason?: string };
+
+async function seatPanelResilient(slug: string, token: string, pollForMs = 120_000): Promise<PanelWrite> {
+  try {
+    return await call<PanelWrite>(`/projects/${slug}/panel`, { method: 'POST', token });
+  } catch (err) {
+    const dropped = !(err instanceof ApiError) || err.status === 0;
+    if (!dropped) throw err;
+    const until = Date.now() + pollForMs;
+    while (Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 3000));
+      let view: ProjectView;
+      try {
+        view = await call<ProjectView>(`/projects/${slug}`, { token });
+      } catch {
+        continue;
+      }
+      const seats = view.graders.filter((g) => g.kind === 'panelist');
+      if (seats.length >= 3) return { seats, families: [...new Set(seats.map((s) => s.family))], generated: true };
+    }
+    throw new ApiError(0, `The connection dropped while the panel was being written (${err instanceof Error ? err.message : 'network error'}), and no seats appeared within ${Math.round(pollForMs / 1000)} seconds. Try the seating again; it never overwrites seats that exist.`);
+  }
+}
+
 
 export const api = {
   createProject: (name: string, description = '', limits = '') =>
@@ -543,6 +692,14 @@ export const api = {
 
   soloEvalsetUrl: (slug: string, token: string) =>
     `/api/projects/${slug}/evalset?format=jsonl&k=${encodeURIComponent(token)}`,
+
+  /* ---- The scenario write as a job ------------------------------------- */
+
+  createScenarioJob: createScenarioJobReq,
+  getScenarioJob: getScenarioJobReq,
+  runScenarioJob: runScenarioJobStream,
+  writeScenarios: writeScenariosResilient,
+  seatPanel: seatPanelResilient,
 
   /** The coverage map: which kinds of ground the cases stand on, and how the last round read each. */
   coverage: (slug: string, token: string) =>

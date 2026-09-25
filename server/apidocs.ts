@@ -82,6 +82,24 @@ curl -s -X POST ${v1}/projects/$SLUG/traces \\
   -d '{"traces":[{"title":"A hard case","content":"USER: … ASSISTANT: …"}]}'   # paste your own
 \`\`\`
 
+#### The write as a job
+
+The one-shot POST above holds a connection open for as long as the model
+takes, and some edges cut a silent connection after twenty seconds with
+no response at all. The Room writes through a job instead: create it (fast),
+run it (a stream with a heartbeat line every four seconds, a line per part
+as it lands, and a final line with done: true; each part's cases are saved
+the moment they arrive), and read it back by polling when the run's
+connection drops. Running a job again reruns only the parts that did not
+land. \`?mode=json\` on run answers once, as JSON, for curl.
+
+\`\`\`bash
+curl -s -X POST ${v1}/projects/$SLUG/scenario-jobs -H "Authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"description":"…"}'                       # 202 { job }
+curl -sN -X POST ${v1}/projects/$SLUG/scenario-jobs/$JOB/run -H "Authorization: Bearer $TOKEN"   # ndjson stream
+curl -s ${v1}/projects/$SLUG/scenario-jobs/$JOB -H "Authorization: Bearer $TOKEN"                # poll
+\`\`\`
+
 #### The coverage map
 
 Which kinds of ground the cases stand on: clear cases the rules settle,

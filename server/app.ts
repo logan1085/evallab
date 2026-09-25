@@ -31,6 +31,7 @@ import { buildTrainingExport, toJsonl, type ExplicitPair, type TrainingRound } f
 import { pairOutcome, swapChoice, type PairVote } from '../shared/pairs.js';
 import { driftReport, type DriftSpec, type RunPoint } from '../shared/drift.js';
 import { coverageMap, type CoverageReading } from '../shared/coverage.js';
+import { SCENARIO_GROUNDS, scenarioBatches } from '../shared/scenarios.js';
 import { buildZip } from './zip.js';
 import { ensembleVerdict, evaluateGate } from '../shared/ensemble.js';
 import { createSpendGuard } from './spend.js';
@@ -735,6 +736,147 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
         return res.status(error.code === 'auth' ? 401 : 502).json({ error: error.message, code: error.code });
       }
       throw error;
+    }
+  });
+
+  /* ---- The scenario write as a job -------------------------------------- */
+
+  /**
+   * Why a job: production cut the scenario request off at the edge after
+   * about twenty seconds with no response at all, so the browser saw
+   * "Failed to fetch" and the project stayed at zero cases however well
+   * the model had done. Three requests now, none of which has to be
+   * long-lived to be safe: create (fast), run (streams a heartbeat line
+   * every few seconds and persists each part the moment it lands), read
+   * (the job's state by polling, for when the run's connection drops).
+   * Running again reruns only the parts that did not land.
+   */
+  const jobView = (job: store.ScenarioJob) => ({
+    ...job,
+    scenarios: job.parts.reduce((n, p) => n + p.scenarios, 0),
+    failed: job.parts.filter((p) => p.status === 'failed').map((p) => `part ${p.index + 1} of ${job.parts.length}: ${p.error}`),
+    pending: job.parts.filter((p) => p.status === 'pending' || p.status === 'running').length,
+  });
+
+  /** A newline-delimited JSON response with a heartbeat, for work that outlives an idle connection. */
+  function ndjson(res: Response) {
+    res.status(200);
+    res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('cache-control', 'no-cache, no-transform');
+    res.setHeader('x-accel-buffering', 'no');
+    res.flushHeaders();
+    let n = 0;
+    const timer = setInterval(() => {
+      if (!res.writableEnded) res.write(`${JSON.stringify({ tick: ++n })}\n`);
+    }, 4000);
+    return {
+      line: (obj: object) => {
+        if (!res.writableEnded) res.write(`${JSON.stringify(obj)}\n`);
+      },
+      end: (obj: object) => {
+        clearInterval(timer);
+        if (!res.writableEnded) res.end(`${JSON.stringify(obj)}\n`);
+      },
+    };
+  }
+
+  async function runScenarioJob(job: store.ScenarioJob, project: Project, onPart?: (part: store.ScenarioJobPart) => void): Promise<store.ScenarioJob> {
+    await readyPins();
+    const scenarist = resolveScenarist();
+    const docs = (await store.listDocuments(db, project.id)).filter((d) => job.documentIds.includes(d.id));
+    const prepared = prepareDocuments(docs.map((d) => ({ title: d.title, kind: d.kind, content: d.content })));
+    const request = { description: job.description, documents: prepared.documents };
+    const todo = job.parts.filter((p) => p.status !== 'done');
+    await store.setScenarioJobStatus(db, job.id, 'running');
+    await Promise.all(
+      todo.map(async (part) => {
+        await store.setScenarioJobPart(db, job.id, { ...part, status: 'running', error: '' });
+        const batch = { index: part.index, of: job.parts.length, count: part.count, ground: part.ground, focus: SCENARIO_GROUNDS.find((g) => g.id === part.ground)!.focus };
+        try {
+          const scenarios = await scenarist.writePart(request, batch, meter());
+          if (scenarios.length === 0) throw new DrafterError('parse', 'No usable scenarios came back for this part.');
+          await store.addTraces(
+            db,
+            project.id,
+            scenarios.map((s) => ({
+              title: s.title,
+              content: s.content,
+              source: 'scenario',
+              meta: { probe: s.probe, generated: true, real: scenarist.real, ground: s.ground ?? part.ground, job: job.id },
+            })),
+          );
+          const done: store.ScenarioJobPart = { ...part, status: 'done', error: '', scenarios: scenarios.length };
+          await store.setScenarioJobPart(db, job.id, done);
+          onPart?.(done);
+        } catch (error) {
+          const failed: store.ScenarioJobPart = { ...part, status: 'failed', error: error instanceof Error ? error.message : String(error), scenarios: 0 };
+          await store.setScenarioJobPart(db, job.id, failed);
+          onPart?.(failed);
+        }
+      }),
+    );
+    return (await store.getScenarioJob(db, job.id))!;
+  }
+
+  api.post('/projects/:slug/scenario-jobs', requireProject, async (req, res) => {
+    const body = z
+      .object({
+        description: z.string().min(10).max(2000),
+        count: z.number().int().min(1).max(32).optional(),
+        documentIds: z.array(z.string().min(1)).optional(),
+        ground: z.enum(['clear', 'boundary', 'unimagined']).optional(),
+      })
+      .safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: 'Describe what your AI is supposed to do, in a sentence or two.' });
+    const { project } = req as ProjectRequest;
+    const allDocs = await store.listDocuments(db, project.id);
+    const documentIds = body.data.documentIds ?? allDocs.map((d) => d.id);
+    if (documentIds.some((id) => !allDocs.some((d) => d.id === id))) return res.status(404).json({ error: 'One of those documents is not in this project.' });
+    const parts: store.ScenarioJobPart[] = scenarioBatches(body.data.count, body.data.ground).map((b) => ({
+      index: b.index,
+      ground: b.ground,
+      count: b.count,
+      status: 'pending',
+      error: '',
+      scenarios: 0,
+    }));
+    const provider = resolveScenarist();
+    const job = await store.createScenarioJob(db, { projectId: project.id, description: body.data.description, documentIds, parts, provider: provider.id });
+    res.status(202).json({ job: jobView(job), provider: { id: provider.id, model: provider.model, real: provider.real } });
+  });
+
+  api.get('/projects/:slug/scenario-jobs/:jobId', requireProject, async (req, res) => {
+    const { project } = req as ProjectRequest;
+    const job = await store.getScenarioJob(db, req.params.jobId!);
+    if (!job || job.projectId !== project.id) return res.status(404).json({ error: 'No such scenario job.' });
+    res.json({ job: jobView(job) });
+  });
+
+  /**
+   * Run the parts that have not landed. Streams by default: a heartbeat
+   * line every four seconds, a line per part as it lands, and a final line
+   * with done: true. With ?mode=json it answers once, as plain JSON, for
+   * curl and the CLI.
+   */
+  api.post('/projects/:slug/scenario-jobs/:jobId/run', requireProject, async (req, res) => {
+    const { project } = req as ProjectRequest;
+    const job = await store.getScenarioJob(db, req.params.jobId!);
+    if (!job || job.projectId !== project.id) return res.status(404).json({ error: 'No such scenario job.' });
+    if (job.status === 'done') return res.json({ done: true, job: jobView(job) });
+    if (req.query.mode === 'json') {
+      const finished = await runScenarioJob(job, project);
+      // A part that failed is reported in the body; only a job with nothing
+      // landed at all is an error status, because that is the only case with
+      // nothing for the caller to keep.
+      return res.status(jobView(finished).scenarios === 0 && finished.status === 'failed' ? 502 : 200).json({ done: true, job: jobView(finished) });
+    }
+    const out = ndjson(res);
+    try {
+      const finished = await runScenarioJob(job, project, (part) => out.line({ part }));
+      out.end({ done: true, job: jobView(finished) });
+    } catch (error) {
+      await store.setScenarioJobStatus(db, job.id, 'failed');
+      out.end({ done: true, error: error instanceof Error ? error.message : 'The scenario job crashed.', job: jobView((await store.getScenarioJob(db, job.id))!) });
     }
   });
 

@@ -16,6 +16,7 @@ import {
   scenarioBatches,
   scenarioJsonSchema,
   type Scenario,
+  type ScenarioBatch,
   type ScenarioRequest,
 } from '../shared/scenarios.js';
 import { DrafterError } from './drafter.js';
@@ -43,6 +44,8 @@ export interface ScenarioProvider {
   /** True when a model actually read the description and documents. */
   real: boolean;
   write(req: ScenarioRequest, gateway?: GatewayOptions): Promise<ScenarioWrite>;
+  /** One part of a write: the scenarios for one kind of ground, or a thrown DrafterError. */
+  writePart(req: ScenarioRequest, batch: ScenarioBatch, gateway?: GatewayOptions): Promise<Scenario[]>;
 }
 
 export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_SCENARIO_MODEL): ScenarioProvider {
@@ -62,27 +65,26 @@ export function resolveScenarist(_model = process.env.GR_DRAFT_MODEL ?? DEFAULT_
  * twelve. Titles are deduplicated across parts.
  */
 function openrouterScenarist(): ScenarioProvider {
-  return {
+  const provider: ScenarioProvider = {
     id: 'openrouter',
     model: resolveCreatorPin().openrouter_model_id,
     real: true,
+    async writePart(req, batch, gateway) {
+      const parsed = await openrouterJson<unknown>({
+        system: buildScenarioSystemPrompt(),
+        user: buildScenarioUserPrompt(req, batch),
+        schema: scenarioJsonSchema(batch.count),
+        // Roughly 250 tokens per scenario, with room: the deadline in
+        // openrouterJson is derived from this number.
+        maxTokens: Math.min(4096, 400 * batch.count + 400),
+        gateway,
+      });
+      return normalizeScenarios(parsed, batch.count).map((s) => ({ ...s, ground: batch.ground }));
+    },
     async write(req, gateway) {
       const count = clampScenarioCount(req.count);
       const batches = scenarioBatches(count, req.ground);
-      const results = await Promise.allSettled(
-        batches.map(async (batch) => {
-          const parsed = await openrouterJson<unknown>({
-            system: buildScenarioSystemPrompt(),
-            user: buildScenarioUserPrompt(req, batch),
-            schema: scenarioJsonSchema(batch.count),
-            // Roughly 250 tokens per scenario, with room: the deadline in
-            // openrouterJson is derived from this number.
-            maxTokens: Math.min(4096, 400 * batch.count + 400),
-            gateway,
-          });
-          return normalizeScenarios(parsed, batch.count).map((s) => ({ ...s, ground: batch.ground }));
-        }),
-      );
+      const results = await Promise.allSettled(batches.map((batch) => provider.writePart(req, batch, gateway)));
       const scenarios: Scenario[] = [];
       const failed: string[] = [];
       const seen = new Set<string>();
@@ -109,13 +111,18 @@ function openrouterScenarist(): ScenarioProvider {
       return { scenarios: scenarios.slice(0, count), parts: batches.length, failed };
     },
   };
+  return provider;
 }
 
 export function offlineScenarist(): ScenarioProvider {
-  return {
+  const provider: ScenarioProvider = {
     id: 'offline',
     model: 'offline',
     real: false,
+    async writePart(req, batch) {
+      const { scenarios } = await provider.write({ ...req, ground: batch.ground, count: batch.count });
+      return scenarios.slice(0, batch.count);
+    },
     async write(req) {
       const what = req.description.trim().replace(/\.$/, '');
       const stubs: Scenario[] = [
@@ -160,4 +167,5 @@ export function offlineScenarist(): ScenarioProvider {
       return { scenarios: pool.slice(0, clampScenarioCount(req.count)), parts: 1, failed: [] };
     },
   };
+  return provider;
 }

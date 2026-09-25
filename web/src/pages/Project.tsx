@@ -157,7 +157,7 @@ function PanelSection({
   async function generate() {
     setBusy('generate');
     try {
-      await api.generatePanel(slug, token);
+      await api.seatPanel(slug, token);
       onChange();
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Could not seat the panel.');
@@ -1144,13 +1144,14 @@ function ScenarioWriter({
     setBusy(true);
     setResult(null);
     try {
-      const res = await api.generateScenarios(slug, token, { description });
+      const { job, provider } = await api.writeScenarios(slug, token, { description }, { onPart: () => onDone() });
+      const real = provider?.real ?? job.provider === 'openrouter';
       setResult(
-        res.provider.real
-          ? `${res.scenarios.length} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.${
-              res.failed.length > 0 ? ` ${res.failed.length} of ${res.parts} parts did not land (${res.failed.join('; ')}); write again for the rest.` : ''
+        real
+          ? `${job.scenarios} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.${
+              job.failed.length > 0 ? ` ${job.failed.length} of ${job.parts.length} parts did not land (${job.failed.join('; ')}); write again for the rest.` : ''
             }`
-          : `${res.scenarios.length} starter scenarios added. No OPENROUTER_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
+          : `${job.scenarios} starter scenarios added. No OPENROUTER_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
       );
       setDescription('');
       onDone();
@@ -1230,7 +1231,8 @@ function CoverageBlock({
     }
     setBusy(ground);
     try {
-      await api.generateScenarios(slug, token, { description, count: 4, ground });
+      const { job } = await api.writeScenarios(slug, token, { description, count: 4, ground });
+      if (job.failed.length > 0) onError(`${job.scenarios} landed; ${job.failed.join('; ')}`);
       reload();
       onChange();
     } catch (err) {
@@ -1324,24 +1326,56 @@ function TracesTab({
   const [pasting, setPasting] = useState(false);
 
   // The arrival write: placeholders while it runs, the error in place with a
-  // retry if it fails, never a spinner with nothing to say.
-  const [arrival, setArrival] = useState<{ status: 'idle' | 'writing' | 'failed'; message: string }>({ status: 'idle', message: '' });
+  // retry if it fails, never a spinner with nothing to say. The write is a
+  // job on the server: parts land one by one, and a retry reruns only the
+  // parts that did not, under the same job.
+  const [arrival, setArrival] = useState<{ status: 'idle' | 'writing' | 'failed'; message: string; jobId: string | null; landed: number }>({
+    status: 'idle',
+    message: '',
+    jobId: null,
+    landed: 0,
+  });
   const startedRef = useRef(false);
 
-  async function writeOnArrival() {
+  async function writeOnArrival(retryJobId: string | null = null) {
     if (!autoWrite) return;
-    setArrival({ status: 'writing', message: '' });
+    setArrival((a) => ({ status: 'writing', message: '', jobId: retryJobId ?? a.jobId, landed: 0 }));
+    let jobId = retryJobId;
     try {
-      const res = await api.generateScenarios(slug, token, { description: autoWrite });
-      setArrival({ status: 'idle', message: '' });
-      if (res.failed.length > 0) {
-        setResult(
-          `${res.scenarios.length} cases written; ${res.failed.length} of ${res.parts} parts did not land (${res.failed.join('; ')}). Write more below for the rest.`,
-        );
+      const { job } = await api.writeScenarios(
+        slug,
+        token,
+        { description: autoWrite },
+        {
+          ...(retryJobId ? { jobId: retryJobId } : {}),
+          onPart: (part) => {
+            if (part.status === 'done') {
+              setArrival((a) => ({ ...a, landed: a.landed + part.scenarios }));
+              onChange();
+            }
+          },
+        },
+      );
+      jobId = job.id;
+      if (job.failed.length > 0) {
+        setArrival({
+          status: 'failed',
+          message: `${job.scenarios} of the cases landed; ${job.failed.length} of ${job.parts.length} parts did not: ${job.failed.join('; ')}`,
+          jobId: job.id,
+          landed: job.scenarios,
+        });
+      } else {
+        setArrival({ status: 'idle', message: '', jobId: null, landed: 0 });
       }
       onChange();
     } catch (err) {
-      setArrival({ status: 'failed', message: err instanceof Error ? err.message : 'The scenarios could not be written.' });
+      setArrival((a) => ({
+        status: 'failed',
+        message: err instanceof Error ? err.message : 'The scenarios could not be written.',
+        jobId: jobId ?? a.jobId,
+        landed: a.landed,
+      }));
+      onChange();
     }
   }
 
@@ -1484,9 +1518,12 @@ function TracesTab({
           </div>
         ) : arrival.status === 'failed' ? (
           <div className="panel">
-            <h3 style={{ marginTop: 0 }}>The scenarios could not be written.</h3>
+            <h3 style={{ marginTop: 0 }}>{arrival.landed > 0 ? 'Some of the scenarios could not be written.' : 'The scenarios could not be written.'}</h3>
             <p className="sec-sub">{arrival.message} Your panel is unaffected.</p>
-            <button onClick={() => void writeOnArrival()}>Try the scenarios again</button>
+            <button onClick={() => void writeOnArrival(arrival.jobId)}>
+              {arrival.jobId ? 'Retry the parts that did not land' : 'Try the scenarios again'}
+            </button>
+            {arrival.jobId ? <p className="tiny mono" style={{ margin: '8px 0 0' }}>job {arrival.jobId}</p> : null}
           </div>
         ) : loading && traces.length === 0 ? (
           <Loading what="scenarios" />

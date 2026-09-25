@@ -323,6 +323,28 @@ CREATE TABLE IF NOT EXISTS endpoints (
 CREATE INDEX IF NOT EXISTS idx_endpoints_project ON endpoints(project_id);
 
 /*
+ * A scenario write as a job. Production cut long requests off at the edge
+ * with no response, so a write that took twenty seconds lost everything
+ * however well the model did. The job is created in one fast request, run
+ * in parts that each persist their cases the moment they land, and read
+ * back by polling, so a dropped connection costs nothing that already
+ * arrived and a retry reruns only the parts that did not.
+ */
+CREATE TABLE IF NOT EXISTS scenario_jobs (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  document_ids TEXT NOT NULL DEFAULT '[]',
+  -- One entry per part: { index, ground, count, status, error, scenarios }.
+  parts       TEXT NOT NULL DEFAULT '[]',
+  status      TEXT NOT NULL DEFAULT 'pending',
+  provider    TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scenario_jobs_project ON scenario_jobs(project_id);
+
+/*
  * Preference pairs: one prompt, two answers, which one the standard prefers.
  * Every seat compares both orders; a vote that flips when A and B swap is
  * position bias and is set aside. The owner's own choice sits beside the

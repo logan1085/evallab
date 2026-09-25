@@ -1,0 +1,29 @@
+# Is production actually working? After every push, wait for Vercel to serve
+# this commit, then drive one fresh project through the deployed product the
+# way a new user would: health, create, write scenarios (as a job, streamed,
+# polled), seat the panel, run the round through the real judges, read the
+# map, open the Standards page. Every step prints PASS or FAIL with the
+# server's own words. This spends real model calls on purpose: a smoke that
+# avoids the models cannot say the product works.
+#
+# Set SMOKE_BASE_URL as a repository variable to point at a different
+# deployment; it defaults to production.
+name: smoke
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Smoke the deployment at this commit
+        run: |
+          npm run smoke -- --base "${{ vars.SMOKE_BASE_URL || 'https://evallab-eosin.vercel.app' }}" --wait-for "${{ github.sha }}"

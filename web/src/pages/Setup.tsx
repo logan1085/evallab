@@ -115,7 +115,10 @@ export function SetupPage() {
       reached = 'seating';
       setPhase('seating');
       setFailure(null);
-      const seated = await api.generatePanel(current.slug, current.token);
+      // Resilient: when the connection drops mid-write, this waits for the
+      // seats to appear rather than calling the step failed, because the
+      // server finishes the write whether or not the browser is listening.
+      const seated = await api.seatPanel(current.slug, current.token);
       setSeats(seated.seats);
       setSeatingFallback(seated.fallbackReason ?? null);
       setPhase('done');

@@ -20,6 +20,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createApp } from '../server/app.js';
 import { openDb, resolveConnection } from '../server/db.js';
 
+/**
+ * Long writes stream: the scenario job sends a heartbeat line every few
+ * seconds while the models work, so no proxy between the browser and this
+ * function sees an idle connection and cuts it. Without this flag the Node
+ * runtime buffers the whole response until end(), and the heartbeats do
+ * nothing.
+ */
+export const config = { supportsResponseStreaming: true };
+
 let cached: Promise<ReturnType<typeof createApp>> | null = null;
 
 function app() {
