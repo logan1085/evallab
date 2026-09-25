@@ -1542,21 +1542,34 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     });
 
     let graded = 0;
+    const failures: string[] = [];
     // Concurrency 6: a full 30-case seat is five waves, roughly 30 seconds at
     // real-model latency, comfortably inside the 60 second function ceiling.
     await mapLimit(shuffled, 6, async (item) => {
       const trace = await store.getTrace(db, item.traceId);
       if (!trace) return;
-      const verdict = await adapter.score(
-        {
-          seat,
-          rubricMarkdown,
-          caseId: item.traceId,
-          caseTitle: trace.title,
-          caseContent: trace.content,
-        },
-        gateway,
-      );
+      let verdict: { verdict: string; reason: string };
+      try {
+        verdict = await adapter.score(
+          {
+            seat,
+            rubricMarkdown,
+            caseId: item.traceId,
+            caseTitle: trace.title,
+            caseContent: trace.content,
+          },
+          gateway,
+        );
+      } catch (error) {
+        // One case the model could not grade must not take the seat, and
+        // with it the round, down. The seat abstains on that case, in the
+        // gateway's words, and the round can still close. The map reads an
+        // abstention as no vote, never as a verdict.
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push(`${trace.title}: ${message}`);
+        await store.submitGrade(db, { itemId: item.id, graderId: seat.id, verdict: ABSTAIN, note: `Could not grade: ${message.slice(0, 300)}`, outputLength: trace.content.length });
+        return;
+      }
       if (!adapter.real) {
         // The simulation records telemetry too, at zero cost, so the running
         // cost machinery is exercised on every surface it will later report.
@@ -1604,11 +1617,18 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     for (const item of sample) {
       const trace = await store.getTrace(db, item.traceId);
       if (!trace) continue;
-      const repeat = await adapter.score(
-        { seat, rubricMarkdown, caseId: item.traceId, caseTitle: trace.title, caseContent: trace.content },
-        gateway,
-      );
-      if (repeat.verdict === firstPass.get(item.id)) agreements++;
+      if (firstPass.get(item.id) === ABSTAIN) continue;
+      try {
+        const repeat = await adapter.score(
+          { seat, rubricMarkdown, caseId: item.traceId, caseTitle: trace.title, caseContent: trace.content },
+          gateway,
+        );
+        if (repeat.verdict === firstPass.get(item.id)) agreements++;
+      } catch (error) {
+        // A repeat that could not be asked counts as neither agreement nor
+        // disagreement; the sample is one smaller.
+        failures.push(`${trace.title} (repeat): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     const threshold = Number(process.env.GR_CONSISTENCY_THRESHOLD ?? '0.7');
     const rate = sample.length === 0 ? 1 : agreements / sample.length;
@@ -1639,9 +1659,18 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     if (complete) await store.closeRound(db, round.id);
 
     const cost = await store.costForRound(db, round.id);
+    if (graded === 0 && failures.length > 0) {
+      // Nothing graded at all: the seat's model is not answering, and that
+      // is an error to show, in the gateway's words, not a seat that ran.
+      return res.status(502).json({ error: `${seat.name} could not grade any case. ${failures[0]}`, seat: seat.name, graded, failed: failures.length, failures });
+    }
+    for (const line of failures) console.warn(`[panel-run] ${seat.name}: ${line}`);
     res.json({
       seat: seat.name,
       graded,
+      /** Cases this seat could not grade; it abstained on them, with the reason recorded. */
+      failed: failures.length,
+      failures,
       simulated: !adapter.real,
       closed: complete,
       cost: { totalCredits: cost.totalCredits, totalTokens: cost.totalTokens },

@@ -104,7 +104,9 @@ async function scoreThroughGateway(
           { role: 'user', content: `Case: ${req.caseTitle}\n\n${req.caseContent}` },
           ...extra,
         ],
-        max_tokens: 300,
+        // Room for a reasoning model to think and still answer: production
+        // saw a 300-token budget spent entirely on reasoning, with no text.
+        max_tokens: 1200,
         response_format: { type: 'json_schema', json_schema: { name: 'verdict', strict: true, schema: SEAT_VERDICT_SCHEMA } },
         caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.caseId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
       },
@@ -136,7 +138,9 @@ async function compareThroughGateway(
           { role: 'user', content: buildPairUserPrompt(req.title, req.prompt, req.a, req.b) },
           ...extra,
         ],
-        max_tokens: 300,
+        // Room for a reasoning model to think and still answer: production
+        // saw a 300-token budget spent entirely on reasoning, with no text.
+        max_tokens: 1200,
         response_format: { type: 'json_schema', json_schema: { name: 'choice', strict: true, schema: PAIR_CHOICE_SCHEMA } },
         caller: { kind: 'grader', panelist_id: req.seat.id, case_id: req.pairId, ...(gateway.roundId ? { round_id: gateway.roundId } : {}) },
       },

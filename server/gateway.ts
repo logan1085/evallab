@@ -137,13 +137,27 @@ export function resetLearnedCapabilities(): void {
   NO_SCHEMA_SUPPORT.clear();
 }
 
+/**
+ * How hard reasoning models may think before they answer. Production found
+ * gpt-5-mini spending its whole grading budget on reasoning and returning
+ * no text at all (finish_reason=length, content null), and the frontier
+ * writer cut off mid-scenario. OpenRouter's reasoning parameter is
+ * normalised across providers and ignored by models that do not reason;
+ * low effort leaves the budget for the answer. GR_REASONING_EFFORT=off
+ * omits the parameter; only router calls carry it, never a company's own
+ * endpoint, whose dialect is unknown.
+ */
+const REASONING_EFFORT = (process.env.GR_REASONING_EFFORT ?? 'low').trim().toLowerCase();
+
 export function buildRequestBody(pin: Pin, req: ModelCallRequest): object {
+  const own = pin.pin_id.startsWith('byo:');
   return {
     model: pin.openrouter_model_id,
     messages: req.messages,
     max_tokens: req.max_tokens ?? 1024,
     ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
     ...(req.response_format ? { response_format: req.response_format } : {}),
+    ...(!own && ['low', 'medium', 'high'].includes(REASONING_EFFORT) ? { reasoning: { effort: REASONING_EFFORT } } : {}),
     // Only lock the provider when the pin names one. Naming a host that does
     // not serve the model is how a request hangs rather than fails; which
     // provider actually answered is recorded per call either way.

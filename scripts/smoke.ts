@@ -217,14 +217,23 @@ async function main() {
   if (round.status !== 201) return finish(slug, token);
   let seatsOk = 0;
   for (const seat of round.body.seats) {
-    const r = await call<{ graded?: number; failed?: number; error?: string }>(`/api/v1/rounds/${round.body.round.id}/panel-run`, {
+    const r = await call<{ graded?: number; failed?: number; failures?: string[]; error?: string }>(`/api/v1/rounds/${round.body.round.id}/panel-run`, {
       method: 'POST',
       ...auth,
       body: JSON.stringify({ seatId: seat.id }),
     });
-    const ok = r.status === 200 && !(r.body.failed && r.body.failed > 0 && (r.body.graded ?? 0) === 0);
-    if (ok) seatsOk++;
-    report(`seat: ${seat.name}`, ok, r.status === 200 ? `graded ${r.body.graded ?? '?'}${r.body.failed ? `, failed ${r.body.failed}` : ''}` : `${r.status}: ${r.body.error ?? r.text.slice(0, 200)}`);
+    // A seat that graded every case passes; one that abstained on some is
+    // reported with the reason, and still counts as run; one that graded
+    // nothing is a 502 from the server and fails here.
+    const ok = r.status === 200 && (r.body.failed ?? 0) === 0;
+    if (r.status === 200) seatsOk++;
+    report(
+      `seat: ${seat.name}`,
+      ok,
+      r.status === 200
+        ? `graded ${r.body.graded ?? '?'}${r.body.failed ? `, abstained on ${r.body.failed}: ${(r.body.failures ?? [])[0] ?? ''}` : ''}`
+        : `${r.status}: ${r.body.error ?? r.text.slice(0, 300)}`,
+    );
   }
 
   // 7. The reading.

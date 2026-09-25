@@ -70,16 +70,29 @@ function openrouterScenarist(): ScenarioProvider {
     model: resolveCreatorPin().openrouter_model_id,
     real: true,
     async writePart(req, batch, gateway) {
-      const parsed = await openrouterJson<unknown>({
-        system: buildScenarioSystemPrompt(),
-        user: buildScenarioUserPrompt(req, batch),
-        schema: scenarioJsonSchema(batch.count),
-        // Roughly 250 tokens per scenario, with room: the deadline in
-        // openrouterJson is derived from this number.
-        maxTokens: Math.min(4096, 400 * batch.count + 400),
-        gateway,
-      });
-      return normalizeScenarios(parsed, batch.count).map((s) => ({ ...s, ground: batch.ground }));
+      try {
+        const parsed = await openrouterJson<unknown>({
+          system: buildScenarioSystemPrompt(),
+          user: buildScenarioUserPrompt(req, batch),
+          schema: scenarioJsonSchema(batch.count),
+          // Production measured a frontier writer at over 500 tokens a
+          // scenario once its reasoning is counted; a thousand each, with
+          // room, and the deadline in openrouterJson follows this number.
+          maxTokens: Math.min(8192, 1000 * batch.count + 500),
+          gateway,
+        });
+        return normalizeScenarios(parsed, batch.count).map((s) => ({ ...s, ground: batch.ground }));
+      } catch (error) {
+        // Cut off at the budget: ask for half as many, twice, rather than
+        // fail the part. Two scenarios always fit; one is the floor.
+        const truncated = error instanceof DrafterError && /cut off at max_tokens/.test(error.message);
+        if (!truncated || batch.count < 2) throw error;
+        const first = Math.ceil(batch.count / 2);
+        const halves = [first, batch.count - first].filter((n) => n > 0);
+        const out: Scenario[] = [];
+        for (const count of halves) out.push(...(await provider.writePart(req, { ...batch, count }, gateway)));
+        return out;
+      }
     },
     async write(req, gateway) {
       const count = clampScenarioCount(req.count);

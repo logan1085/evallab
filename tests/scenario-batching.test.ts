@@ -89,7 +89,7 @@ describe('POST /projects/:slug/scenarios with a real writer', () => {
     expect(res.body.failed).toEqual([]);
     expect(res.body.provider.real).toBe(true);
     expect(seen.map((s) => s.part).sort()).toEqual([1, 2, 3]);
-    expect(seen.every((s) => s.count === 4 && s.maxTokens === 2000)).toBe(true);
+    expect(seen.every((s) => s.count === 4 && s.maxTokens === 4500)).toBe(true);
   });
 
   it('keeps the parts that landed when one fails, and names the one that did not', async () => {
