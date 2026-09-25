@@ -11,15 +11,25 @@
  * judges are fighting.
  */
 
+/*
+ * Colour: the instrument palette, not the paper one. Neutral with a
+ * barely-there cool cast, white ground, near-black ink, and a dark room
+ * that follows the system. Two semantic hues and nothing else: rose for
+ * a split, green for agreement. Warm cream and terracotta read as a
+ * template; grey and black read as a tool.
+ */
 :root {
-  --paper: #faf8f5;
-  --paper-2: #f3f0ea;
-  --ink: #16130e;
-  --muted: #6b655c;
-  --hairline: #e4dfd6;
-  --amber: #b8771a;
-  --fail: #9c3b2e;
-  --signal: #c22e1f;
+  color-scheme: light dark;
+  --paper: #ffffff;
+  --paper-2: #f0f0f3;
+  --ink: #1a1a1d;
+  --muted: #6b6b74;
+  --hairline: #e3e3e8;
+  --amber: #a16207;
+  --fail: #9f2f44;
+  --signal: #c2334d;
+  --agree: #15806a;
+  --placeholder: #9797a0;
 
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
   --ui: 'Inter', system-ui, -apple-system, sans-serif;
@@ -27,9 +37,36 @@
 
   /* Aliases older components lean on. */
   --ink-4: var(--muted);
-  --agree: var(--ink);
   --split: var(--signal);
   --sunk: var(--paper-2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --paper: #0e0e11;
+    --paper-2: #17171b;
+    --ink: #f2f2f5;
+    --muted: #8f8f9a;
+    --hairline: #2a2a31;
+    --amber: #e0a040;
+    --fail: #f2788c;
+    --signal: #f2788c;
+    --agree: #4cc4a3;
+    --placeholder: #6a6a75;
+  }
+}
+
+:root[data-theme='dark'] {
+  --paper: #0e0e11;
+  --paper-2: #17171b;
+  --ink: #f2f2f5;
+  --muted: #8f8f9a;
+  --hairline: #2a2a31;
+  --amber: #e0a040;
+  --fail: #f2788c;
+  --signal: #f2788c;
+  --agree: #4cc4a3;
+  --placeholder: #6a6a75;
 }
 
 * {
@@ -343,7 +380,7 @@ select {
   font-family: var(--ui);
   font-size: 15px;
   color: var(--ink);
-  background: #fff;
+  background: var(--paper);
   border: 1px solid var(--hairline);
   border-radius: 8px;
   padding: 9px 12px;
@@ -357,7 +394,7 @@ textarea {
 
 input::placeholder,
 textarea::placeholder {
-  color: #a49d92;
+  color: var(--placeholder);
 }
 
 .pill-row {
@@ -553,7 +590,7 @@ textarea::placeholder {
   border: 1px solid var(--ink);
   padding: 22px 24px;
   margin-top: 18px;
-  background: #fff;
+  background: var(--paper);
 }
 
 .idcard h3 {

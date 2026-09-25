@@ -261,7 +261,7 @@
 /* The case is an exhibit: a sheet with a ruled head, square corners. */
 .l-card {
   border: 1px solid var(--ink);
-  background: #fff;
+  background: var(--paper);
   padding: 0;
 }
 
@@ -414,13 +414,13 @@
   position: absolute;
   inset: 12px 12px 0 0;
   border: 1px solid var(--hairline);
-  background: #fff;
+  background: var(--paper);
 }
 
 .l-artifact {
   position: relative;
   border: 1px solid var(--ink);
-  background: #fff;
+  background: var(--paper);
   padding: 44px 48px 40px;
 }
 

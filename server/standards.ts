@@ -58,7 +58,10 @@ export function ogStatLine(v: StandardsView): string {
 }
 
 const CSS = `
-:root{--paper:#faf8f5;--ink:#16130e;--muted:#6b655c;--hairline:#e4dfd6;--amber:#b8771a;--signal:#c22e1f;}
+:root{color-scheme:light dark;--paper:#ffffff;--ink:#1a1a1d;--muted:#6b6b74;--hairline:#e3e3e8;--amber:#a16207;--signal:#c2334d;}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0e0e11;--ink:#f2f2f5;--muted:#8f8f9a;--hairline:#2a2a31;--amber:#e0a040;--signal:#f2788c;}}
+:root[data-theme="dark"]{--paper:#0e0e11;--ink:#f2f2f5;--muted:#8f8f9a;--hairline:#2a2a31;--amber:#e0a040;--signal:#f2788c;}
+@media print{:root{--paper:#ffffff;--ink:#1a1a1d;--muted:#6b6b74;--hairline:#e3e3e8;--signal:#c2334d;}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--paper);color:var(--ink);font:17px/1.6 'Newsreader',Georgia,'Times New Roman',serif;padding:64px 24px 96px}
 .doc{max-width:680px;margin:0 auto}
@@ -248,11 +251,11 @@ document.querySelectorAll('button.copy').forEach(function (b) {
 export function renderOgSvg(v: StandardsView): string {
   const title = `Standards v${v.version.version}`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
-  <rect width="1200" height="630" fill="#FAF8F5"/>
-  <rect x="0" y="0" width="1200" height="8" fill="#16130E"/>
-  <text x="100" y="200" font-family="Georgia, 'Times New Roman', serif" font-size="88" fill="#16130E">${esc(title)}</text>
-  <text x="100" y="280" font-family="Georgia, serif" font-size="44" font-style="italic" fill="#16130E">${esc(v.project.name)}</text>
-  <text x="100" y="400" font-family="Menlo, monospace" font-size="34" fill="#C22E1F">${esc(ogStatLine(v))}</text>
-  <text x="100" y="540" font-family="Menlo, monospace" font-size="24" fill="#6B655C">The Grading Room · the rubric diff is the product</text>
+  <rect width="1200" height="630" fill="#0E0E11"/>
+  <rect x="0" y="0" width="1200" height="8" fill="#F2788C"/>
+  <text x="100" y="200" font-family="Georgia, 'Times New Roman', serif" font-size="88" fill="#F2F2F5">${esc(title)}</text>
+  <text x="100" y="280" font-family="Georgia, serif" font-size="44" font-style="italic" fill="#F2F2F5">${esc(v.project.name)}</text>
+  <text x="100" y="400" font-family="Menlo, monospace" font-size="34" fill="#F2788C">${esc(ogStatLine(v))}</text>
+  <text x="100" y="540" font-family="Menlo, monospace" font-size="24" fill="#8F8F9A">The Grading Room · the rubric diff is the product</text>
 </svg>`;
 }
