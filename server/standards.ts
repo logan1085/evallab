@@ -58,9 +58,8 @@ export function ogStatLine(v: StandardsView): string {
 }
 
 const CSS = `
-:root{color-scheme:light dark;--paper:#ffffff;--ink:#1a1a1d;--muted:#6b6b74;--hairline:#e3e3e8;--amber:#a16207;--signal:#c2334d;}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--paper:#0e0e11;--ink:#f2f2f5;--muted:#8f8f9a;--hairline:#2a2a31;--amber:#e0a040;--signal:#f2788c;}}
-:root[data-theme="dark"]{--paper:#0e0e11;--ink:#f2f2f5;--muted:#8f8f9a;--hairline:#2a2a31;--amber:#e0a040;--signal:#f2788c;}
+:root{color-scheme:dark;--paper:#0e0e11;--ink:#f2f2f5;--muted:#8f8f9a;--hairline:#2a2a31;--amber:#e0a040;--signal:#f2788c;}
+:root[data-theme="light"]{color-scheme:light;--paper:#ffffff;--ink:#1a1a1d;--muted:#6b6b74;--hairline:#e3e3e8;--amber:#a16207;--signal:#c2334d;}
 @media print{:root{--paper:#ffffff;--ink:#1a1a1d;--muted:#6b6b74;--hairline:#e3e3e8;--signal:#c2334d;}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--paper);color:var(--ink);font:17px/1.6 'Newsreader',Georgia,'Times New Roman',serif;padding:64px 24px 96px}

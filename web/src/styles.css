@@ -18,18 +18,19 @@
  * a split, green for agreement. Warm cream and terracotta read as a
  * template; grey and black read as a tool.
  */
+/* Dark is the room. Light exists for print and for anyone who sets data-theme="light". */
 :root {
-  color-scheme: light dark;
-  --paper: #ffffff;
-  --paper-2: #f0f0f3;
-  --ink: #1a1a1d;
-  --muted: #6b6b74;
-  --hairline: #e3e3e8;
-  --amber: #a16207;
-  --fail: #9f2f44;
-  --signal: #c2334d;
-  --agree: #15806a;
-  --placeholder: #9797a0;
+  color-scheme: dark;
+  --paper: #0e0e11;
+  --paper-2: #17171b;
+  --ink: #f2f2f5;
+  --muted: #8f8f9a;
+  --hairline: #2a2a31;
+  --amber: #e0a040;
+  --fail: #f2788c;
+  --signal: #f2788c;
+  --agree: #4cc4a3;
+  --placeholder: #6a6a75;
 
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
   --ui: 'Inter', system-ui, -apple-system, sans-serif;
@@ -41,32 +42,30 @@
   --sunk: var(--paper-2);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --paper: #0e0e11;
-    --paper-2: #17171b;
-    --ink: #f2f2f5;
-    --muted: #8f8f9a;
-    --hairline: #2a2a31;
-    --amber: #e0a040;
-    --fail: #f2788c;
-    --signal: #f2788c;
-    --agree: #4cc4a3;
-    --placeholder: #6a6a75;
-  }
+:root[data-theme='light'] {
+  color-scheme: light;
+  --paper: #ffffff;
+  --paper-2: #f0f0f3;
+  --ink: #1a1a1d;
+  --muted: #6b6b74;
+  --hairline: #e3e3e8;
+  --amber: #a16207;
+  --fail: #9f2f44;
+  --signal: #c2334d;
+  --agree: #15806a;
+  --placeholder: #9797a0;
 }
 
-:root[data-theme='dark'] {
-  --paper: #0e0e11;
-  --paper-2: #17171b;
-  --ink: #f2f2f5;
-  --muted: #8f8f9a;
-  --hairline: #2a2a31;
-  --amber: #e0a040;
-  --fail: #f2788c;
-  --signal: #f2788c;
-  --agree: #4cc4a3;
-  --placeholder: #6a6a75;
+@media print {
+  :root {
+    --paper: #ffffff;
+    --paper-2: #f0f0f3;
+    --ink: #1a1a1d;
+    --muted: #6b6b74;
+    --hairline: #e3e3e8;
+    --signal: #c2334d;
+    --agree: #15806a;
+  }
 }
 
 * {
