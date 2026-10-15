@@ -15,7 +15,8 @@ import { z } from 'zod';
 import type { DB } from './db.js';
 import { newId, newSlug, newToken, resolveConnection } from './db.js';
 import { PIN_OVERRIDES, validatePins } from './pins.js';
-import { writerCheck } from './openrouter.js';
+import { openrouterKey } from './openrouter.js';
+import { hosted, HOSTED_ENDPOINT_MESSAGE } from './model-policy.js';
 import { callModel, type GatewayOptions } from './gateway.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
@@ -180,24 +181,20 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       : { env: 'local', url: null, commit: null, ref: null, deploymentId: null };
     try {
       await db.get('SELECT 1 AS ok');
-      // Pin validity is cached per instance: it is a network call, and every
-      // cold start paying for it would tax every request.
-      const keyed = !!process.env.OPENROUTER_API_KEY;
-      const pins = keyed ? await cachedPinCheck() : null;
-      // The writer canary: a real call, because a listed id is not a working
-      // writer. Health is false when the writer cannot answer, so a dead
-      // writer pin fails the check that people actually look at.
-      const writer = keyed ? await cachedWriterCheck() : null;
-      const ok = (!!conn.url || !deployed) && (writer === null || writer.ok);
+      // Public health is strictly read-only: no model calls, no paid canary.
+      // A live round is the end-to-end model check; a ping is only liveness.
+      const keyed = !!openrouterKey();
+      const ok = !!conn.url || !deployed;
       res.status(ok ? 200 : 503).json({
         ok,
         deploy,
         judge: resolveProvider().id,
+        mode: keyed ? 'live' : 'simulated',
+        modelProbe: 'not-run',
         // Where a company's own endpoint keys are sealed. 'dev-default' means
         // GR_SECRET is unset and the fixed development phrase is in use.
         secrets: secretsSource(),
-        ...(pins ? { pins: { ...pins, overrides: PIN_OVERRIDES } } : {}),
-        ...(writer ? { writer } : {}),
+
         database: conn.url
           ? { driver: 'postgres', via: conn.via, pooled: conn.pooled }
           : { driver: 'memory', warning: 'No Postgres connection string set. Data is lost when the process ends.' },
@@ -264,33 +261,12 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * an unreachable list changes nothing and the call proceeds as pinned.
    */
   const readyPins = async () => {
-    if (!process.env.OPENROUTER_API_KEY) return;
+    if (!openrouterKey()) return;
     try {
       await cachedPinCheck();
     } catch {
       /* validatePins does not throw; belt and braces */
     }
-  };
-
-  /**
-   * The writer canary, cached: a good answer holds for ten minutes, a failure
-   * is retried after one, so a recovered writer shows recovered without a
-   * restart and a broken one does not get pinged on every probe.
-   */
-  let writerState: { at: number; result: Awaited<ReturnType<typeof writerCheck>> } | null = null;
-  let writerInFlight: Promise<Awaited<ReturnType<typeof writerCheck>>> | null = null;
-  const cachedWriterCheck = async () => {
-    const ttl = writerState?.result.ok ? 10 * 60_000 : 60_000;
-    if (writerState && Date.now() - writerState.at < ttl) return writerState.result;
-    writerInFlight ??= writerCheck({ ...meter(), ...(appOpts.writerGateway ?? {}) })
-      .then((result) => {
-        writerState = { at: Date.now(), result };
-        return result;
-      })
-      .finally(() => {
-        writerInFlight = null;
-      });
-    return writerInFlight;
   };
 
   /** The credential, wherever the caller put it: Bearer, header, or link. */
@@ -341,6 +317,14 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     if (!project) return res.status(404).json({ error: 'No project with that link.' });
     if (!(await authorizeProject(req, res, project))) return;
     (req as ProjectRequest).project = project;
+    next();
+  }
+
+  /** Only the original project credential may grant or revoke other keys. */
+  function requireProjectOwner(req: Request, res: Response, next: NextFunction) {
+    if (credentialOf(req) !== (req as ProjectRequest).project.token) {
+      return res.status(403).json({ error: 'Use the original project key to manage API keys.' });
+    }
     next();
   }
 
@@ -460,8 +444,12 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
 
   api.get('/projects/:slug', requireProject, async (req, res) => {
     const { project } = req as ProjectRequest;
+    // The master credential is returned once, when the project is created.
+    // A revocable API key may read the project, but must never learn a
+    // credential that would survive its own revocation.
+    const { token: _masterToken, ...publicProject } = project;
     res.json({
-      project,
+      project: publicProject,
       rubric: await store.currentRubric(db, project.id),
       traceCount: (await store.listTraces(db, project.id)).length,
       documentCount: (await store.listDocuments(db, project.id)).length,
@@ -505,7 +493,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * Minting requires an existing credential, so a leaked slug alone mints
    * nothing.
    */
-  api.post('/projects/:slug/keys', requireProject, async (req, res) => {
+  api.post('/projects/:slug/keys', requireProject, requireProjectOwner, async (req, res) => {
     const project = (req as ProjectRequest).project;
     const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim().slice(0, 80) : 'unnamed key';
     const key = `gr_${randomBytes(24).toString('hex')}`;
@@ -525,12 +513,12 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     });
   });
 
-  api.get('/projects/:slug/keys', requireProject, async (req, res) => {
+  api.get('/projects/:slug/keys', requireProject, requireProjectOwner, async (req, res) => {
     const project = (req as ProjectRequest).project;
     res.json({ keys: await store.listApiKeys(db, project.id) });
   });
 
-  api.delete('/projects/:slug/keys/:keyId', requireProject, async (req, res) => {
+  api.delete('/projects/:slug/keys/:keyId', requireProject, requireProjectOwner, async (req, res) => {
     const project = (req as ProjectRequest).project;
     const revoked = await store.revokeApiKey(db, project.id, req.params.keyId!);
     if (!revoked) return res.status(404).json({ error: 'No live key with that id on this project.' });
@@ -1209,6 +1197,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
   });
 
   api.post('/projects/:slug/endpoints', requireProject, async (req, res) => {
+    if (hosted()) return res.status(403).json({ error: HOSTED_ENDPOINT_MESSAGE });
     const project = (req as ProjectRequest).project;
     const body = z
       .object({
@@ -1245,6 +1234,7 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
    * prompt with a JSON reply, through the same gateway a seat would use.
    */
   api.post('/projects/:slug/endpoints/:endpointId/check', requireProject, async (req, res) => {
+    if (hosted()) return res.status(403).json({ error: HOSTED_ENDPOINT_MESSAGE });
     const project = (req as ProjectRequest).project;
     const endpoint = (await ownEndpoints(project.id)).find((e) => e.id === req.params.endpointId);
     if (!endpoint) return res.status(404).json({ error: 'No such endpoint on this project.' });
@@ -3213,8 +3203,8 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
     const rubric = await store.getRubric(db, req.params.rubricId!);
     if (!rubric) return res.status(404).json({ error: 'No such version of the standards.' });
     const project = await store.getProjectById(db, rubric.projectId);
-    const token = (req.header('x-gr-token') ?? req.query.k ?? '') as string;
-    if (!project || token !== project.token) return res.status(403).json({ error: 'Wrong or missing key.' });
+    if (!project) return res.status(404).json({ error: 'No such project.' });
+    if (!(await authorizeProject(req, res, project))) return;
 
     // Open questions travel with the human-readable exports but never with the
     // judge prompt — see the note on buildJudgeSystemPrompt.

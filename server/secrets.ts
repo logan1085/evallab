@@ -14,6 +14,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 const DEV_PHRASE = 'grading-room-development-secret';
 
 function keyMaterial(): Buffer {
+  if (process.env.VERCEL && !process.env.GR_SECRET) throw new SealError('GR_SECRET must be configured before storing or opening endpoint credentials in a hosted deployment.');
   return createHash('sha256').update(process.env.GR_SECRET || DEV_PHRASE).digest();
 }
 

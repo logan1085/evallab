@@ -191,7 +191,7 @@ export function Home() {
       <section className="l-hero">
         <div className="l-wrap">
           <p className="l-docket" data-reveal>
-            Simulate experts. Create the perfect evaluation framework.
+            Explore the panel. Build your evaluation framework.
           </p>
           <h1 className="l-title" data-reveal style={{ ['--d' as string]: '60ms' }}>
             Five experts walk in.
@@ -208,7 +208,7 @@ export function Home() {
               Seat your panel
             </Link>
             <a className="l-tlink" href="/s/example">
-              See a real framework <span className="chev">›</span>
+              See an example framework <span className="chev">›</span>
             </a>
           </div>
         </div>

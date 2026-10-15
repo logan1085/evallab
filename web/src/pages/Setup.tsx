@@ -64,8 +64,6 @@ export function SetupPage() {
   const [seats, setSeats] = useState<Grader[]>([]);
   const [seatingFallback, setSeatingFallback] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(0);
-  const [email, setEmail] = useState('');
-  const [emailNoted, setEmailNoted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const step = Math.min(answers.length, QUESTIONS.length - 1);
@@ -144,17 +142,6 @@ export function SetupPage() {
     const done = [...answers, text];
     setAnswers(done);
     if (done.length === QUESTIONS.length) void run(done);
-  }
-
-  async function noteEmail(e: React.FormEvent) {
-    e.preventDefault();
-    if (!project || !email.trim()) return;
-    try {
-      await api.saveEmail(project.slug, project.token, email.trim());
-      setEmailNoted(true);
-    } catch {
-      setEmailNoted(false);
-    }
   }
 
   const benchSeated = seats.length > 0 && revealed >= seats.length;
@@ -309,25 +296,10 @@ export function SetupPage() {
               >
                 Copy link
               </button>
-              <form onSubmit={noteEmail} className="row" style={{ gap: 8 }}>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
-                  aria-label="Email for your link"
-                  style={{ width: 220 }}
-                />
-                <button type="submit" className="ghost" disabled={!email.trim() || emailNoted}>
-                  {emailNoted ? 'Noted' : 'Email it to me'}
-                </button>
-              </form>
             </div>
-            {emailNoted ? (
-              <p className="tiny" style={{ marginTop: 8, marginBottom: 0 }}>
-                Noted on the project. The link stays the key, so copy it too.
-              </p>
-            ) : null}
+            <p className="tiny" style={{ marginTop: 8, marginBottom: 0 }}>
+              No email is sent. Save this private link somewhere safe; anyone with it can open your project.
+            </p>
           </div>
           <div style={{ marginTop: 22 }}>
             {/* The Room writes the scenarios on arrival, with the description

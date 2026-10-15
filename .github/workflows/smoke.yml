@@ -3,8 +3,8 @@
 # way a new user would: health, create, write scenarios (as a job, streamed,
 # polled), seat the panel, run the round through the real judges, read the
 # map, open the Standards page. Every step prints PASS or FAIL with the
-# server's own words. This spends real model calls on purpose: a smoke that
-# avoids the models cannot say the product works.
+# server's own words. Defaults to the labeled free simulation. Paid mode requires an explicit
+# --allow-live invocation after budget approval; CI never passes that flag.
 #
 # Set SMOKE_BASE_URL as a repository variable to point at a different
 # deployment; it defaults to production.

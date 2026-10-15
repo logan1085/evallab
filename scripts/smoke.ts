@@ -11,7 +11,7 @@
  * step passed. With --wait-for it first waits (up to ten minutes) for
  * /api/health to report that commit, so it can run right after a push.
  *
- * This spends real model calls when the deployment has a key: one scenario
+ * With explicit --allow-live and an approved budget, this spends model calls: one scenario
  * write, one panel write, one round of six seats over twelve cases. That
  * is the point; a smoke that avoids the models cannot say the product works.
  */
@@ -20,6 +20,7 @@ interface Args {
   base: string;
   waitFor: string | null;
   keep: boolean;
+  allowLive: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -27,6 +28,7 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--keep') out.keep = true;
+    else if (a === '--allow-live') out.allowLive = true;
     else if (a.startsWith('--')) out[a.slice(2)] = argv[++i] ?? '';
   }
   const base = (typeof out.base === 'string' && out.base ? out.base : process.env.GR_BASE_URL ?? '').replace(/\/+$/, '');
@@ -34,7 +36,7 @@ function parseArgs(argv: string[]): Args {
     console.error('Usage: smoke --base https://your-deployment [--wait-for <sha>] [--keep]');
     process.exit(2);
   }
-  return { base, waitFor: typeof out['wait-for'] === 'string' && out['wait-for'] ? out['wait-for'] : null, keep: out.keep === true };
+  return { base, waitFor: typeof out['wait-for'] === 'string' && out['wait-for'] ? out['wait-for'] : null, keep: out.keep === true, allowLive: out['allowLive'] === true };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -72,6 +74,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Health {
   ok: boolean;
+  mode?: 'live' | 'simulated';
+  modelProbe?: string;
   deploy?: { env: string | null; commit: string | null; url: string | null };
   writer?: { ok: boolean; model: string; error: string | null };
   pins?: { ok: boolean; problems: string[]; repinned?: { pin_id: string; from: string; to: string }[]; disabled: string[] };
@@ -84,19 +88,23 @@ async function main() {
   // 1. The deploy: the commit we expect, or whatever is there.
   let health: { status: number; body: Health; text: string } | null = null;
   const deadline = Date.now() + 10 * 60_000;
-  for (;;) {
-    try {
-      health = await call<Health>('/api/health');
-    } catch (err) {
-      health = { status: 0, body: { ok: false, error: err instanceof Error ? err.message : String(err) }, text: '' };
+  // Wait on static HTML, not /health on an older release whose probe may
+  // spend credits. The marker is embedded by Vite from Vercel's commit SHA.
+  if (args.waitFor) {
+    for (;;) {
+      const html = await fetch(args.base).then((r) => r.text()).catch(() => '');
+      if (html.includes(`content="${args.waitFor}"`)) break;
+      if (Date.now() > deadline) {
+        report('deploy', false, `waited ten minutes for static build ${args.waitFor.slice(0, 7)}`);
+        return finish();
+      }
+      await sleep(15_000);
     }
-    const commit = health.body.deploy?.commit ?? null;
-    if (!args.waitFor || (commit && commit.startsWith(args.waitFor.slice(0, 7)))) break;
-    if (Date.now() > deadline) {
-      report('deploy', false, `waited ten minutes for ${args.waitFor.slice(0, 7)}; health still reports ${commit ?? 'no commit'}`);
-      break;
-    }
-    await sleep(15_000);
+  }
+  try {
+    health = await call<Health>('/api/health');
+  } catch (err) {
+    health = { status: 0, body: { ok: false, error: err instanceof Error ? err.message : String(err) }, text: '' };
   }
   const h = health!;
   const commit = h.body.deploy?.commit?.slice(0, 7) ?? 'unknown';
@@ -105,21 +113,14 @@ async function main() {
 
   // 2. Health: the database, the pins, the writer.
   report('database', !!h.body.database && h.body.database.driver === 'postgres', `driver ${h.body.database?.driver ?? 'none'}`);
-  if (h.body.pins) {
-    const repinned = h.body.pins.repinned ?? [];
-    report(
-      'pins',
-      h.body.pins.ok,
-      h.body.pins.ok
-        ? `all listed${repinned.length ? `; writer repinned ${repinned.map((r) => `${r.from} -> ${r.to}`).join(', ')}` : ''}`
-        : h.body.pins.problems.join(' | '),
-    );
-  } else {
-    report('pins', false, 'no pins block: OPENROUTER_API_KEY is not set on this deployment, so every seat is the simulation');
+  report('evaluation mode', h.body.mode === 'live' || h.body.mode === 'simulated',
+    h.body.mode === 'simulated' ? 'labeled free simulation; no model charges' : 'live model mode');
+  report('read-only health', h.body.modelProbe === 'not-run', 'health does not invoke models');
+  if (h.body.mode !== 'simulated' && !args.allowLive) {
+    report('spend authorization', false, 'refusing paid model calls; rerun with --allow-live only after explicit budget approval');
+    return finish();
   }
-  if (h.body.writer) report('writer', h.body.writer.ok, h.body.writer.ok ? `answers on ${h.body.writer.model}` : h.body.writer.error ?? 'no answer');
-  else report('writer', false, 'no writer canary: no key on the deployment');
-  report('secrets', h.body.secrets === 'env' ? true : 'warn', h.body.secrets === 'env' ? 'GR_SECRET set' : `secrets=${h.body.secrets ?? 'unknown'}: endpoint keys are sealed under the development phrase; set GR_SECRET in the Vercel project and redeploy`);
+
 
   // 3. A fresh project, as a new user makes one.
   const created = await call<{ project: { slug: string; token: string; description: string }; error?: string }>('/api/v1/projects', {
@@ -266,7 +267,7 @@ async function main() {
 
 function finish(slug?: string, token?: string) {
   console.log('');
-  if (slug && token) console.log(`Project: ${args.base}/p/${slug}?k=${token}${args.keep ? '' : '  (left in place; delete it from the Room if you like)'}`);
+  if (slug) console.log(`Project: ${args.base}/p/${slug} (private access key intentionally omitted from logs)`);
   console.log(
     failed === 0
       ? `SMOKE PASSED: the deployment works end to end.${warned ? ` ${warned} configuration warning${warned === 1 ? '' : 's'} above.` : ''}`

@@ -79,7 +79,7 @@ describe('the first creator call on a cold instance', () => {
     else process.env.OPENROUTER_API_KEY = before;
   });
 
-  it('checks the list and repins before writing, and health reports the repin', async () => {
+  it('checks the list and repins before writing; health performs no model work', async () => {
     let listed = 0;
     const pinFetch = (async () => {
       listed++;
@@ -96,7 +96,7 @@ describe('the first creator call on a cold instance', () => {
     expect(resolvePin('anthropic-frontier-1').openrouter_model_id).toBe('anthropic/claude-sonnet-4.5');
     const health = await request(app).get('/api/v1/health');
     expect(listed).toBe(1);
-    expect(health.body.pins.repinned).toEqual([{ pin_id: 'anthropic-frontier-1', from: 'anthropic/claude-opus-5', to: 'anthropic/claude-sonnet-4.5' }]);
-    expect(health.body.writer.model).toBe('anthropic/claude-sonnet-4.5');
+    expect(health.body.modelProbe).toBe('not-run');
+    expect(health.body.writer).toBeUndefined();
   });
 });

@@ -11,6 +11,9 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    maxWorkers: 4,
+    minWorkers: 1,
+    setupFiles: ['tests/offline-setup.ts'],
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     // Route tests seat a panel and grade through the simulation; under a

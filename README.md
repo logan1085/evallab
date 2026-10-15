@@ -1,4 +1,24 @@
-# The Grading Room
+# Eval Lab · The Grading Room
+
+**Public demo:** https://evallab-eosin.vercel.app
+
+The hosted app defaults to a free, clearly labeled simulation. Visitors can
+create a project, edit the rubric and cases, run a panel, review disagreements,
+and export a framework without an account or model charges. Demo scenarios
+and verdicts are fixtures, not model research results. Use fictional or
+non-sensitive examples.
+
+For a trusted deployment with real models, explicitly set
+`GR_ENABLE_LIVE_MODE=true`, `GR_ROUND_COST_CEILING_CREDITS`, and
+`GR_DAILY_COST_CEILING_CREDITS`, alongside the model key. Put a hard credit
+limit on that key in OpenRouter as well: application-level checks can overshoot
+under concurrent traffic. Do not enable public paid access without an approved
+budget. Custom endpoints are self-hosted only; hosted deployments refuse them.
+
+`/api/health` checks the database and reports the mode without invoking a model.
+The smoke test defaults to simulation and refuses paid runs unless `--allow-live`
+is explicitly passed after budget approval. It never prints a project access key.
+
 
 You cannot recruit five domain experts to argue about your outputs. You can
 summon them.
@@ -79,7 +99,7 @@ because serverless functions exhaust a direct connection under load. Provisionin
 by hand from [neon.tech](https://neon.tech) works identically: set `DATABASE_URL`
 to the **pooled** string, the one with `-pooler` in the hostname.
 
-**Set `OPENROUTER_API_KEY`.** This one matters: scenario writing is the heart
+**For an explicitly enabled live deployment, set `OPENROUTER_API_KEY`.** This one matters: scenario writing is the heart
 of the product, and without a key every company gets the same six labelled
 placeholder scenarios instead of ones written from its own description. The
 panel, the judge and the rubric drafter also fall back to clearly labelled

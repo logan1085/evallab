@@ -8,12 +8,13 @@
  */
 
 import { callModel, type GatewayOptions } from './gateway.js';
+import { configuredModelKey } from './model-policy.js';
 import { DrafterError } from './drafter.js';
 import { parseModelJson } from '../shared/schema.js';
 import { cheapestPin, PIN_REGISTRY, resolvePin, type Pin } from './pins.js';
 
 export function openrouterKey(): string | undefined {
-  return process.env.OPENROUTER_API_KEY;
+  return configuredModelKey();
 }
 
 /** Generation quality wants the frontier pin; graders use the small tier. */

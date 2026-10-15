@@ -15,6 +15,7 @@
  */
 
 import { PinError, resolvePin, type Pin } from './pins.js';
+import { configuredModelKey, hosted, liveModelsEnabled, HOSTED_ENDPOINT_MESSAGE } from './model-policy.js';
 
 export type CallerKind = 'creator' | 'grader' | 'clusterer';
 
@@ -348,6 +349,8 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
 
   let pin: Pin;
   const own = req.endpoint ?? null;
+  if (hosted() && own) return errorResult(req, null, callId, 'auth', HOSTED_ENDPOINT_MESSAGE);
+  if (hosted() && !liveModelsEnabled()) return errorResult(req, null, callId, 'auth', 'Live models are disabled on this public demo. Use the labeled simulation.');
   if (own) {
     // A synthetic pin, so every downstream row and log line reads the same
     // way for a company's own model as for a registry one. The family is
@@ -380,7 +383,7 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
     if (refusal) return errorResult(req, pin, callId, refusal.kind, refusal.message);
   }
 
-  const apiKey = own ? (own.api_key ?? '') : (opts.apiKey ?? process.env.OPENROUTER_API_KEY);
+  const apiKey = own ? (own.api_key ?? '') : (opts.apiKey ?? configuredModelKey());
   if (apiKey === undefined) return errorResult(req, pin, callId, 'auth', 'No OpenRouter key on this request and none in the environment.');
   const url = own ? `${own.base_url.replace(/\/+$/, '')}/chat/completions` : undefined;
   const where = own ? `${own.name} (${own.model})` : pin.openrouter_model_id;
@@ -529,6 +532,17 @@ export async function callModel(req: ModelCallRequest, opts: GatewayOptions = {}
       http_status: status,
       error_kind: reply.error !== null || empty ? 'provider_error' : null,
     });
+    // An empty HTTP body is a transport failure, distinct from a model that
+    // returned an empty/truncated completion. Retry it once, recording both
+    // attempts and checking the spend guard again before doing so.
+    const missingBody = typeof json === 'object' && json !== null
+      && (json as { non_json_body?: unknown }).non_json_body === '';
+    if (missingBody && attemptNo === 1) {
+      const refusal = opts.guard ? await opts.guard.check(req.caller) : null;
+      if (refusal) return errorResult(req, pin, callId, refusal.kind, refusal.message);
+      await sleep(250);
+      continue;
+    }
     if (reply.error !== null || empty) {
       // A 200 that carries no answer is a failed call, said in the router's
       // words, with the body quoted when the router had none. Retrying the
@@ -585,6 +599,7 @@ function httpTransport(timeoutMs = REQUEST_TIMEOUT_MS): GatewayTransport {
       try {
         const res = await fetch(url, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             'content-type': 'application/json',
             ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),

@@ -146,3 +146,26 @@ describe('openrouterJson names the stage that failed', () => {
     expect(s.sent).toHaveLength(1);
   });
 });
+
+
+describe('an empty HTTP response body', () => {
+  it('retries a missing body once and records the failed and successful attempts', async () => {
+    const s = scripted([{ non_json_body: '', content_type: 'application/json' }, { choices: [{ message: { content: '{"ok":true}' }, finish_reason: 'stop' }] }]);
+    const rows: { error_kind: string | null }[] = [];
+    const result = await callModel(req, { ...env, transport: s.transport, recorder: async (a) => { rows.push(a); } });
+    expect(s.sent).toHaveLength(2);
+    expect(rows.map((r) => r.error_kind)).toEqual(['provider_error', null]);
+    expect(result.text).toBe('{"ok":true}');
+  });
+  it('does not loop forever or bypass the spend guard', async () => {
+    const s = scripted([{ non_json_body: '', content_type: 'application/json' }]);
+    const result = await callModel(req, { ...env, transport: s.transport });
+    expect(s.sent).toHaveLength(2);
+    expect(result.error?.kind).toBe('provider_error');
+    const gated = scripted([{ non_json_body: '', content_type: 'application/json' }]);
+    let checks = 0;
+    const refused = await callModel(req, { ...env, transport: gated.transport, guard: { check: async () => ++checks === 1 ? null : { kind: 'budget_exceeded', message: 'budget reached' } } });
+    expect(refused.error?.kind).toBe('budget_exceeded');
+    expect(gated.sent).toHaveLength(1);
+  });
+});

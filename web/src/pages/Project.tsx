@@ -34,7 +34,7 @@ export function ProjectPage() {
     return <main className="sheet"><ErrorBanner message={loadError ?? 'Could not load this project.'} /></main>;
   }
 
-  const link = `${window.location.origin}/p/${data.project.slug}?k=${data.project.token}`;
+  const link = `${window.location.origin}/p/${data.project.slug}?k=${encodeURIComponent(token)}`;
   const traces = tracesQ.data?.traces ?? [];
   // The masthead counts come from the project view, which is server-computed
   // and loaded before this renders; waiting on the separate traces fetch here
@@ -58,7 +58,7 @@ export function ProjectPage() {
         standfirst={`Standards v${data.rubric?.version ?? 1} · panel of ${seats.length} · ${caseCount} case${caseCount === 1 ? '' : 's'} · Round ${data.rounds.length + 1} next`}
         right={
           (data.rubric?.version ?? 1) > 1 ? (
-            <a href={`/s/${data.project.slug}?k=${encodeURIComponent(data.project.token)}`}>Your Standards page</a>
+            <a href={`/s/${data.project.slug}?k=${encodeURIComponent(token)}`}>Your Standards page</a>
           ) : undefined
         }
       />
@@ -222,9 +222,9 @@ function PanelSection({
 
       <p className="tiny" style={{ margin: '10px 0 0' }}>
         {simulatedPanel && ownSeats.length === 0
-          ? 'Every seat is simulated: no OPENROUTER_API_KEY is set, so this is the labeled simulation rather than judgment.'
+          ? 'Every seat is simulated. Live model judging is not enabled, so these verdicts demonstrate the workflow.'
           : simulatedPanel
-            ? `${registrySeats.length} simulated seats (no OPENROUTER_API_KEY is set) and ${ownClause}. The simulated seats show the loop; your model’s verdicts are real.`
+            ? `${registrySeats.length} simulated seats (live model judging is not enabled) and ${ownClause}. The simulated seats show the loop; your model’s verdicts are real.`
             : `${seats.length} seats across ${registryFamilies.length} model famil${registryFamilies.length === 1 ? 'y' : 'ies'}: ${registryFamilies.join(', ')}${ownClause ? `, plus ${ownClause}` : ''}. Different families is the point, because a panel that is one model six times agrees with itself for reasons that have nothing to do with your rubric.`}
         {!simulatedPanel && registryFamilies.length + ownNames.length < 3
           ? ' Fewer than three disjoint families: the run will refuse until the spread is real.'

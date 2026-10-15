@@ -6,7 +6,14 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   root: 'web',
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'deployment-identity',
+    transformIndexHtml: () => [{
+      tag: 'meta',
+      attrs: { name: 'build-commit', content: process.env.VERCEL_GIT_COMMIT_SHA ?? 'local' },
+      injectTo: 'head',
+    }],
+  }],
   resolve: {
     alias: {
       '@shared': root + 'shared',

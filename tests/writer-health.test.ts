@@ -1,9 +1,4 @@
-/**
- * /api/health said pins.ok=true while onboarding failed. A pin on the
- * router's list is not a writer that answers, so health now makes one real
- * call through the writer pin and reports that. These pin the canary and
- * the health contract around it.
- */
+/** Operator canaries are explicit; the public health endpoint never spends credits. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
@@ -54,60 +49,25 @@ describe('writerCheck', () => {
   });
 });
 
-describe('/api/health validates the writer, not just the list', () => {
+describe('/api/health is read-only', () => {
   let db: DB;
   const before = process.env.OPENROUTER_API_KEY;
-
-  beforeEach(async () => {
-    db = await testDb();
-    process.env.OPENROUTER_API_KEY = 'test-key';
-  });
+  beforeEach(async () => { db = await testDb(); process.env.OPENROUTER_API_KEY = 'test-key'; });
   afterEach(() => {
     if (before === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = before;
   });
-
-  const health = (app: Express) => request(app).get('/api/v1/health');
-
-  it('is ok when the list resolves and the writer answers', async () => {
-    const app = createApp(db, { pinFetch: listFetch, writerGateway: { transport: good } });
-    const res = await health(app).expect(200);
-    expect(res.body.ok).toBe(true);
-    expect(res.body.pins.ok).toBe(true);
-    expect(res.body.writer.ok).toBe(true);
-    expect(res.body.writer.model).toBe('anthropic/claude-opus-5');
-  });
-
-  it('fails when the writer pin is listed but cannot answer', async () => {
-    const app = createApp(db, { pinFetch: listFetch, writerGateway: { transport: dead } });
-    const res = await health(app).expect(503);
-    expect(res.body.ok).toBe(false);
-    expect(res.body.pins.ok).toBe(true);
-    expect(res.body.writer.ok).toBe(false);
-    expect(res.body.writer.error).toContain('No endpoints found');
-  });
-
-  it('lists the live same-namespace ids so a replacement is a verified choice', async () => {
-    const app = createApp(db, { pinFetch: listFetch, writerGateway: { transport: dead } });
-    const res = await health(app);
-    expect(res.body.pins.siblings['anthropic-frontier-1']).toEqual([
-      'anthropic/claude-haiku-4.5',
-      'anthropic/claude-opus-5',
-      'anthropic/claude-sonnet-4.5',
-    ]);
-  });
-
-  it('makes one canary call per probe burst, not one per request', async () => {
+  it('does not call a writer or model-list endpoint, even across repeated probes', async () => {
     let calls = 0;
-    const counting: GatewayTransport = {
-      post: async () => {
-        calls++;
-        return { status: 200, json: { choices: [{ message: { content: '{"ok":true}' } }] } };
-      },
-    };
-    const app = createApp(db, { pinFetch: listFetch, writerGateway: { transport: counting } });
-    await Promise.all([health(app), health(app), health(app)]);
-    await health(app);
-    expect(calls).toBe(1);
+    const transport: GatewayTransport = { post: async () => { calls++; throw new Error('Must not call a model'); } };
+    const pinFetch = (async () => { calls++; throw new Error('Must not fetch pins'); }) as typeof fetch;
+    const app = createApp(db, { pinFetch, writerGateway: { transport } });
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app).get('/api/v1/health').expect(200);
+      expect(res.body.modelProbe).toBe('not-run');
+      expect(res.body.mode).toBe('live');
+      expect(res.body.writer).toBeUndefined();
+    }
+    expect(calls).toBe(0);
   });
 });

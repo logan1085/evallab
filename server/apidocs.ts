@@ -34,7 +34,7 @@ A request with no credential gets \`401\`. A wrong or revoked key gets \`403\`.
 
 The project token is the master credential; minted keys can be handed to
 agents and revoked one at a time. The full key is returned once and only its
-hash is stored.
+hash is stored. Only the original project token can mint, list, or revoke keys. Project reads never return that token.
 
 \`\`\`bash
 curl -s -X POST ${v1}/projects/$SLUG/keys \\
@@ -48,6 +48,8 @@ curl -s -X DELETE ${v1}/projects/$SLUG/keys/$KEY_ID -H "Authorization: Bearer $T
 \`\`\`
 
 ## The loop
+
+Only the original project key can list, create, or revoke named API keys. Project reads never return that original key.
 
 ### 1. Create a project
 
@@ -147,6 +149,8 @@ curl -s -X PATCH ${v1}/projects/$SLUG/panel/seats/$SEAT -H "Authorization: Beare
 curl -s ${v1}/projects/$SLUG/endpoints -H "Authorization: Bearer $TOKEN"
 \`\`\`
 
+Hosted public deployments disable custom endpoints. Use this feature only in a trusted self-hosted installation.
+
 ### 5. Run a blind round
 
 Create the round, then run each seat. Every seat grades every case blind;
@@ -162,7 +166,9 @@ for SEAT in $(echo "$ROUND" | jq -r '.seats[].id'); do
 done
 \`\`\`
 
-With \`OPENROUTER_API_KEY\` on the server the seats are real models on pinned
+Hosted public deployments default to a labeled free simulation, even when a server key exists. Live hosted mode requires explicit GR_ENABLE_LIVE_MODE=true and positive daily and per-round ceilings.
+
+When live mode is enabled, with \`OPENROUTER_API_KEY\` on the server the seats are real models on pinned
 versions, one family each; per-request BYOK is accepted as \`x-openrouter-key\`
 and never stored. With no key the run is a labeled simulation. Every call,
 including retries, lands in \`model_call\` with its usage read off the router,

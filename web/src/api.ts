@@ -181,7 +181,7 @@ export interface PatchView {
 }
 
 export interface ProjectView {
-  project: Project;
+  project: Omit<Project, 'token'>;
   rubric: RubricVersion | null;
   traceCount: number;
   documentCount: number;
