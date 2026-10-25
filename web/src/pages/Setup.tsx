@@ -268,7 +268,7 @@ export function SetupPage() {
           {benchSeated ? (
             <p className="progress-line">
               {seats.every((s) => s.family === 'offline')
-                ? 'Six seats, all simulated: no model key is set, so this is the labeled simulation.'
+                ? 'Six seats, all simulated: live model judging is not enabled here, so this is the labeled simulation.'
                 : `Six seats, ${new Set(seats.map((s) => s.family)).size} model families. They will not agree with each other for free.`}
             </p>
           ) : null}

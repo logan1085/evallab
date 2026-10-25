@@ -70,4 +70,74 @@ describe('/api/health is read-only', () => {
     }
     expect(calls).toBe(0);
   });
+
+  it('says why a hosted deployment is simulated, variable by variable, and what a visitor can do', async () => {
+    const saved = { VERCEL: process.env.VERCEL, GR_ENABLE_LIVE_MODE: process.env.GR_ENABLE_LIVE_MODE };
+    process.env.VERCEL = '1';
+    delete process.env.GR_ENABLE_LIVE_MODE;
+    try {
+      // 503 here: a hosted deployment with no DATABASE_URL is not ok, and
+      // this test's database is the in-memory one. The mode report is the
+      // point, and it is there either way.
+      const res = await request(createApp(db)).get('/api/v1/health').expect(503);
+      expect(res.body.mode).toBe('simulated');
+      expect(res.body.live).toEqual({
+        hosted: true,
+        enabled: false,
+        reasons: ['GR_ENABLE_LIVE_MODE is not "true"', 'GR_DAILY_COST_CEILING_CREDITS is not a positive number', 'GR_ROUND_COST_CEILING_CREDITS is not a positive number'],
+      });
+      expect(res.body.capabilities).toEqual({ liveModels: false, ownEndpoints: false });
+      // A probe on a simulated deployment is a no-op, never a model call.
+      const probed = await request(createApp(db)).get('/api/v1/health?probe=writer').expect(503);
+      expect(probed.body.modelProbe).toBe('not-run');
+    } finally {
+      if (saved.VERCEL === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = saved.VERCEL;
+      if (saved.GR_ENABLE_LIVE_MODE === undefined) delete process.env.GR_ENABLE_LIVE_MODE;
+      else process.env.GR_ENABLE_LIVE_MODE = saved.GR_ENABLE_LIVE_MODE;
+    }
+  });
+
+  it('runs the free pin check on ?probe=pins and the paid writer canary only on ?probe=writer, in live mode', async () => {
+    let posts = 0;
+    let lists = 0;
+    const transport: GatewayTransport = {
+      post: async () => {
+        posts++;
+        return { status: 200, json: { choices: [{ finish_reason: 'stop', message: { content: '{"ok":true}' } }], usage: { completion_tokens: 4 } } };
+      },
+    };
+    const pinFetch = (async (...args: Parameters<typeof fetch>) => {
+      lists++;
+      return listFetch(...args);
+    }) as typeof fetch;
+    const app = createApp(db, { pinFetch, writerGateway: { transport } });
+
+    const pins = await request(app).get('/api/v1/health?probe=pins').expect(200);
+    expect(pins.body.modelProbe).toBe('pins');
+    expect(pins.body.pins.ok).toBe(true);
+    expect(pins.body.writer).toBeUndefined();
+    expect([lists, posts]).toEqual([1, 0]);
+
+    const writer = await request(app).get('/api/v1/health?probe=writer').expect(200);
+    expect(writer.body.modelProbe).toBe('writer');
+    expect(writer.body.writer.ok).toBe(true);
+    expect(writer.body.writer.model).toBe('anthropic/claude-opus-5');
+    expect([lists, posts]).toEqual([1, 1]);
+
+    // Cached: a second writer probe inside the window costs nothing.
+    await request(app).get('/api/v1/health?probe=writer').expect(200);
+    expect(posts).toBe(1);
+    // The plain probe is still silent.
+    const plain = await request(app).get('/api/v1/health').expect(200);
+    expect(plain.body.modelProbe).toBe('not-run');
+    expect(plain.body.live).toEqual({ hosted: false, enabled: true, reasons: [] });
+  });
+
+  it('fails health on ?probe=writer when the writer cannot answer, in the router’s words', async () => {
+    const app = createApp(db, { pinFetch: listFetch, writerGateway: { transport: dead } });
+    const res = await request(app).get('/api/v1/health?probe=writer').expect(503);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.writer.error).toContain('No endpoints found');
+  });
 });

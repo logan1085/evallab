@@ -1,22 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useMode } from './mode';
 
-/** Mode is read from the server, never inferred from the browser's hostname. */
+/**
+ * The band that says what this deployment is. Mode is read from the server,
+ * never inferred from the browser's hostname, and the band is quiet: one
+ * line in the house type, on the house tokens, not a banner.
+ */
 export function ModeNotice() {
-  const [mode, setMode] = useState<'simulated' | 'live' | 'unknown'>('unknown');
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch('/api/health', { signal: controller.signal })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.mode === 'simulated' || data.mode === 'live') setMode(data.mode);
-      })
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
-  if (mode === 'unknown') return null;
-  return <aside aria-label="Evaluation mode" style={{ padding: '10px 20px', borderBottom: '1px solid var(--line, #333)', fontSize: 13, lineHeight: 1.5, textAlign: 'center' }}>
-    {mode === 'simulated'
-      ? <><strong>Free interactive demo.</strong> Create a project, edit its rubric, run a simulated panel, and export a framework. Scenarios and verdicts are sample data, not live model evaluations. Please use fictional or non-sensitive examples.</>
-      : <><strong>Live model mode.</strong> Your cases are sent to model providers for evaluation. Please use non-sensitive examples.</>}
-  </aside>;
+  const m = useMode();
+  if (m.mode === 'unknown') return null;
+  return (
+    <aside className="mode-notice" aria-label="Evaluation mode">
+      {m.mode === 'simulated' ? (
+        <>
+          <b>Free demo.</b> Create a project, edit its standard, run a simulated panel, and leave with a framework. Scenarios and
+          verdicts are fixtures, not model judgments. Use fictional or non-sensitive examples.
+        </>
+      ) : (
+        <>
+          <b>Live model mode.</b> Your cases are sent to model providers to be judged. Use non-sensitive examples.
+        </>
+      )}
+    </aside>
+  );
 }

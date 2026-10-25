@@ -702,6 +702,24 @@ textarea::placeholder {
 
 /* ---- Votes in the spread ------------------------------------------------- */
 
+/* The deployment-mode band: one quiet line above everything, on the tokens. */
+.mode-notice {
+  font-family: var(--ui);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: var(--paper-2);
+  border-bottom: 1px solid var(--hairline);
+  padding: 8px 20px;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.mode-notice b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* One seat's choice on a preference pair, inline, hover for the reason. */
 .vote-chip {
   display: inline-block;

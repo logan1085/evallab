@@ -197,7 +197,7 @@ export function renderStandardsPage(v: StandardsView, baseUrl: string): string {
     }</div>
     <div class="stamp mono">${
       v.stats.simulated
-        ? 'A demonstration: no model key was set, so no model judged anything here.'
+        ? 'A demonstration: live model judging was not enabled, so no model judged anything here.'
         : esc(modelLine(v))
     }</div>
     ${copyLink}

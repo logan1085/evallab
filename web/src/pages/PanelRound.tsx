@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, recallKey, type PanelCaseView, type PanelMapView, type PatchView } from '../api';
+import { simulatedBecause, useMode } from '../mode';
 import { ErrorBanner, Loading, Masthead, pct, useAsync } from '../ui';
 
 /**
@@ -153,16 +154,7 @@ export function PanelRoundPage() {
 
       <StandardsHandoff slug={slug!} roundId={roundId!} token={token} splits={disagreements} nextVersion={nextVersion} onError={setError} />
 
-      {map.simulated ? (
-        <div className="warn">
-          <span className="metric-k">Simulated panel</span>
-          <p style={{ margin: '6px 0 0' }}>
-            No model API keys are set, so these verdicts come from a deterministic simulation, clearly not judgment.
-            The full loop works; the verdicts mean nothing. Set OPENROUTER_API_KEY to seat real models: one key
-            reaches every family, which is what makes the panel six judges rather than one model six times.
-          </p>
-        </div>
-      ) : null}
+      {map.simulated ? <SimulatedNote /> : null}
 
       <div className="metrics" style={{ margin: '18px 0 8px', borderTop: '1px solid var(--hairline)', paddingTop: 16 }}>
         {[
@@ -664,6 +656,21 @@ function SelfCheckSection({
 }
 
 /* ---- Export --------------------------------------------------------------- */
+
+/** The simulated-panel note, worded for the deployment at hand. */
+function SimulatedNote() {
+  const m = useMode();
+  return (
+    <div className="warn">
+      <span className="metric-k">Simulated panel</span>
+      <p style={{ margin: '6px 0 0' }}>
+        These verdicts come from a deterministic simulation, clearly not judgment. {simulatedBecause(m)} The full loop
+        works; the verdicts mean nothing. With live models, one key reaches every family, which is what makes the panel
+        six judges rather than one model six times.
+      </p>
+    </div>
+  );
+}
 
 function ExportSection({ roundId, token, onError }: { roundId: string; token: string; onError: (m: string) => void }) {
   const [busy, setBusy] = useState(false);

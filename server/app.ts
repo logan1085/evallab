@@ -15,8 +15,8 @@ import { z } from 'zod';
 import type { DB } from './db.js';
 import { newId, newSlug, newToken, resolveConnection } from './db.js';
 import { PIN_OVERRIDES, validatePins } from './pins.js';
-import { openrouterKey } from './openrouter.js';
-import { hosted, HOSTED_ENDPOINT_MESSAGE } from './model-policy.js';
+import { openrouterKey, writerCheck } from './openrouter.js';
+import { capabilities, hosted, HOSTED_ENDPOINT_MESSAGE, liveModeReport } from './model-policy.js';
 import { callModel, type GatewayOptions } from './gateway.js';
 import * as store from './store.js';
 import { seedDemoProject } from './seed.js';
@@ -181,20 +181,31 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       : { env: 'local', url: null, commit: null, ref: null, deploymentId: null };
     try {
       await db.get('SELECT 1 AS ok');
-      // Public health is strictly read-only: no model calls, no paid canary.
-      // A live round is the end-to-end model check; a ping is only liveness.
-      const keyed = !!openrouterKey();
+      // Public health is read-only: no model call, no paid canary, ever, on
+      // the plain probe. What it does say is why the deployment is in the
+      // mode it is in, in the operator's terms, and what a visitor can do.
+      const live = liveModeReport();
       const ok = !!conn.url || !deployed;
-      res.status(ok ? 200 : 503).json({
-        ok,
+      // Probes are opt-in and live-mode only, so the plain probe makes no
+      // network call at all: ?probe=pins checks every pin against the
+      // router's model list (a free GET, no key spent); ?probe=writer does
+      // that and makes one real, paid writer call. Both cached per instance.
+      const asked = typeof _req.query.probe === 'string' ? _req.query.probe : '';
+      const pins = live.mode === 'live' && (asked === 'pins' || asked === 'writer') ? await cachedPinCheck() : null;
+      const probe = live.mode === 'live' && asked === 'writer' ? await cachedWriterCheck() : null;
+      res.status(ok && (probe === null || probe.ok) ? 200 : 503).json({
+        ok: ok && (probe === null || probe.ok),
         deploy,
         judge: resolveProvider().id,
-        mode: keyed ? 'live' : 'simulated',
-        modelProbe: 'not-run',
+        mode: live.mode,
+        live: { hosted: live.hosted, enabled: live.mode === 'live', reasons: live.reasons },
+        capabilities: capabilities(),
+        modelProbe: probe ? 'writer' : pins ? 'pins' : 'not-run',
+        ...(pins ? { pins: { ...pins, overrides: PIN_OVERRIDES } } : {}),
+        ...(probe ? { writer: probe } : {}),
         // Where a company's own endpoint keys are sealed. 'dev-default' means
         // GR_SECRET is unset and the fixed development phrase is in use.
         secrets: secretsSource(),
-
         database: conn.url
           ? { driver: 'postgres', via: conn.via, pooled: conn.pooled }
           : { driver: 'memory', warning: 'No Postgres connection string set. Data is lost when the process ends.' },
@@ -203,6 +214,28 @@ export function createApp(db: DB, appOpts: AppOptions = {}) {
       res.status(503).json({ ok: false, error: error instanceof Error ? error.message : 'database unavailable' });
     }
   });
+
+  /**
+   * The writer canary, cached: a good answer holds for ten minutes, a failure
+   * is retried after one, so a recovered writer shows recovered without a
+   * restart and a broken one does not get pinged on every probe. Reached
+   * only through /api/health?probe=writer, in live mode.
+   */
+  let writerState: { at: number; result: Awaited<ReturnType<typeof writerCheck>> } | null = null;
+  let writerInFlight: Promise<Awaited<ReturnType<typeof writerCheck>>> | null = null;
+  const cachedWriterCheck = async () => {
+    const ttl = writerState?.result.ok ? 10 * 60_000 : 60_000;
+    if (writerState && Date.now() - writerState.at < ttl) return writerState.result;
+    writerInFlight ??= writerCheck({ ...meter(), ...(appOpts.writerGateway ?? {}) })
+      .then((result) => {
+        writerState = { at: Date.now(), result };
+        return result;
+      })
+      .finally(() => {
+        writerInFlight = null;
+      });
+    return writerInFlight;
+  };
 
   /* ---- Project scoping -------------------------------------------------- */
 

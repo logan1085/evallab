@@ -4,6 +4,7 @@ import { MAX_DRAFT_EXAMPLES } from '@shared/drafting';
 import { DEFAULT_SCENARIOS } from '@shared/scenarios';
 import type { DocumentKind, DraftConflict, DraftQuestion, RubricCriterion, Trace, VerdictLevel } from '@shared/types';
 import { api, recallKey, type DraftResponse, type EndpointView, type ProjectView } from '../api';
+import { useMode } from '../mode';
 import { ErrorBanner, Loading, Masthead, useAsync } from '../ui';
 
 /** The stored source values are import formats; the owner reads provenance. */
@@ -444,6 +445,11 @@ function EndpointsBlock({
   const [form, setForm] = useState({ name: '', base_url: '', model: '', api_key: '' });
   const [busy, setBusy] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<string, { ok: boolean; text: string }>>({});
+  const deployment = useMode();
+  // A hosted public deployment refuses endpoints server-side; the offer is
+  // not made where it would be refused. After every hook, so the hook
+  // count never changes between renders.
+  if (!deployment.capabilities.ownEndpoints) return null;
 
   const host = (url: string) => {
     try {
@@ -1151,7 +1157,7 @@ function ScenarioWriter({
           ? `${job.scenarios} scenarios written from your description and documents. They are in the list below. Edit or remove any before you poll.${
               job.failed.length > 0 ? ` ${job.failed.length} of ${job.parts.length} parts did not land (${job.failed.join('; ')}); write again for the rest.` : ''
             }`
-          : `${job.scenarios} starter scenarios added. No OPENROUTER_API_KEY is set, so these are the situations every operation meets rather than ones written from your documents.`,
+          : `${job.scenarios} starter scenarios added. Live model writing is not enabled on this deployment, so these are the situations every operation meets rather than ones written from your documents.`,
       );
       setDescription('');
       onDone();
@@ -1196,6 +1202,40 @@ function ScenarioWriter({
  * should happen, say why. The verdict saves on click; the reason saves when
  * you leave the field. Answered cards are test cases already.
  */
+/* ---- Notes worded for the deployment at hand ----------------------------- */
+
+/** Generic starter scenarios: why they are generic, in this deployment's terms. */
+function StubNote({ count }: { count: number }) {
+  const m = useMode();
+  return (
+    <div className="warn">
+      <span className="metric-k">Placeholder scenarios</span>
+      <p style={{ margin: '6px 0 0' }}>
+        {count} of these scenarios are generic starters, not written from your description.{' '}
+        {m.hosted
+          ? 'Live model writing is not enabled on this deployment. Paste your own transcripts below; they are the cases that prove the eval on your actual problem.'
+          : `Live model writing is off${m.reasons.length ? ` (${m.reasons.join('; ')})` : ''}. Set the model key in .env.local, then use the writer below to replace them with scenarios about your actual operation.`}
+      </p>
+    </div>
+  );
+}
+
+/** No model read the documents: why, in this deployment's terms. */
+function NoModelNote() {
+  const m = useMode();
+  return (
+    <div className="warn">
+      <span className="metric-k">No model configured</span>
+      <p style={{ margin: '6px 0 0' }}>
+        Nothing read your conversations, so there are no criteria below. Inventing some would give you standards that
+        look drafted from your data and are not. What you get instead is a blank three-point scale and the questions
+        teams argue about first.{' '}
+        {m.hosted ? 'Live model drafting is not enabled on this deployment.' : 'Set the model key in .env.local to draft from your own material.'}
+      </p>
+    </div>
+  );
+}
+
 /* ---- The coverage map ---------------------------------------------------- */
 
 /**
@@ -1436,16 +1476,7 @@ function TracesTab({
             </button>
           </div>
         </div>
-        {stubScenarios > 0 ? (
-          <div className="warn">
-            <span className="metric-k">Placeholder scenarios</span>
-            <p style={{ margin: '6px 0 0' }}>
-              {stubScenarios} of these scenarios are generic starters, not written from your description, because
-              the server has no OPENROUTER_API_KEY. Set one in your deployment, then use the writer below to replace
-              them with scenarios about your actual operation.
-            </p>
-          </div>
-        ) : null}
+        {stubScenarios > 0 ? <StubNote count={stubScenarios} /> : null}
 
         {traces.length > 0 ? (
           <CoverageBlock slug={slug} token={token} description={description} traceCount={traces.length} onChange={onChange} onError={onError} />
@@ -1763,16 +1794,7 @@ function DraftPanel({
 
       {draft ? (
         <div style={{ marginTop: 20 }}>
-          {!draft.provider.real ? (
-            <div className="warn">
-              <span className="metric-k">No model configured</span>
-              <p style={{ margin: '6px 0 0' }}>
-                Nothing read your conversations, so there are no criteria below. Inventing some would give you standards
-                that look drafted from your data and are not. What you get instead is a blank three-point scale and the
-                questions teams argue about first. Set OPENROUTER_API_KEY to draft from your own material.
-              </p>
-            </div>
-          ) : null}
+          {!draft.provider.real ? <NoModelNote /> : null}
 
           <h4>{draft.draft.name}</h4>
           {draft.draft.preamble ? <p>{draft.draft.preamble}</p> : null}

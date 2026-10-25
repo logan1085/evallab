@@ -351,10 +351,18 @@ npm run evallab -- drift --project $SLUG --token $TOKEN --window 5 --gate pass-r
 
 \`\`\`bash
 curl -s ${base}/api/health
-# -> { "ok": true, "database": { "driver": "postgres", … } }
+# -> { "ok": true, "mode": "simulated", "live": { "hosted": true, "enabled": false, "reasons": ["GR_ENABLE_LIVE_MODE is not \\"true\\"", …] },
+#      "capabilities": { "liveModels": false, "ownEndpoints": false }, "modelProbe": "not-run", "database": { "driver": "postgres", … } }
 \`\`\`
 
 \`ok\` is false when the deployment has no database, because nothing would
-survive; the error names the fix.
+survive; the error names the fix. \`mode\` is what every surface labels
+itself with, and \`live.reasons\` names each variable that keeps a
+deployment simulated, so an operator is never left guessing which one.
+
+The plain probe makes no network call. Two opt-in probes, live mode only,
+cached per instance: \`?probe=pins\` checks every pin against the router's
+model list (a free GET); \`?probe=writer\` does that and makes one real,
+paid writer call, and health is 503 when the writer cannot answer.
 `;
 }
