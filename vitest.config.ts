@@ -19,5 +19,9 @@ export default defineConfig({
     // Route tests seat a panel and grade through the simulation; under a
     // full parallel run that can pass ten seconds on a loaded machine.
     testTimeout: 30_000,
+    // The beforeEach that creates a project and seats a panel is a hook, and
+    // vitest's default hook timeout is ten seconds: under four workers the
+    // first test of a file failed there, at 10.4s, and read as flaky.
+    hookTimeout: 30_000,
   },
 });

@@ -73,10 +73,10 @@ describe('GET /projects/:slug/coverage', () => {
   it('stamps written scenarios with their ground, counts the classes, and fills a gap by ground', async () => {
     await request(app).post(`/api/v1/projects/${slug}/scenarios`).set(auth).send({ description: 'A support agent for a bike shop that answers order questions.' }).expect(201);
     let cov = (await request(app).get(`/api/v1/projects/${slug}/coverage`).set(auth).expect(200)).body;
-    expect(cov.total).toBe(6);
+    expect(cov.total).toBe(12);
     expect(cov.round).toBeNull();
     const by = Object.fromEntries(cov.rows.map((r: { id: string; cases: number }) => [r.id, r.cases]));
-    expect(by).toEqual({ clear: 1, boundary: 3, unimagined: 2, real: 0 });
+    expect(by).toEqual({ clear: 4, boundary: 4, unimagined: 4, real: 0 });
     expect(cov.gaps.map((g: { id: string }) => g.id)).toEqual(['real']);
 
     await request(app).post(`/api/v1/projects/${slug}/traces`).set(auth).send({ traces: [{ title: 'Real one', content: 'USER: hi. ASSISTANT: hello.' }] }).expect(201);

@@ -71,13 +71,13 @@ describe('the synthetic panel', () => {
 
     // 3. The round: every remaining seat grades every case, then it closes itself.
     const created = (await auth(request(app).post(`/api/projects/${project.slug}/panel-rounds`)).expect(201)).body;
-    expect(created.cases).toBe(6);
+    expect(created.cases).toBe(12);
     let closed = false;
     for (const seat of created.seats) {
       const run = (
         await auth(request(app).post(`/api/rounds/${created.round.id}/panel-run`)).send({ seatId: seat.id }).expect(200)
       ).body;
-      expect(run.graded).toBe(6);
+      expect(run.graded).toBe(12);
       expect(run.simulated).toBe(true);
       closed = run.closed;
     }
@@ -86,7 +86,7 @@ describe('the synthetic panel', () => {
     // 4. The map: every case read, agreement numbers with AC1 beside alpha,
     // pinned versions, telemetry-backed cost, and per-seat self-consistency.
     const map = (await auth(request(app).get(`/api/rounds/${created.round.id}/map`)).expect(200)).body;
-    expect(map.cases.length).toBe(6);
+    expect(map.cases.length).toBe(12);
     expect(map.simulated).toBe(true);
     expect(Object.keys(map.pinnedModels).length).toBe(5);
     expect(map.cost.attempts).toBeGreaterThanOrEqual(30); // 5 seats x 6 cases, simulated telemetry
@@ -104,7 +104,7 @@ describe('the synthetic panel', () => {
       expect(c.votes.length).toBe(5);
       for (const v of c.votes) expect(v.reason.length).toBeGreaterThan(5);
     }
-    expect(map.counts.settled + map.counts.personaDriven + map.counts.contested + map.counts.blindSpots).toBe(6);
+    expect(map.counts.settled + map.counts.personaDriven + map.counts.contested + map.counts.blindSpots).toBe(12);
 
     // Settled cases are provisional until the owner checks them.
     for (const c of map.cases.filter((x: { pattern: string }) => x.pattern === 'settled')) {

@@ -134,6 +134,36 @@ somebody's first request.
 
 Then open the deployment, create a project, and share the link.
 
+### From the free demo to a live deployment
+
+The hosted app is the labeled simulation until four things are true at
+once. `/api/health` lists which of them are missing under `live.reasons`,
+so start there and work the list down:
+
+1. **A hard limit on the key.** In OpenRouter, set a credit limit on the key
+   you are about to use. The application ceilings below are checked before
+   each call and can overshoot under concurrent traffic; the router's limit
+   cannot.
+2. **The four variables, in the Vercel project** (Settings → Environment
+   Variables), then redeploy:
+   `OPENROUTER_API_KEY`, `GR_ENABLE_LIVE_MODE=true`,
+   `GR_ROUND_COST_CEILING_CREDITS` (a positive number, one round's budget),
+   `GR_DAILY_COST_CEILING_CREDITS` (a positive number, the day's).
+3. **`GR_SECRET`**, a long random string, if anyone will register their own
+   model endpoint on a self-hosted instance. Hosted deployments refuse
+   endpoints regardless.
+4. **Confirm, in order:**
+   ```
+   curl -s https://your-app/api/health                 # mode: "live", live.reasons: []
+   curl -s "https://your-app/api/health?probe=pins"    # every pin on the router's list (free)
+   curl -s "https://your-app/api/health?probe=writer"  # one paid canary call; 503 if the writer cannot answer
+   npm run smoke -- --base https://your-app --allow-live   # one real round, end to end
+   ```
+
+The plain health probe never calls a model; the two probes are opt-in and
+cached per instance. To go back to the demo, unset `GR_ENABLE_LIVE_MODE` and
+redeploy; the key can stay.
+
 ### Running it locally
 
 ```
